@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo-full.png" alt="Task Hub" width="360">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-color-reversed.png">
+    <img src="assets/logo-color.png" alt="Task Hub" width="380">
+  </picture>
 </p>
 
 <p align="center">
