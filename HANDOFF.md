@@ -1,7 +1,9 @@
 # Task Hub — state as of 2026-09-03
 
-Working Supernote plugin, installed and in real use. **v0.10.1**, `pluginID vfmnvjq0i1hxf8gu`.
+Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 259 tests across 13 suites; `tsc` and eslint clean.
+
+**Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`).
 
 Two plugins ship from this one tree: **Task Hub** (`vfmnvjq0i1hxf8gu`) and
 **Task Hub Demo** (`do3dzvwic8ss836h`). There is no fork — see *Demo build* below.
@@ -91,6 +93,36 @@ one. `buildDemo.ps1` clears it either side of its run.
 PowerShell 5.1 corrupted all three swapped files on the first attempt:
 `Get-Content -Raw` decodes UTF-8 as ANSI and `Set-Content -Encoding utf8` adds a
 BOM. `buildDemo.ps1` now uses `[System.IO.File]` with an explicit no-BOM encoder.
+
+## The public repository — rules that outlive this session
+
+History was deliberately reset to a clean start before publishing. Two things must not creep
+back in, because undoing them after a push means rewriting public history:
+
+1. **No AI-assistant attribution in commit messages.** The repo was scrubbed of it on the
+   author's explicit instruction — working tree and every git object, verified with
+   `git rev-list --objects --all | cut -d' ' -f1 | git cat-file --batch | grep -i ...`.
+   Re-run that check before any push if in doubt.
+2. **No personal email.** Commits are authored `Sparkinman
+   <sparkinman@users.noreply.github.com>`, set as *local* repo config, so a global git
+   identity cannot leak in. `git log --format='%an <%ae>'` before pushing.
+
+`.mcp.json` is untracked and ignored — it is local tooling config, not project source.
+
+Any snapshot zip taken before 2026-09-03 predates all this and still bundles the **old**
+`.git`, with the previous author identity inside. Do not upload one anywhere; rebuild from
+the current tree instead.
+
+### Not yet done on the repo
+
+- **No release.** `gh release create v0.19.0 build/outputs/TaskHub.snplg
+  build/outputs/TaskHubDemo.snplg --title ... --notes ...` — until this runs there is no
+  download, and the `.snplg` files exist only locally (`build/` is correctly gitignored).
+- **No LICENSE**, so all-rights-reserved by default: readable, not legally usable or forkable.
+- **No repo description or topics** set yet (`gh repo edit --description ... --add-topic ...`).
+- **`versionCode` is still 26** and `versionName` still `0.19.0` in both PluginConfig files,
+  unchanged through everything since. The device uses `versionCode` to decide what counts as
+  an update — bump both before handing out another build.
 
 ## Naming — do not drift
 
@@ -218,6 +250,27 @@ exist. Fixed locally with a full path plus `-WorkingDirectory`; original kept as
 - The Android app's Gradle compile is only exercised by the native path; nothing
   runs the standalone app, so `MainActivity` is effectively untested.
 
+## SDK lessons that cost a build cycle each
+
+The vendor SDK reference is authoritative and answers most of these directly — read it before
+guessing at an API. Three findings that were not obvious:
+
+- **Use `PluginCommAPI.insertGeometry` for the current page, not
+  `PluginFileAPI.insertElements`.** The file-level API needs `PluginCommAPI.createElement()`
+  first to allocate an element's native-side accessors, and a saved file underneath it. A
+  hand-built element object pushed straight at it draws nothing and reports success — which
+  looked exactly like "shading is broken".
+- **Inserts do not repaint.** They land in the host's in-memory page; call
+  `PluginCommAPI.reloadFile()` afterwards. This is why the box worked and nothing else did:
+  the box is drawn by the live lasso path, the inserts were not.
+- **Flush before reading a file you have open.** `PluginFileAPI.getElements` reads disk, so
+  call `PluginNoteAPI.saveCurrentNote()` first or a mark made this session may not be there.
+
+`getLassoRect`, `insertGeometry` and text-link rects are all **pixel** coordinates on the
+current page, so no EMR conversion is involved and positions scale across device sizes on
+their own. The exception was the caption's font clamp, now expressed as a fraction of
+`getPageDisplaySize()` height — see *Page marking*.
+
 ## Bugs worth not rediscovering
 
 - **`sanitise` clobbered defaults with `undefined`.** It names every config field
@@ -241,6 +294,19 @@ exist. Fixed locally with a full path plus `-WorkingDirectory`; original kept as
   `screen` changes — leaving via the host's own dismissal instead of Done & Exit
   left it at `'hub'`, so the next opening never refetched. `openHub` refreshes
   directly on the button press.
+
+## Next session — test these on device
+
+None of it could be verified off-device, and all of it changed last:
+
+1. **Shading draws at all**, and at a sensible weight. `MARKER_PEN.penWidth` (2200, in
+   `src/markstyle.ts`) is the one value inferred rather than measured — the device reported
+   3800 for a hand-drawn marker stroke.
+2. **The "Task Hub Task" caption** appears, and its size and offset look right against the
+   handwriting. The `fontSize` units were a best guess at the scale.
+3. **Save is available immediately** after a lasso — the capture screen no longer fetches
+   anything.
+4. **Completing a captured task clears box, caption and shading together.**
 
 ## Open threads
 
