@@ -11,16 +11,9 @@ import React from 'react';
 import {fs, sp} from './common';
 import {Image, StyleSheet, Text, View} from 'react-native';
 
-import {DEMO} from '../mode';
 
-/**
- * The product name, everywhere it is shown.
- *
- * The demo says so in its own name rather than only in the banner: both plugins
- * can be installed at once, and someone looking at a screenshot — or at the
- * device a week later — should not have to work out which one they are in.
- */
-export const APP_NAME = DEMO ? 'Task Hub Demo' : 'Task Hub';
+/** The product name, everywhere it is shown. */
+export const APP_NAME = 'Task Hub';
 
 /** Mark only — used in the top-left of every screen header. */
 export function Logo(props: {size?: number}): React.JSX.Element {

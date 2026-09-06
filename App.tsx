@@ -97,17 +97,6 @@ import {REPEAT_OPTIONS, repeatKey, repeatLabel, ruleFor, type RepeatKey} from '.
 import {readLassoAsText, readSourceRef, type SourceRef} from './src/lasso';
 import {TASK_LABEL, markPage, removePageMark} from './src/pagemark';
 import {MARK_STYLES, SHADE_COLORS, type MarkStyle} from './src/markstyle';
-import {DEMO} from './src/mode';
-import {
-  DEMO_BANNER,
-  DEMO_BLOCKED,
-  DEMO_COLLECTIONS,
-  DEMO_CONFIG,
-  demoEvents,
-  demoMeetingFiles,
-  demoNoteFiles,
-  demoTasks,
-} from './src/demo';
 import {PermissionDeniedError} from './src/permissions';
 import {
   EMPTY_CONFIG,
@@ -303,9 +292,9 @@ export default function App(): React.JSX.Element {
   calViewRef.current = calView;
   viewHistoryRef.current = viewHistory;
   const [status, setStatus] = useState<Status>(null);
-  const [config, setLocalConfig] = useState<RadicaleConfig>(DEMO ? DEMO_CONFIG : getConfig);
+  const [config, setLocalConfig] = useState<RadicaleConfig>(getConfig);
   const [collections, setLocalCollections] = useState<TaskCollection[]>(
-    DEMO ? DEMO_COLLECTIONS : getCollections,
+    getCollections,
   );
 
   const [draft, setDraft] = useState<TaskDraftState>(EMPTY_TASK);
@@ -450,20 +439,6 @@ export default function App(): React.JSX.Element {
     return {year: now.getFullYear(), month: now.getMonth()};
   });
 
-  /**
-   * Refuse an action in the demo build and say so.
-   *
-   * Returns true when it handled the call, so every guarded handler reads as
-   * `if (blockedInDemo()) { return; }`.
-   */
-  const blockedInDemo = useCallback((): boolean => {
-    if (!DEMO) {
-      return false;
-    }
-    setAsk(null);
-    setStatus({kind: 'done', message: DEMO_BLOCKED});
-    return true;
-  }, []);
 
   /**
    * What a reload needs to fetch.
@@ -475,20 +450,6 @@ export default function App(): React.JSX.Element {
    */
   const refresh = useCallback(
     async (scope: 'all' | 'opening' | 'tasks' | 'events' | 'notes' = 'all') => {
-    if (DEMO) {
-      // Sample data, generated fresh so it is always dated around today. No
-      // network call is made, and none can be: the demo build does not declare
-      // the INTERNET permission.
-      const now = new Date();
-      setTasks(demoTasks(now));
-      setEvents(demoEvents(now));
-      setMissing([]);
-      // A few days already have notes, so the month grid's N marker and the
-      // "open" rather than "create" path are both reachable in the demo.
-      setNoteFiles(demoNoteFiles(now));
-      setMeetingFiles(demoMeetingFiles());
-      return;
-    }
 
     const cfg = getConfig();
     // 'opening' is everything the first screen needs and nothing it does not.
@@ -546,7 +507,7 @@ export default function App(): React.JSX.Element {
    */
   const notesLoaded = useRef(false);
   useEffect(() => {
-    if (tab === 'calendar' && !notesLoaded.current && !DEMO) {
+    if (tab === 'calendar' && !notesLoaded.current) {
       notesLoaded.current = true;
       void refresh('notes');
     }
@@ -651,8 +612,8 @@ export default function App(): React.JSX.Element {
   /**
    * Run a write immediately, with no confirmation.
    *
-   * The same path as runAsk — demo guard, busy flag, status, scoped reload —
-   * minus the dialog. Used for creating and editing a task, which is the write
+   * The same path as runAsk — busy flag, status, scoped reload — minus the
+   * dialog. Used for creating and editing a task, which is the write
    * done most often and the least consequential: it adds a row that can be
    * edited or ticked off in two taps. Making somebody confirm it turned every
    * save into a second full-screen repaint and a second press.
@@ -661,9 +622,6 @@ export default function App(): React.JSX.Element {
    * discarding unsaved work.
    */
   const runNow = useCallback(async (action: Ask) => {
-    if (blockedInDemo()) {
-      return;
-    }
     setStatus({kind: 'working', message: 'Saving…'});
     setWriting(true);
     try {
@@ -679,15 +637,11 @@ export default function App(): React.JSX.Element {
     } finally {
       setWriting(false);
     }
-  }, [blockedInDemo, refresh, scheduleClose]);
+  }, [refresh, scheduleClose]);
 
   /** Confirm → push → success → reload. The single write path. */
   const runAsk = useCallback(async () => {
-    // Every write in the plugin passes through here, which is what makes one
-    // guard enough to guarantee the demo changes nothing.
-    if (blockedInDemo()) {
-      return;
-    }
+    // Every write in the plugin passes through here.
     const pending = ask;
     setAsk(null);
     if (!pending) {
@@ -715,7 +669,7 @@ export default function App(): React.JSX.Element {
     } finally {
       setWriting(false);
     }
-  }, [ask, refresh, scheduleClose, blockedInDemo]);
+  }, [ask, refresh, scheduleClose]);
 
   const capture = useCallback(async () => {
     // The host is showing us again, so the next close is a real one.
@@ -791,12 +745,6 @@ export default function App(): React.JSX.Element {
       return;
     }
     setRestored(true);
-    if (DEMO) {
-      // Nothing is read from or written to disk in the demo build, so a real
-      // installation's settings sitting next to it are left untouched.
-      void refresh();
-      return;
-    }
     void (async () => {
       const stored = await loadSettings();
       if (stored) {
@@ -853,9 +801,7 @@ export default function App(): React.JSX.Element {
         setStatus(null);
         setScreen('settings');
         // Only this screen needs them, and the call is cheap.
-        if (!DEMO) {
-          void listAllTemplates().then(setTemplates);
-        }
+        void listAllTemplates().then(setTemplates);
       },
     });
     return () => {
@@ -1246,9 +1192,6 @@ export default function App(): React.JSX.Element {
    */
   const askPeriodNote = useCallback(
     (period: Period, iso: string, exists: boolean) => {
-      if (blockedInDemo()) {
-        return;
-      }
       const cfg = getConfig();
       const noteConfig = noteConfigFor(period, cfg);
       const path = periodNotePath(period, noteConfig, iso, cfg.dateFormat);
@@ -1285,16 +1228,13 @@ export default function App(): React.JSX.Element {
         },
       });
     },
-    [leaveForNote, blockedInDemo, noteConfigFor],
+    [leaveForNote, noteConfigFor],
   );
 
   const askDailyNote = useCallback(
     (iso: string, exists: boolean) => {
       // Guarded here rather than in runAsk alone: the "already exists" branch
       // opens a file without going through a confirmation.
-      if (blockedInDemo()) {
-        return;
-      }
       const cfg = getConfig();
       const path = dailyNotePath(cfg.dailyNote, iso, cfg.dateFormat);
       if (!path) {
@@ -1332,7 +1272,7 @@ export default function App(): React.JSX.Element {
         },
       });
     },
-    [leaveForNote, blockedInDemo],
+    [leaveForNote],
   );
 
   /**
@@ -1344,10 +1284,6 @@ export default function App(): React.JSX.Element {
   const openSource = useCallback(
     (task: RemoteTask) => {
       if (!task.sourcePath) {
-        return;
-      }
-      // The demo's source path names a note that does not exist.
-      if (blockedInDemo()) {
         return;
       }
       setStatus({kind: 'working', message: 'Opening source page…'});
@@ -1362,14 +1298,11 @@ export default function App(): React.JSX.Element {
         }
       })();
     },
-    [leaveForNote, blockedInDemo],
+    [leaveForNote],
   );
 
   const askEventNote = useCallback(
     (event: RemoteEvent, exists: boolean) => {
-      if (blockedInDemo()) {
-        return;
-      }
       const cfg = getConfig();
       if (exists) {
         setStatus({kind: 'working', message: 'Opening note…'});
@@ -1402,7 +1335,7 @@ export default function App(): React.JSX.Element {
         },
       });
     },
-    [close, meetingFiles, blockedInDemo],
+    [close, meetingFiles],
   );
 
   const askComplete = useCallback((task: RemoteTask) => {
@@ -1485,9 +1418,6 @@ export default function App(): React.JSX.Element {
   // ---- settings ----
 
   const discover = useCallback(async () => {
-    if (blockedInDemo()) {
-      return;
-    }
     setConfig(config);
     if (!canDiscover(config)) {
       setStatus({kind: 'error', message: 'Enter the server URL and username first.'});
@@ -1505,18 +1435,15 @@ export default function App(): React.JSX.Element {
     } catch (err) {
       setStatus({kind: 'error', message: describe(err)});
     }
-  }, [config, blockedInDemo]);
+  }, [config]);
 
   /**
    * Write the settings, reporting whether they were stored.
    *
-   * Returns false when nothing was saved — the demo build, or a storage
-   * failure — so the caller can decline to say "Setup saved" and leave.
+   * Returns false when nothing was saved — a storage failure — so the caller
+   * can decline to say "Setup saved" and leave.
    */
   const persistSettings = useCallback(async (): Promise<boolean> => {
-    if (blockedInDemo()) {
-      return false;
-    }
     // Deliberately no requirement to have ticked anything. The note features —
     // daily, weekly, monthly, quarterly and yearly notes, meeting notes, the
     // templates and folders they use — need no server at all, and refusing to
@@ -1549,7 +1476,7 @@ export default function App(): React.JSX.Element {
     }
     void refresh();
     return true;
-  }, [config, refresh, blockedInDemo]);
+  }, [config, refresh]);
 
   /**
    * Save the settings, say so, and leave.
@@ -1775,11 +1702,6 @@ export default function App(): React.JSX.Element {
         // what the host reported rather than from a constant.
         keyboardUp && {paddingBottom: keyboardHeight + 24},
       ]}>
-      {DEMO && (
-        <View style={styles.demoBanner}>
-          <Text style={styles.demoBannerText}>{DEMO_BANNER}</Text>
-        </View>
-      )}
 
       {screen === 'save' && (
         <>
@@ -2572,9 +2494,9 @@ will not duplicate them.`}
           status={status}
           scrollHandle={scrollHandle}
           onScrollTo={scrollFieldIntoView}
-          onBrowse={() => !blockedInDemo() && setPickingFolder('daily')}
-          onBrowseMeetings={() => !blockedInDemo() && setPickingFolder('meeting')}
-          onBrowsePeriod={period => !blockedInDemo() && setPickingFolder(period)}
+          onBrowse={() => setPickingFolder('daily')}
+          onBrowseMeetings={() => setPickingFolder('meeting')}
+          onBrowsePeriod={period => setPickingFolder(period)}
           templates={templates}
           showHelp={showHelp}
           onToggleHelp={() => setShowHelp(v => !v)}

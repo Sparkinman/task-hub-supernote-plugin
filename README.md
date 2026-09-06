@@ -183,13 +183,6 @@ command and runs on a Raspberry Pi. Or point this at any CalDAV server you alrea
 skip it entirely — the note and calendar-view features work without one, and settings save
 with nothing ticked.
 
-### Try it without a server
-
-`TaskHubDemo.snplg` is the same plugin filled with sample data. It **requests no permissions
-at all**, has no network access, and refuses every write — it exists so you can see and use
-the thing before deciding whether to set up a server. It installs alongside the real one and
-says "Task Hub Demo" on every screen.
-
 ---
 
 ## Build from source
@@ -197,9 +190,9 @@ says "Task Hub Demo" on every screen.
 ```bash
 npx tsc --noEmit                  # must pass first — Metro does not typecheck
 npx eslint . --ext .ts,.tsx,.js
-npx jest                          # 350 tests
+npx jest                          # 317 tests
 ./buildPlugin.sh                  # -> build/outputs/TaskHub.snplg
-# Windows: .\buildPlugin.ps1 and .\buildDemo.ps1
+# Windows: .\buildPlugin.ps1
 ```
 
 `buildPlugin.sh` exits non-zero and packages nothing if the APK step fails. That matters:
@@ -207,12 +200,9 @@ npx jest                          # 350 tests
 script that carried on would zip a new JS bundle around a stale native payload and report
 success.
 
-Needs the Android SDK with NDK 27.0.12077973, a JDK, Node, and Python 3 on PATH.
+Needs the Android SDK with NDK 27.0.12077973, a JDK and Node on PATH.
 [HANDOFF.md](HANDOFF.md) carries the full setup, the architecture, and the bugs worth not
 rediscovering.
-
-Both plugins are built from this one source tree — there is no fork. `buildDemo.ps1` flips a
-compile-time flag, swaps the plugin config, builds, and restores everything.
 
 ---
 

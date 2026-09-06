@@ -794,23 +794,6 @@ export const styles = StyleSheet.create({
   subheadingCompact: {fontSize: fs(23), fontWeight: '700', color: '#000', marginTop: sp(16), marginBottom: sp(4)},
   helpStepCompact: {fontSize: fs(18), color: '#222', lineHeight: fs(25), marginBottom: sp(8)},
   noteCompact: {fontSize: fs(17), color: '#444', lineHeight: fs(23), marginBottom: sp(8)},
-  /**
-   * Demo-build banner. Inverted rather than tinted: a grey wash is close to
-   * invisible on e-ink, and this label has to be unmissable.
-   */
-  demoBanner: {
-    backgroundColor: '#000',
-    paddingVertical: sp(5),
-    paddingHorizontal: sp(8),
-    marginBottom: sp(6),
-  },
-  demoBannerText: {
-    color: '#fff',
-    fontSize: fs(14),
-    fontWeight: '700',
-    textAlign: 'center',
-    letterSpacing: 0.5,
-  },
   checkRowCompact: {
     flexDirection: 'row',
     alignItems: 'center',

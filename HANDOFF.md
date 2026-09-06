@@ -6,15 +6,22 @@ Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`).
 
-Two plugins ship from this one tree: **Task Hub** (`vfmnvjq0i1hxf8gu`) and
-**Task Hub Demo** (`do3dzvwic8ss836h`). There is no fork — see *Demo build* below.
+One plugin: **Task Hub** (`vfmnvjq0i1hxf8gu`).
+
+The demo build was removed on 2026-09-06. It existed so somebody could try the
+plugin before setting up a CalDAV server; lifting the server requirement made it
+redundant — the real plugin now saves its settings and runs every note and
+calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
+`PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
+test suite are all gone, along with the `blockedInDemo` guard that sat on every
+write path.
 
 ## Build
 
 ```powershell
 npx tsc --noEmit                              # MUST pass before building
 npx eslint . --ext .ts,.tsx,.js
-npx jest                                      # 350 tests, 17 suites
+npx jest                                      # 317 tests, 16 suites
 .uildPlugin.ps1                             # ~15 s -> build/outputs/TaskHub.snplg (6.91 MB)
 .uildDemo.ps1                               # -> build/outputs/TaskHubDemo.snplg, restores the tree
 ```
@@ -24,8 +31,7 @@ on device. Never build on a failing `tsc`.
 
 `build/generated` is never cleared, and the packaging step zips whatever is in
 it — so a bundle left by the other variant gets packaged alongside the real one.
-`buildDemo.ps1` clears it either side of its run; clear it by hand if the two are
-ever built another way.
+Clear it by hand if a build is ever done another way.
 
 `buildPlugin.sh` now EXITS 1 if the APK step fails rather than carrying on. It
 used to print "APK build failed" in red and then package the stale `app.npk` left
@@ -47,8 +53,6 @@ What does NOT come from the repo:
   `libnative-lib.so`. First native build ~7 min; incremental ~7 s.
 - **The Android SDK licences**, accepted interactively via
   `sdkmanager --licenses`. Nobody can accept those on your behalf.
-- **Python 3 on PATH** — `buildDemo.ps1` shells out to
-  `scripts/set_demo_names.py`.
 - **The device's own settings**, `Document/TaskHub/settings.json`. Server, login
   and every choice live there, not in the repo, and survive uninstalling the
   plugin. Clear it from Settings -> *Wipe All Save Data*.
@@ -56,50 +60,6 @@ What does NOT come from the repo:
 Installing a build whose `app.npk` changed needs **Add Plugin**, not Reinstall:
 reinstall reads the host's managed copy under `MyStyle/Plugins/` rather than the
 file just pushed, so the old native payload is kept.
-
-## Demo build
-
-One source tree, two outputs. `buildDemo.ps1` flips three things, runs the normal
-build, and restores them in a `finally`:
-
-| | real | demo |
-|---|---|---|
-| `src/mode.ts` | `DEMO = false` | `DEMO = true` |
-| `PluginConfig.json` | as committed | copy of `PluginConfig.demo.json` |
-| `package.json` `name` | `TaskHub` | `TaskHubDemo` (sets the output filename) |
-| `app.json` `name` | `TaskHub` | `TaskHubDemo` (the registered RN component) |
-
-`DEMO` is a compile-time `const` that Metro folds, not a runtime setting — the
-released plugin cannot be talked into demo mode, and the demo cannot be talked
-into reaching the network. A jest test asserts `DEMO === false`, so an
-interrupted build that leaves the flag set fails the suite rather than shipping.
-
-The demo declares **no permissions at all**. Everything that would need one is
-guarded: `refresh` returns `src/demo.ts` sample data instead of fetching,
-`runAsk` refuses every write (all writes funnel through it, which is what makes
-one guard sufficient), and the note-opening, folder-picker, template-listing,
-discover and save-settings paths each check `blockedInDemo()`. Calling
-`hasPermission` for an *undeclared* permission throws error 1500, so any new
-code path that touches network or files must be added to that list.
-
-Demo data is generated relative to `new Date()` at call time — never hard-coded,
-or the demo looks broken when opened months later.
-
-**The demo shipped dead once**, because `buildDemo.ps1` changed `pluginKey` but
-not `app.json`'s `name`: `index.js` registers the component under the app.json
-name, the host resolves it by `pluginKey`, and a mismatch installs cleanly then
-does nothing at all — no buttons, no settings, no error. The script now derives
-the demo name from `PluginConfig.demo.json`'s `pluginKey` and refuses to build if
-the two disagree; a test asserts the same pairing for the committed files.
-
-`buildPlugin.ps1` never clears `build/generated` and step 14 zips whatever is in
-it, so a stale bundle from the other variant gets packaged alongside the real
-one. `buildDemo.ps1` clears it either side of its run.
-
-**Do not edit `src/mode.ts` or `PluginConfig.demo.json` by hand mid-build.**
-PowerShell 5.1 corrupted all three swapped files on the first attempt:
-`Get-Content -Raw` decodes UTF-8 as ANSI and `Set-Content -Encoding utf8` adds a
-BOM. `buildDemo.ps1` now uses `[System.IO.File]` with an explicit no-BOM encoder.
 
 ## The public repository — rules that outlive this session
 
