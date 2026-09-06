@@ -80,16 +80,16 @@ Any snapshot zip taken before 2026-09-03 predates all this and still bundles the
 `.git`, with the previous author identity inside. Do not upload one anywhere; rebuild from
 the current tree instead.
 
-### Not yet done on the repo
+### The state of the repo
 
-- **No release.** `gh release create v0.19.0 build/outputs/TaskHub.snplg
-  build/outputs/TaskHubDemo.snplg --title ... --notes ...` — until this runs there is no
-  download, and the `.snplg` files exist only locally (`build/` is correctly gitignored).
-- **No LICENSE**, so all-rights-reserved by default: readable, not legally usable or forkable.
-- **No repo description or topics** set yet (`gh repo edit --description ... --add-topic ...`).
-- **`versionCode` is still 26** and `versionName` still `0.19.0` in both PluginConfig files,
-  unchanged through everything since. The device uses `versionCode` to decide what counts as
-  an update — bump both before handing out another build.
+- **Released.** v0.50.0 is published with `TaskHub.snplg` attached. `build/` stays gitignored,
+  so the binary reaches people through the release page and nowhere else. Bump `versionCode`
+  and `versionName` in `PluginConfig.json` before cutting the next one — the device uses
+  `versionCode` to decide what counts as an update.
+- **Licensed GPLv3**, the same as [the server](https://github.com/Sparkinman/task-hub). The
+  full text is in `LICENSE`; the README explains it. This replaces the earlier
+  all-rights-reserved position — do not reintroduce it.
+- **No repo description or topics** set yet.
 
 ## Naming — do not drift
 

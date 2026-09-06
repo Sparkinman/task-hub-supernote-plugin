@@ -262,9 +262,20 @@ password. **Settings → Wipe All Save Data** clears it, since uninstalling does
 
 ## Licence
 
-Public to read, and free to install and use on your own device. **This is not open source**:
-no licence is granted to fork, modify, redistribute or bundle it into another project. All
-rights are reserved.
+Task Hub is free software under the **GNU General Public License, version 3**. The full text
+is in [LICENSE](LICENSE).
+
+In plain terms: you may run it, study it, change it, and pass it on. If you distribute it, or
+anything built from it, you must do so under the same licence and make your source available.
+A modified Task Hub cannot be shipped inside a closed product.
+
+The same licence as [the server](https://github.com/Sparkinman/task-hub), deliberately — the
+two are built alongside each other and there is no reason for the terms to differ.
+
+The dependencies are permissive and impose no conflicting requirement: React Native and
+Ratta's `sn-plugin-lib` SDK are both MIT.
+
+Copyright © 2026 Sparkinman.
 
 ## Known limits
 
