@@ -89,3 +89,6 @@ buildPlugin.sh.orig
 
 # Local editor / tooling config
 .mcp.json
+
+# Announcement copy — kept next to the project, not published with it
+drafts/

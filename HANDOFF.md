@@ -1,10 +1,11 @@
 # Task Hub — state as of 2026-09-06
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-350 tests across 17 suites; `tsc` and eslint clean. Current build 0.49.0
-(versionCode 64).
+**317 tests across 16 suites**; `tsc` and eslint clean, all verified 2026-09-06.
+Current build **0.50.0** (versionCode 65).
 
-**Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`).
+**Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
+**licensed GPLv3**, with v0.50.0 released and `TaskHub.snplg` attached to it.
 
 One plugin: **Task Hub** (`vfmnvjq0i1hxf8gu`).
 
@@ -282,6 +283,43 @@ None of it could be verified off-device, and all of it changed last:
    anything.
 4. **Completing a captured task clears box, caption and shading together.**
 
+
+## What changed on 2026-09-06 (publication and licensing)
+
+Nothing in this session touched device behaviour — it was all repository,
+documentation and licensing work. Both repos are clean and pushed.
+
+- **Relicensed the plugin to GPLv3**, matching the server, at Paul's
+  instruction. Added `LICENSE` (byte-identical to the server's), rewrote the
+  README licence section, set `"license": "GPL-3.0-or-later"` in
+  `package.json`. The earlier "not open source, all rights reserved" position
+  is **superseded — do not reintroduce it**. Dependency licences were checked
+  and are compatible: React Native and `sn-plugin-lib` are both MIT.
+- **Scrubbed the personal email from git history in both repositories.**
+  `git filter-branch` rewrote 28 commits here and all 110 in
+  `Sparkinman/task-hub`, then both were force-pushed. Trees were verified
+  byte-identical before and after. The cause was that neither repo had a
+  *local* git identity, so the global one leaked; the global identity is now
+  `Sparkinman <sparkinman@users.noreply.github.com>` and both repos also set it
+  locally. Local-only `refs/original/*` backups still hold the old commits on
+  this machine; nothing leaky was pushed.
+- **Two features got proper README coverage**: notes attached to calendar
+  events (and that a recurring event's occurrences all resolve to one note),
+  and the `↩ page` chip that reopens the note and page a task was captured on.
+  Both were previously buried and absent from the comparison table.
+- **Announcement copy** is saved in `drafts/` — `reddit-long.md` (~1,400 words)
+  and `reddit-short.md` (~300). The directory is gitignored, so it lives on
+  this machine only and is not published with the repo.
+
+### Left open
+
+- The repo still has **no description and no topics** set on GitHub.
+- A stray tag `backup-before-author-rewrite` sits on the remote. It points at a
+  *rewritten*, clean commit so it leaks nothing, but it is clutter and could be
+  deleted from the GitHub Tags page.
+- GitHub keeps the pre-rewrite commits reachable by direct SHA until it
+  garbage-collects. They appear nowhere in the UI or in a clone; GitHub Support
+  can force a GC if that ever matters.
 
 ## What changed since 2026-09-03
 
