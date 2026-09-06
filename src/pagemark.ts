@@ -214,6 +214,9 @@ function isOurCaption(element: PageElement, boxes: Required<Rect>[]): boolean {
 /** How far below its box a caption may sit and still be recognised as ours. */
 const CAPTION_WITHIN = 160;
 
+/** Pixels between the box and the caption under it. */
+const CAPTION_GAP = 4;
+
 /**
  * Take the mark off a page once its task is done.
  *
@@ -300,7 +303,7 @@ export async function removePageMark(source: SourceRef): Promise<string | null> 
 }
 
 /** Text drawn under a captured task, so the box needs no tap to be understood. */
-export const TASK_LABEL = 'Task Hub Task';
+export const TASK_LABEL = 'Task Hub';
 
 /**
  * Write a caption under the handwriting, as plain text.
@@ -335,7 +338,9 @@ export async function labelLassoStrokes(rect: Rect): Promise<string | null> {
     // writing rather than belonging to it. Underneath, it reads as a label on
     // the thing above it, which is what it is.
     const left = rect.left;
-    const top = rect.bottom + Math.round(fontSize / 3);
+    // Tight under the box. A third of the font size left it floating, looking
+    // like a separate note rather than a label on the mark above it.
+    const top = rect.bottom + CAPTION_GAP;
 
     const inserted = (await PluginNoteAPI.insertText({
       textContentFull: TASK_LABEL,

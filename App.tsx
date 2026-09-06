@@ -218,6 +218,19 @@ interface EventDraftState {
   repeat: RepeatKey;
 }
 
+/**
+ * The hours offered for the agenda window.
+ *
+ * Every third hour rather than all 24: the picker is a row of chips on a narrow
+ * panel, and nobody sets their working day to start at 04:00 rather than 03:00.
+ */
+const AGENDA_HOURS = [0, 3, 6, 7, 8, 9, 12, 15, 17, 18, 19, 21, 23];
+
+/** An hour as the user writes times, e.g. "7am" or "07:00". */
+function hourLabel(hour: number, timeFormat: TimeFormat): string {
+  return formatTime(`${String(hour).padStart(2, '0')}:00`, timeFormat);
+}
+
 const EMPTY_TASK: TaskDraftState = {
   summary: '',
   description: '',
@@ -519,6 +532,20 @@ export default function App(): React.JSX.Element {
    */
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * Whether the host is currently showing our view.
+   *
+   * closePluginView must be called exactly once per opening. Called a second
+   * time — a stale timer, a confirmation that closes after something else
+   * already did — it runs against a view the host has already dismissed, and
+   * the host's idea of the view then disagrees with reality: the next button
+   * press is spent resyncing rather than opening, which is the double-tap.
+   *
+   * A ref rather than state: it must be correct the instant close() is called,
+   * not after the next render.
+   */
+  const viewShowing = useRef(true);
+
   const close = useCallback(() => {
     if (closeTimer.current !== null) {
       clearTimeout(closeTimer.current);
@@ -529,6 +556,10 @@ export default function App(): React.JSX.Element {
     setAsk(null);
     setTaskForm(null);
     setEventForm(null);
+    if (!viewShowing.current) {
+      return;
+    }
+    viewShowing.current = false;
     void PluginManager.closePluginView();
   }, []);
 
@@ -657,6 +688,8 @@ export default function App(): React.JSX.Element {
   }, [ask, refresh, scheduleClose, blockedInDemo]);
 
   const capture = useCallback(async () => {
+    // The host is showing us again, so the next close is a real one.
+    viewShowing.current = true;
     setScreen('save');
     const cfg = getConfig();
     setTargets(cfg.defaultCollectionUrl ? [cfg.defaultCollectionUrl] : []);
@@ -688,6 +721,7 @@ export default function App(): React.JSX.Element {
   }, []);
 
   const openHub = useCallback(() => {
+    viewShowing.current = true;
     setStatus(null);
     setTaskForm(null);
     setEventForm(null);
@@ -738,6 +772,21 @@ export default function App(): React.JSX.Element {
       if (stored) {
         setConfig(stored);
         setLocalConfig(stored);
+        // Seed the capture screen's list from the settings just loaded.
+        //
+        // capture() reads getConfig() when the lasso button is pressed, and on
+        // a cold start that can happen before this load has finished — the
+        // default list was then read from an empty config and nothing came out
+        // pre-ticked. Only seeded when nothing has been chosen, so a choice
+        // made in the meantime is not overwritten.
+        if (stored.defaultCollectionUrl) {
+          setTargets(previous =>
+            previous.length === 0 ? [stored.defaultCollectionUrl] : previous,
+          );
+          setTaskTargets(previous =>
+            previous.length === 0 ? [stored.defaultCollectionUrl] : previous,
+          );
+        }
         // Reopen on the day the plugin was last left from, so coming back from
         // a note lands where it was rather than on today.
         if (stored.lastDay) {
@@ -763,6 +812,7 @@ export default function App(): React.JSX.Element {
     });
     const configButton = PluginManager.registerConfigButtonListener({
       onClick: () => {
+        viewShowing.current = true;
         setLocalConfig(getConfig());
         setLocalCollections(getCollections());
         setStatus(null);
@@ -2406,6 +2456,8 @@ will not duplicate them.`}
                   timeFormat={timeFormat}
                   hasNote={dayHasNote}
                   notesEnabled={config.dailyNote.enabled}
+                  startHour={config.agendaStartHour}
+                  endHour={config.agendaEndHour}
                   onDailyNote={askDailyNote}
                   onPickDate={() => setPickingDate('day')}
                   eventNotes={eventNotes}
@@ -3074,6 +3126,31 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         hint={'How dates and times are written throughout the plugin.'}
         open={openFolds.has('formats')}
         onToggle={() => toggleFold('formats')}>
+      <Text style={styles.subheadingCompact}>Agenda hours</Text>
+      <Text style={styles.noteCompact}>
+        Which hours the Day view lays out as rows. Anything timed outside them is still
+        listed, plainly, under the grid — narrowing this decides what gets a row of its own,
+        not what the day contains. All-day items stay at the top whatever you choose.
+      </Text>
+      <Text style={styles.labelCompact}>Day starts at</Text>
+      <Choice
+        options={AGENDA_HOURS.map(h => ({key: String(h), label: hourLabel(h, config.timeFormat)}))}
+        value={String(config.agendaStartHour)}
+        onPick={k => onChange({...config, agendaStartHour: Number(k)})}
+      />
+      <Text style={styles.labelCompact}>Day ends at</Text>
+      <Choice
+        options={AGENDA_HOURS.map(h => ({key: String(h), label: hourLabel(h, config.timeFormat)}))}
+        value={String(config.agendaEndHour)}
+        onPick={k => onChange({...config, agendaEndHour: Number(k)})}
+      />
+      {config.agendaEndHour < config.agendaStartHour && (
+        <Text style={styles.noteCompact}>
+          The end is before the start, so the Day view shows the starting hour only. Everything
+          else appears under the grid.
+        </Text>
+      )}
+
       <Text style={styles.subheadingCompact}>Date format</Text>
       <Choice
         options={DATE_FORMATS.map(f => ({key: f.key, label: `${f.label}  ${f.example}`}))}

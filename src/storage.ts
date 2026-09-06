@@ -95,6 +95,8 @@ export function sanitise(raw: unknown): Partial<RadicaleConfig> {
     markShadeColor: isShadeColor(value.markShadeColor)
       ? (value.markShadeColor as string)
       : undefined,
+    agendaStartHour: asHour(value.agendaStartHour),
+    agendaEndHour: asHour(value.agendaEndHour),
     markLabel: typeof value.markLabel === 'boolean' ? value.markLabel : undefined,
     dailyNote: sanitiseDailyNote(value.dailyNote),
     // A settings file written before these existed simply has no such key, and
@@ -113,6 +115,15 @@ export function sanitise(raw: unknown): Partial<RadicaleConfig> {
 }
 
 /** Same rules as a daily note, against whichever period's defaults apply. */
+/** An hour of the day, or undefined so the default applies. */
+function asHour(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return undefined;
+  }
+  const hour = Math.round(raw);
+  return hour >= 0 && hour <= 23 ? hour : undefined;
+}
+
 function sanitisePeriodNote(raw: unknown, fallback: PeriodNoteConfig): PeriodNoteConfig {
   if (typeof raw !== 'object' || raw === null) {
     return {...fallback};

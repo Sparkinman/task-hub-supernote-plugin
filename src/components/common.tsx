@@ -937,6 +937,9 @@ export const styles = StyleSheet.create({
   paneFoldHit: {width: 34, alignItems: 'center'},
   paneFold: {fontSize: 34, color: '#000', lineHeight: 34},
   paneTaskStep: {paddingLeft: 18, backgroundColor: '#ededed'},
+  // Events outside the agenda's chosen hours, under the grid.
+  outsideBlock: {marginTop: 10, borderTopWidth: 1, borderTopColor: '#999', paddingTop: 8},
+  outsideHead: {fontSize: 17, color: '#555', marginBottom: 4},
   browseRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 8},
   miniCell: {flex: 1, height: 52, alignItems: 'center', justifyContent: 'center', margin: 1},
   miniCellOn: {borderWidth: 1, borderColor: '#999'},

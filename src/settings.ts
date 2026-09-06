@@ -45,6 +45,15 @@ export interface RadicaleConfig {
   markShade: boolean;
   /** Which of the documented marker colours the wash uses. See `markstyle.ts`. */
   markShadeColor: string;
+  /**
+   * The hours the day view shows as slots, inclusive of the first and exclusive
+   * of nothing — 7 and 19 means a row for every hour from 07:00 to 19:00.
+   *
+   * Anything outside them is still shown, listed under the grid, so narrowing
+   * the window hides nothing. All-day items stay above the grid regardless.
+   */
+  agendaStartHour: number;
+  agendaEndHour: number;
   /** Write "Task Hub Task" under the boxed handwriting. */
   markLabel: boolean;
   /** Where per-day notes live and how their folders are laid out. */
@@ -87,6 +96,8 @@ export const EMPTY_CONFIG: RadicaleConfig = {
   markStyle: 'dashed',
   markShade: false,
   markShadeColor: 'light',
+  agendaStartHour: 7,
+  agendaEndHour: 21,
   markLabel: false,
   dailyNote: {...DEFAULT_DAILY_NOTE},
   weekNote: {...DEFAULT_WEEK_NOTE},

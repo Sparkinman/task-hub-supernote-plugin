@@ -18,7 +18,17 @@ import {toDateInput} from '../ical';
 import type {RemoteEvent, RemoteTask} from '../tasks';
 import {styles} from './common';
 
-const HOURS = Array.from({length: 24}, (_, h) => h);
+/**
+ * The hours the grid shows, from the user's chosen window.
+ *
+ * Always at least one row, and always in order, whatever pair of numbers the
+ * settings hold — a window nobody can read is worse than a default one.
+ */
+function hoursBetween(startHour: number, endHour: number): number[] {
+  const first = Math.min(Math.max(0, Math.round(startHour)), 23);
+  const last = Math.min(Math.max(first, Math.round(endHour)), 23);
+  return Array.from({length: last - first + 1}, (_, i) => first + i);
+}
 
 /** Minutes past midnight, or null when the day shown is not today. */
 function nowMinutes(day: string): number | null {
@@ -48,6 +58,9 @@ function DayViewImpl(props: {
   hasNote: boolean;
   /** False when daily notes are switched off in settings. */
   notesEnabled: boolean;
+  /** The hours to lay out as slots, from settings. */
+  startHour: number;
+  endHour: number;
   onShiftDay: (days: number) => void;
   onEditEvent: (event: RemoteEvent) => void;
   onCompleteTask: (task: RemoteTask) => void;
@@ -67,6 +80,8 @@ function DayViewImpl(props: {
     timeFormat,
     hasNote,
     notesEnabled,
+    startHour,
+    endHour,
     onShiftDay,
     onEditEvent,
     onCompleteTask,
@@ -78,6 +93,24 @@ function DayViewImpl(props: {
 
   const dayEvents = eventsOnDay(events, day);
   const allDay = dayEvents.filter(e => hourOf(e) === null);
+  const hours = hoursBetween(startHour, endHour);
+  // Timed events outside the chosen window. Never dropped — narrowing the grid
+  // decides what gets a row of its own, not what the day contains.
+  //
+  // Split by which end they fall off, and placed accordingly: something at
+  // 06:00 belongs above a grid that starts at seven, next to the all-day items,
+  // and something at 23:00 belongs after the last hour. Reading the column top
+  // to bottom then stays in time order.
+  const byTime = (a: RemoteEvent, b: RemoteEvent) =>
+    (a.startTime ?? '').localeCompare(b.startTime ?? '');
+  const timedOutside = dayEvents.filter(e => {
+    const hour = hourOf(e);
+    return hour !== null && (hour < hours[0] || hour > hours[hours.length - 1]);
+  });
+  const before = timedOutside.filter(e => (hourOf(e) ?? 0) < hours[0]).sort(byTime);
+  const after = timedOutside
+    .filter(e => (hourOf(e) ?? 0) > hours[hours.length - 1])
+    .sort(byTime);
 
   // Completed tasks never appear in either panel.
   const openTasks = tasks.filter(t => !t.completed);
@@ -172,7 +205,37 @@ function DayViewImpl(props: {
           </View>
         )}
 
-        {HOURS.map(h => {
+        {/*
+          Timed events that fall before the window, sitting with the all-day
+          items above the grid so the column still reads top to bottom in time
+          order.
+        */}
+        {before.length > 0 && (
+          <View style={styles.outsideBlock}>
+            <Text style={styles.outsideHead}>
+              Before {formatTime(`${String(hours[0]).padStart(2, '0')}:00`, timeFormat)}
+            </Text>
+            {before.map(event => (
+              <View key={event.uid} style={styles.eventRow}>
+                <Pressable style={styles.grow} onPress={() => onEditEvent(event)}>
+                  <Text style={styles.slotEvent}>
+                    {formatTime(event.startTime, timeFormat)}  {event.summary}
+                  </Text>
+                  <Text style={styles.slotMeta}>{event.calendarLabel}</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.noteChip}
+                  onPress={() => onEventNote(event, eventNotes.has(event.uid))}>
+                  <Text style={styles.noteChipText}>
+                    {eventNotes.has(event.uid) ? '🗒' : '+🗒'}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {hours.map(h => {
           const inSlot = dayEvents.filter(e => hourOf(e) === h);
           // The whole hour counts as past only once it has fully elapsed, so the
           // hour in progress still reads as active.
@@ -231,6 +294,38 @@ function DayViewImpl(props: {
             </View>
           );
         })}
+
+        {/*
+          Anything timed outside the chosen window, listed plainly under the
+          grid. Narrowing the hours decides what gets a row of its own, not
+          what the day contains — an event at 06:00 must not vanish because
+          somebody set their day to start at seven.
+        */}
+        {after.length > 0 && (
+          <View style={styles.outsideBlock}>
+            <Text style={styles.outsideHead}>After {formatTime(
+              `${String(hours[hours.length - 1] + 1).padStart(2, '0')}:00`,
+              timeFormat,
+            )}</Text>
+            {after.map(event => (
+              <View key={event.uid} style={styles.eventRow}>
+                <Pressable style={styles.grow} onPress={() => onEditEvent(event)}>
+                  <Text style={styles.slotEvent}>
+                    {formatTime(event.startTime, timeFormat)}  {event.summary}
+                  </Text>
+                  <Text style={styles.slotMeta}>{event.calendarLabel}</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.noteChip}
+                  onPress={() => onEventNote(event, eventNotes.has(event.uid))}>
+                  <Text style={styles.noteChipText}>
+                    {eventNotes.has(event.uid) ? '🗒' : '+🗒'}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
 
       <View style={styles.dayTasks}>
