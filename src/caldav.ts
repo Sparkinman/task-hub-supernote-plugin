@@ -1,21 +1,27 @@
 import {base64, buildVTodo, type TaskDraft} from './ical';
-import {parseCollections, userHomeUrl, type TaskCollection} from './discovery';
+import {
+  parseCollections,
+  parseHrefProp,
+  principalCandidates,
+  userHomeUrl,
+  type TaskCollection,
+} from './discovery';
 import {ensureInternet} from './permissions';
-import {collectionsOwner, type RadicaleConfig} from './settings';
+import {collectionsOwner, type ServerConfig} from './settings';
 
 export {newUid} from './ical';
 import {newUid, parseSteps} from './ical';
 export type {TaskDraft} from './ical';
 
 /**
- * CalDAV writes and collection discovery for Radicale.
+ * CalDAV writes and collection discovery.
  *
  * Creating a task is a plain HTTP PUT of a single-VTODO calendar object to
  * <collection>/<uid>.ics — no MKCALENDAR involved, so the collection must
  * already exist.
  */
 
-export function authHeader(config: RadicaleConfig): string {
+export function authHeader(config: ServerConfig): string {
   return 'Basic ' + base64(`${config.username}:${config.password}`);
 }
 
@@ -25,34 +31,104 @@ const DISCOVERY_BODY =
   '<prop><displayname/><resourcetype/><C:supported-calendar-component-set/></prop>' +
   '</propfind>';
 
-/** Enumerate the user's VTODO-capable collections. */
-export async function discoverCollections(
-  config: RadicaleConfig,
-): Promise<TaskCollection[]> {
-  await ensureInternet();
+const PRINCIPAL_BODY =
+  '<?xml version="1.0" encoding="utf-8"?>' +
+  '<propfind xmlns="DAV:"><prop><current-user-principal/></prop></propfind>';
 
-  const home = userHomeUrl(config.serverUrl, collectionsOwner(config));
-  const response = await fetch(home, {
+const HOME_BODY =
+  '<?xml version="1.0" encoding="utf-8"?>' +
+  '<propfind xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">' +
+  '<prop><C:calendar-home-set/></prop></propfind>';
+
+/** Thrown when the server refuses the credentials, so callers can say so plainly. */
+export class AuthError extends Error {
+  constructor() {
+    super('The server rejected those credentials.');
+    this.name = 'AuthError';
+  }
+}
+
+async function propfind(
+  url: string,
+  config: ServerConfig,
+  depth: '0' | '1',
+  body: string,
+): Promise<string | null> {
+  const response = await fetch(url, {
     method: 'PROPFIND',
     headers: {
       Authorization: authHeader(config),
-      Depth: '1',
+      Depth: depth,
       'Content-Type': 'application/xml; charset=utf-8',
     },
-    body: DISCOVERY_BODY,
+    body,
   });
 
   if (response.status === 401) {
-    throw new Error('Radicale rejected those credentials.');
+    throw new AuthError();
   }
+  // 207 Multi-Status is the success case; anything else means "not here",
+  // which during the well-known walk is a reason to try the next candidate
+  // rather than to fail outright.
   if (!response.ok && response.status !== 207) {
-    throw new Error(`Could not reach ${home} (HTTP ${response.status}).`);
+    return null;
+  }
+  return response.text();
+}
+
+/**
+ * Find the collection home, preferring the standard walk over a path guess.
+ *
+ * An explicitly configured `owner` short-circuits this: it exists precisely
+ * because the collections wanted are not the login's own, and the well-known
+ * walk can only ever report where the *login's* calendars live.
+ */
+export async function resolveHome(config: ServerConfig): Promise<string> {
+  const fallback = userHomeUrl(config.serverUrl, collectionsOwner(config));
+  if (config.owner.trim()) {
+    return fallback;
   }
 
-  const collections = parseCollections(config.serverUrl, await response.text());
+  for (const candidate of principalCandidates(config.serverUrl)) {
+    const principalXml = await propfind(candidate, config, '0', PRINCIPAL_BODY);
+    if (!principalXml) {
+      continue;
+    }
+    const principal = parseHrefProp(config.serverUrl, principalXml, 'current-user-principal');
+    if (!principal) {
+      continue;
+    }
+
+    const homeXml = await propfind(principal, config, '0', HOME_BODY);
+    if (!homeXml) {
+      continue;
+    }
+    const home = parseHrefProp(config.serverUrl, homeXml, 'calendar-home-set');
+    if (home) {
+      // A home is a collection; a trailing slash keeps relative joins honest.
+      return home.endsWith('/') ? home : `${home}/`;
+    }
+  }
+
+  return fallback;
+}
+
+/** Enumerate the user's VTODO-capable collections. */
+export async function discoverCollections(
+  config: ServerConfig,
+): Promise<TaskCollection[]> {
+  await ensureInternet();
+
+  const home = await resolveHome(config);
+  const xml = await propfind(home, config, '1', DISCOVERY_BODY);
+  if (xml === null) {
+    throw new Error(`Could not reach ${home}.`);
+  }
+
+  const collections = parseCollections(config.serverUrl, xml);
   if (collections.length === 0) {
     throw new Error(
-      'No task lists found. Radicale only auto-detects collections directly under /username/.',
+      'No task lists found. If the server keeps them somewhere unusual, paste a collection URL instead.',
     );
   }
   return collections;
@@ -60,7 +136,7 @@ export async function discoverCollections(
 
 /** Writes into `collectionUrl`, or the configured default when omitted. */
 export async function putTask(
-  config: RadicaleConfig,
+  config: ServerConfig,
   task: TaskDraft,
   collectionUrl?: string,
 ): Promise<void> {
@@ -80,7 +156,7 @@ export async function putTask(
  * `putTask` as the only public entry point is what makes that hard to forget.
  */
 async function writeTask(
-  config: RadicaleConfig,
+  config: ServerConfig,
   task: TaskDraft,
   collectionUrl?: string,
 ): Promise<void> {
@@ -102,7 +178,7 @@ async function writeTask(
   });
 
   if (!response.ok) {
-    throw new Error(`Radicale rejected the task (HTTP ${response.status}).`);
+    throw new Error(`The server rejected the task (HTTP ${response.status}).`);
   }
 }
 
@@ -123,7 +199,7 @@ async function writeTask(
  * somebody who typed all five.
  */
 export async function addSteps(
-  config: RadicaleConfig,
+  config: ServerConfig,
   parentUid: string,
   text: string,
   collectionUrl?: string,
@@ -138,7 +214,7 @@ export async function addSteps(
   }
 
   // One permission check for the whole batch, then the writes together. Each
-  // step is its own PUT to Radicale, and doing them in series is a round trip
+  // step is its own PUT to the server, and doing them in series is a round trip
   // per step that the user waits through.
   await ensureInternet();
   const results = await Promise.all(
@@ -163,7 +239,7 @@ export async function addSteps(
         return true;
       } catch {
         // Counted rather than thrown: losing four steps because the third had a
-        // character Radicale disliked would be a poor trade.
+        // character the server disliked would be a poor trade.
         return false;
       }
     }),

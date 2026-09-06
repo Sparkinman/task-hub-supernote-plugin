@@ -203,7 +203,11 @@ managed copy under `MyStyle/Plugins/`, not the file you just copied across, so a
 appears to do nothing.
 
 Then open the plugin's settings, enter your server address and login, tap **Discover**, and
-tick the task lists and calendars to watch.
+tick the task lists and calendars to watch. Discovery follows the CalDAV standard
+(RFC 6764 — `/.well-known/caldav`, then the principal's calendar home), so it works against
+Radicale, Nextcloud, Baikal, Fastmail and anything else that speaks the protocol. If your
+server keeps a collection somewhere discovery does not reach, paste its full URL into the
+manual field instead.
 
 Need a server? [**Task Hub**](https://github.com/Sparkinman/task-hub) installs with one
 command and runs on a Raspberry Pi. Or point this at any CalDAV server you already have. Or
@@ -217,7 +221,7 @@ with nothing ticked.
 ```bash
 npx tsc --noEmit                  # must pass first — Metro does not typecheck
 npx eslint . --ext .ts,.tsx,.js
-npx jest                          # 317 tests
+npx jest                          # 338 tests
 ./buildPlugin.sh                  # -> build/outputs/TaskHub.snplg
 # Windows: .\buildPlugin.ps1
 ```

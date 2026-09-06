@@ -1,7 +1,7 @@
 import {NativeModules} from 'react-native';
 
 import {ensureFileAccess} from './permissions';
-import {EMPTY_CONFIG, type RadicaleConfig} from './settings';
+import {EMPTY_CONFIG, type ServerConfig} from './settings';
 import {isMarkStyle, isShadeColor} from './markstyle';
 import {DEFAULT_DAILY_NOTE, type DailyNoteConfig} from './dailynote';
 import {
@@ -47,7 +47,7 @@ const FORMAT = 1;
 
 interface StoredShape {
   version: number;
-  config: Partial<RadicaleConfig>;
+  config: Partial<ServerConfig>;
 }
 
 /**
@@ -66,11 +66,11 @@ function defined<T extends object>(value: T): Partial<T> {
 }
 
 /** Exported for tests: the merge with EMPTY_CONFIG is where the bug lived. */
-export function sanitise(raw: unknown): Partial<RadicaleConfig> {
+export function sanitise(raw: unknown): Partial<ServerConfig> {
   if (typeof raw !== 'object' || raw === null) {
     return {};
   }
-  const value = raw as Partial<RadicaleConfig>;
+  const value = raw as Partial<ServerConfig>;
   const asStrings = (input: unknown): string[] =>
     Array.isArray(input) ? input.filter((u): u is string => typeof u === 'string') : [];
 
@@ -283,7 +283,7 @@ export async function listNotes(relativeRoot: string): Promise<string[]> {
  * Never throws: a missing module, denied permission or corrupt file all mean
  * "start with defaults", and none of them should stop the plugin opening.
  */
-export async function loadSettings(): Promise<RadicaleConfig | null> {
+export async function loadSettings(): Promise<ServerConfig | null> {
   if (!store) {
     return null;
   }
@@ -304,7 +304,7 @@ export async function loadSettings(): Promise<RadicaleConfig | null> {
 }
 
 /** Save settings. Resolves to the path written, and throws so the UI can report. */
-export async function saveSettings(config: RadicaleConfig): Promise<string> {
+export async function saveSettings(config: ServerConfig): Promise<string> {
   if (!store) {
     throw new Error('This build has no settings storage — rebuild with the native module.');
   }

@@ -41,7 +41,7 @@ export async function ensureInternet(): Promise<void> {
   const result = await PluginManager.requestPermission(
     'plugin.permission.INTERNET',
     // Only shown if the user previously chose "don't allow".
-    'task-sync uploads lassoed tasks to your Radicale server.',
+    'task-sync uploads lassoed tasks to your CalDAV server.',
   );
 
   if (result !== GRANTED_SESSION && result !== GRANTED_ALWAYS) {

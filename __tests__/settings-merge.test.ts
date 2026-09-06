@@ -16,10 +16,10 @@ jest.mock('../src/permissions', () => ({
 }));
 
 import {sanitise} from '../src/storage';
-import {EMPTY_CONFIG, type RadicaleConfig} from '../src/settings';
+import {EMPTY_CONFIG, type ServerConfig} from '../src/settings';
 
 /** Exactly what loadSettings does with the parsed file. */
-const load = (stored: unknown): RadicaleConfig => ({...EMPTY_CONFIG, ...sanitise(stored)});
+const load = (stored: unknown): ServerConfig => ({...EMPTY_CONFIG, ...sanitise(stored)});
 
 const OLD_FILE = {
   serverUrl: 'https://dav.example',

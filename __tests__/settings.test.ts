@@ -5,13 +5,13 @@ import {
   isConfigured,
   toggleCalendar,
   toggleCollection,
-  type RadicaleConfig,
+  type ServerConfig,
 } from '../src/settings';
 
 const A = 'https://host:5232/user/work/';
 const B = 'https://host:5232/user/home/';
 
-const base: RadicaleConfig = {...EMPTY_CONFIG, serverUrl: 'https://host:5232', username: 'user'};
+const base: ServerConfig = {...EMPTY_CONFIG, serverUrl: 'https://host:5232', username: 'user'};
 
 describe('toggleCollection', () => {
   it('the first selection claims the new-task target', () => {

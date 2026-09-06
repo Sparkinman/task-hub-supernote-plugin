@@ -12,10 +12,10 @@ import {
   type VEvent,
   type VTodo,
 } from './ical';
-import {authHeader} from './caldav';
+import {AuthError, authHeader} from './caldav';
 import {resolveHref} from './discovery';
 import {ensureInternet} from './permissions';
-import {collectionName, type RadicaleConfig} from './settings';
+import {collectionName, type ServerConfig} from './settings';
 
 /**
  * Reading and writing tasks across the watched collections.
@@ -175,7 +175,7 @@ function asArray<T>(value: T | T[] | undefined | null): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-async function listOne(config: RadicaleConfig, collection: string): Promise<RemoteTask[]> {
+async function listOne(config: ServerConfig, collection: string): Promise<RemoteTask[]> {
   const url = collection.trim().replace(/\/+$/, '');
   const response = await fetch(url, {
     method: 'REPORT',
@@ -188,7 +188,7 @@ async function listOne(config: RadicaleConfig, collection: string): Promise<Remo
   });
 
   if (response.status === 401) {
-    throw new Error('Radicale rejected those credentials.');
+    throw new AuthError();
   }
   if (collectionIsGone(response.status)) {
     throw new CollectionGoneError(url, collectionName(url), response.status, 'task');
@@ -243,7 +243,7 @@ async function listOne(config: RadicaleConfig, collection: string): Promise<Remo
  * one list surfaces rather than silently yielding a partial set, which would
  * look identical to "those tasks were completed elsewhere".
  */
-export async function listTasks(config: RadicaleConfig): Promise<ListResult<RemoteTask>> {
+export async function listTasks(config: ServerConfig): Promise<ListResult<RemoteTask>> {
   await ensureInternet();
 
   const settled = await Promise.allSettled(
@@ -261,7 +261,7 @@ export interface RemoteEvent extends VEvent {
   raw: string;
 }
 
-async function listEventsOne(config: RadicaleConfig, calendar: string): Promise<RemoteEvent[]> {
+async function listEventsOne(config: ServerConfig, calendar: string): Promise<RemoteEvent[]> {
   const url = calendar.trim().replace(/\/+$/, '');
   const response = await fetch(url, {
     method: 'REPORT',
@@ -274,7 +274,7 @@ async function listEventsOne(config: RadicaleConfig, calendar: string): Promise<
   });
 
   if (response.status === 401) {
-    throw new Error('Radicale rejected those credentials.');
+    throw new AuthError();
   }
   if (collectionIsGone(response.status)) {
     throw new CollectionGoneError(url, collectionName(url), response.status, 'calendar');
@@ -318,7 +318,7 @@ async function listEventsOne(config: RadicaleConfig, calendar: string): Promise<
 }
 
 /** Every event across every watched calendar. */
-export async function listEvents(config: RadicaleConfig): Promise<ListResult<RemoteEvent>> {
+export async function listEvents(config: ServerConfig): Promise<ListResult<RemoteEvent>> {
   await ensureInternet();
   const settled = await Promise.allSettled(
     config.calendarUrls.map(url => listEventsOne(config, url)),
@@ -328,7 +328,7 @@ export async function listEvents(config: RadicaleConfig): Promise<ListResult<Rem
 }
 
 async function putCalendarObject(
-  config: RadicaleConfig,
+  config: ServerConfig,
   task: RemoteTask,
   body: string,
 ): Promise<void> {
@@ -354,12 +354,12 @@ async function putCalendarObject(
   }
 }
 
-export async function completeTask(config: RadicaleConfig, task: RemoteTask): Promise<void> {
+export async function completeTask(config: ServerConfig, task: RemoteTask): Promise<void> {
   await putCalendarObject(config, task, markCompleted(task.raw));
 }
 
 export async function editTask(
-  config: RadicaleConfig,
+  config: ServerConfig,
   task: RemoteTask,
   edit: TaskEdit,
 ): Promise<void> {
@@ -368,7 +368,7 @@ export async function editTask(
 
 /** Write a brand-new event into a calendar collection. */
 export async function createEvent(
-  config: RadicaleConfig,
+  config: ServerConfig,
   calendarUrl: string,
   draft: EventDraft,
 ): Promise<void> {
@@ -389,12 +389,12 @@ export async function createEvent(
   });
 
   if (!response.ok) {
-    throw new Error(`Radicale rejected the event (HTTP ${response.status}).`);
+    throw new Error(`The server rejected the event (HTTP ${response.status}).`);
   }
 }
 
 export async function editEvent(
-  config: RadicaleConfig,
+  config: ServerConfig,
   event: RemoteEvent,
   draft: Omit<EventDraft, 'uid'>,
 ): Promise<void> {

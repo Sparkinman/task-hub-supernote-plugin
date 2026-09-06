@@ -11,7 +11,7 @@ import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from '.
 import type {DateFormat, TimeFormat} from './format';
 import type {MarkStyle} from './markstyle';
 
-export interface RadicaleConfig {
+export interface ServerConfig {
   /** Server origin, e.g. https://host:5232 — not a collection URL. */
   serverUrl: string;
   username: string;
@@ -19,7 +19,7 @@ export interface RadicaleConfig {
   /**
    * Whose collections to browse, when that differs from the login.
    *
-   * A Radicale credential scoped by a rights file logs in as one user while the
+   * A credential scoped by a server-side rights file (Radicale supports this) logs
    * collections live under another's path — discovery must query the owner's
    * home, not the login's. Empty means they are the same.
    */
@@ -83,7 +83,7 @@ export interface RadicaleConfig {
   lastDay: string;
 }
 
-export const EMPTY_CONFIG: RadicaleConfig = {
+export const EMPTY_CONFIG: ServerConfig = {
   serverUrl: '',
   username: '',
   password: '',
@@ -109,12 +109,12 @@ export const EMPTY_CONFIG: RadicaleConfig = {
   lastDay: '',
 };
 
-export function hasCalendars(config: RadicaleConfig): boolean {
+export function hasCalendars(config: ServerConfig): boolean {
   return config.calendarUrls.length > 0;
 }
 
 /** Toggle a VEVENT collection in the watched calendar set. */
-export function toggleCalendar(config: RadicaleConfig, url: string): RadicaleConfig {
+export function toggleCalendar(config: ServerConfig, url: string): ServerConfig {
   return {
     ...config,
     calendarUrls: config.calendarUrls.includes(url)
@@ -124,22 +124,22 @@ export function toggleCalendar(config: RadicaleConfig, url: string): RadicaleCon
 }
 
 /** Enough to attempt discovery. */
-export function canDiscover(config: RadicaleConfig): boolean {
+export function canDiscover(config: ServerConfig): boolean {
   return /^https?:\/\//i.test(config.serverUrl.trim()) && collectionsOwner(config).length > 0;
 }
 
 /** The path segment collections live under: the owner if set, else the login. */
-export function collectionsOwner(config: RadicaleConfig): string {
+export function collectionsOwner(config: ServerConfig): string {
   return (config.owner.trim() || config.username.trim()).trim();
 }
 
 /** Enough to read tasks. */
-export function hasCollections(config: RadicaleConfig): boolean {
+export function hasCollections(config: ServerConfig): boolean {
   return config.collectionUrls.length > 0;
 }
 
 /** Enough to save a new task. */
-export function isConfigured(config: RadicaleConfig): boolean {
+export function isConfigured(config: ServerConfig): boolean {
   return /^https?:\/\//i.test(config.defaultCollectionUrl.trim());
 }
 
@@ -150,7 +150,7 @@ export function isConfigured(config: RadicaleConfig): boolean {
  * dangling, so the target follows the selection: it falls back to whatever is
  * still selected, and a first selection claims it automatically.
  */
-export function toggleCollection(config: RadicaleConfig, url: string): RadicaleConfig {
+export function toggleCollection(config: ServerConfig, url: string): ServerConfig {
   const selected = config.collectionUrls.includes(url)
     ? config.collectionUrls.filter(u => u !== url)
     : [...config.collectionUrls, url];
@@ -173,10 +173,10 @@ export function toggleCollection(config: RadicaleConfig, url: string): RadicaleC
  * A plugin has no access to a keystore, so a Radicale credential scoped to just
  * these collections is safer than an account password — see the `owner` field.
  */
-let current: RadicaleConfig = {...EMPTY_CONFIG};
+let current: ServerConfig = {...EMPTY_CONFIG};
 let discovered: TaskCollection[] = [];
 
-export function getConfig(): RadicaleConfig {
+export function getConfig(): ServerConfig {
   return {
     ...current,
     collectionUrls: [...current.collectionUrls],
@@ -191,7 +191,7 @@ export function getConfig(): RadicaleConfig {
   };
 }
 
-export function setConfig(next: RadicaleConfig): void {
+export function setConfig(next: ServerConfig): void {
   current = {
     ...next,
     collectionUrls: [...next.collectionUrls],
