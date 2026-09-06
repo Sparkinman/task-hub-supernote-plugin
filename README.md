@@ -21,8 +21,8 @@
 
 Ratta's own calendar subscribes to **exactly one** calendar. A work calendar, a family one
 and a couple of shared ones mean choosing which single one the tablet gets to show. Its
-planner has no year view, no quarter view, and no way to attach a note to a week or a month.
-Its to-do list has no sub tasks and no priority.
+planner has no year view, no quarter view, and no way to attach a note to a week, a month or
+a meeting. Its to-do list has no sub tasks and no priority.
 
 This plugin is a planner that does those things, on the device, on the page you are already
 writing on.
@@ -34,6 +34,8 @@ writing on.
 | Create and edit events on device | ✓ | ✓ **including repeat rules** |
 | Notes tied to a date | daily | **day, week, month, quarter, year** — each with its own folder and template |
 | Notes for a future date | — | **✓ any date, pinned to that day** |
+| Notes attached to an event | — | **✓ one note per meeting, shared across a repeating series** |
+| Jump from a task to the page you wrote it on | — | ✓ |
 | Sub tasks | — | **✓ nested, folded, ordered by soonest step** |
 | Task priority | — | **✓ high / medium / low** |
 | Repeating tasks | — | ✓ |
@@ -83,9 +85,23 @@ is pressed from.
 JPG anywhere on the device — three tabs, real thumbnails, and a search box. The template is
 applied when the note is created; changing it later does not restyle notes you already have.
 
-**Meeting notes** attach to a calendar event. A repeating event shares one note across every
-occurrence; a one-off carries its date in the filename. The link is kept on the device and
-never written back to CalDAV.
+### A note attached to the meeting, a tap away in your schedule
+
+Open an event in any view and it has its own **note** — **Open** if it already exists,
+**Create** if it does not. Your notes live where you look for the meeting, not in a folder you
+have to go hunting through afterwards.
+
+Notes are linked to the event's **UID**, which is what makes a repeating meeting work
+properly: **every occurrence of a recurring event resolves to the same note.** A weekly
+stand-up gets one running note that builds up week after week — open next Thursday's
+occurrence and last Thursday's notes are already there. A **one-off** event carries its date
+in the filename instead, so two unrelated meetings that share a title stay tellable apart.
+
+Notes are named after the meeting itself — `Team sync.note` — because the link is kept in a
+`uid → filename` map rather than smuggled into the filename as a hash. The folder stays
+readable when you browse it on the device. Meeting notes get their own root folder and their
+own template, and the link is stored **only on the device** — nothing is written back to
+CalDAV, so the plugin never modifies anyone else's event.
 
 ### Tasks, properly
 
@@ -120,10 +136,21 @@ The page keeps a mark so the writing shows it became a task: a **box** around th
 **marker-pen wash** in a colour you choose. **Completing the task removes the mark again.**
 Every part is off-switchable, because it writes into your own note.
 
-The task remembers where it came from: a `↩ page` chip closes the plugin and reopens that
-note at that page. Tapping the box on the page shows the Task Hub logo — the SDK's link types
-are pages, files, documents, images and URLs, none of which can reach a plugin, and the image
-says so rather than leaving you wondering.
+### Jump straight back to the page a task came from
+
+A task captured from handwriting remembers **which note and which page** it was written on,
+and every place it appears carries a **`↩ page` chip** — the task list, the day view and the
+week view. One tap closes the plugin and opens **that note at that exact page**, so the
+context behind a one-line task is never more than a tap away. Coming back lands you where you
+were, because leaving is bookmarked.
+
+The path and page number ride along on the task itself as `X-TASKHUB-SOURCE` and
+`X-TASKHUB-SOURCE-PAGE`, so the link survives a sync and is still there on the next device
+that reads the list.
+
+The reverse trip is the one thing that cannot work. Tapping the box on the page shows the Task
+Hub logo — the SDK's link types are pages, files, documents, images and URLs, none of which
+can reach a plugin, and the image says so rather than leaving you wondering.
 
 ### Built for e-ink
 
