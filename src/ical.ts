@@ -7,6 +7,8 @@
  * this module SDK-free is what lets the formatting logic be unit-tested off-device.
  */
 
+import {parsePriority} from './priority';
+
 // Hermes has no global btoa, and RN does not polyfill it. Basic auth needs one.
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
@@ -129,6 +131,30 @@ export interface VTodo {
   /** Note this task was captured from, when it came from a lasso on device. */
   sourcePath?: string;
   sourcePage?: number;
+  /**
+   * UID of the task this one is a step of, from RELATED-TO;RELTYPE=PARENT.
+   *
+   * A component may carry several RELATED-TO lines with different relationship
+   * types — PARENT, CHILD and SIBLING are all legal — so the first one is not
+   * necessarily the parent. An absent RELTYPE means PARENT by RFC 5545, which
+   * is why that is the default rather than a reason to skip the line.
+   */
+  parentUid?: string;
+  /**
+   * RFC 5545 PRIORITY, 0–9, absent when the task carries no such line.
+   *
+   * Stored as the raw number rather than as a band so an edit that does not
+   * touch importance writes back exactly what another client set. See
+   * `priority.ts` for how the number becomes something a person can read.
+   */
+  priority?: number;
+  /**
+   * The RRULE value as stored, without the property name — e.g. `FREQ=WEEKLY`.
+   *
+   * Kept verbatim rather than reduced to one of the picker's choices, so a rule
+   * this plugin cannot name survives an edit untouched. See `recurrence.ts`.
+   */
+  rrule?: string;
   /** Task Hub's X-TASKHUB-ORIGIN, absent when another client wrote the item. */
   origin?: string;
   /** Optional human-readable account label, X-TASKHUB-ORIGIN-NAME. */
@@ -214,6 +240,9 @@ export function parseVTodos(text: string): VTodo[] {
           startAt: current.startAt ?? null,
           status: completed ? 'COMPLETED' : status,
           completed,
+          parentUid: current.parentUid,
+          priority: current.priority,
+          rrule: current.rrule,
           sourcePath: current.sourcePath,
           sourcePage: current.sourcePage,
           origin: current.origin,
@@ -246,6 +275,26 @@ export function parseVTodos(text: string): VTodo[] {
         break;
       case 'DESCRIPTION':
         current.description = unescapeText(value);
+        break;
+      case 'RELATED-TO': {
+        // Only a parent relationship makes this task a step of another. Taking
+        // any RELATED-TO would hang tasks off their own siblings.
+        const reltype = params
+          .map(p => /^RELTYPE=(.*)$/i.exec(p.trim()))
+          .find(Boolean)?.[1];
+        if (!reltype || reltype.trim().toUpperCase() === 'PARENT') {
+          const parent = value.trim();
+          if (parent) {
+            current.parentUid = parent;
+          }
+        }
+        break;
+      }
+      case 'PRIORITY':
+        current.priority = parsePriority(value);
+        break;
+      case 'RRULE':
+        current.rrule = value.trim();
         break;
       case 'STATUS':
         current.status = value.trim().toUpperCase();
@@ -346,6 +395,8 @@ export interface VEvent {
   allDay: boolean;
   /** True when the event carries an RRULE, i.e. it repeats. */
   recurring: boolean;
+  /** The RRULE value as stored, without the property name. See `recurrence.ts`. */
+  rrule?: string;
   origin?: string;
   originName?: string;
 }
@@ -416,6 +467,7 @@ export function parseVEvents(text: string): VEvent[] {
           startAt: current.startAt ?? 0,
           allDay: current.allDay ?? false,
           recurring: current.recurring ?? false,
+          rrule: current.rrule,
           origin: current.origin,
           originName: current.originName,
         });
@@ -451,9 +503,11 @@ export function parseVEvents(text: string): VEvent[] {
         current.location = unescapeText(value);
         break;
       case 'RRULE':
-        // Presence is all that matters here: a repeating event shares one note
-        // across occurrences, a one-off gets its date in the filename.
+        // Presence decides how notes are filed — a repeating event shares one
+        // note across occurrences, a one-off gets its date in the filename —
+        // and the rule itself is kept so the editor can show and preserve it.
         current.recurring = value.trim().length > 0;
+        current.rrule = value.trim();
         break;
       case 'X-TASKHUB-ORIGIN':
         current.origin = value.trim().toLowerCase();
@@ -496,6 +550,12 @@ export interface EventDraft {
   /** Local 'HH:MM'. Omitted makes the event all-day. */
   startTime?: string;
   endTime?: string;
+  /**
+   * The RRULE to write, without the property name. Same three states as
+   * `TaskEdit.rrule`: `undefined` leaves a stored rule alone, `''` removes it,
+   * a value replaces it.
+   */
+  rrule?: string;
 }
 
 /** DTSTART/DTEND line, mirroring buildDue's date-vs-instant handling. */
@@ -545,6 +605,9 @@ export function buildVEvent(draft: EventDraft, now: Date = new Date()): string {
   if (draft.location) {
     lines.push(`LOCATION:${escapeText(draft.location)}`);
   }
+  if (draft.rrule) {
+    lines.push(`RRULE:${draft.rrule}`);
+  }
 
   lines.push('END:VEVENT', 'END:VCALENDAR');
   return lines.map(fold).join('\r\n') + '\r\n';
@@ -558,6 +621,11 @@ export function updateVEvent(
 ): string {
   const stamp = utcStamp(now);
   const drop = /^(SUMMARY|DESCRIPTION|LOCATION|DTSTART|DTEND|DTSTAMP|LAST-MODIFIED)[;:]/i;
+  // As in updateVTodo: an undefined rrule leaves the stored rule untouched, so
+  // a rule the picker reports as custom is never rewritten by an edit that was
+  // only meant to change the title.
+  const touchesRepeat = draft.rrule !== undefined;
+  const dropRule = /^RRULE[;:]/i;
 
   const lines = unfold(raw)
     .split(/\r?\n/)
@@ -589,11 +657,17 @@ export function updateVEvent(
       if (draft.location) {
         out.push(`LOCATION:${escapeText(draft.location)}`);
       }
+      if (touchesRepeat && draft.rrule) {
+        out.push(`RRULE:${draft.rrule}`);
+      }
       out.push(`DTSTAMP:${stamp}`, `LAST-MODIFIED:${stamp}`, line);
       inside = false;
       continue;
     }
     if (inside && drop.test(line)) {
+      continue;
+    }
+    if (inside && touchesRepeat && dropRule.test(line)) {
       continue;
     }
     out.push(line);
@@ -711,6 +785,20 @@ export interface TaskEdit {
   description?: string;
   dueDate?: string;
   dueTime?: string;
+  /**
+   * RFC 5545 PRIORITY to write, 0–9. 0 or absent removes the property, which is
+   * what "None" means — an explicit PRIORITY:0 is legal but says the same thing
+   * more obscurely.
+   */
+  priority?: number;
+  /**
+   * The RRULE to write, without the property name.
+   *
+   * Three states, and the difference matters: `undefined` leaves whatever rule
+   * is already stored exactly as it is — which is what a rule this plugin cannot
+   * name must get — `''` removes the rule, and a value replaces it.
+   */
+  rrule?: string;
 }
 
 /**
@@ -723,8 +811,13 @@ export interface TaskEdit {
  */
 export function updateVTodo(raw: string, edit: TaskEdit, now: Date = new Date()): string {
   const stamp = utcStamp(now);
-  const drop = /^(SUMMARY|DESCRIPTION|DUE)[;:]/i;
+  const drop = /^(SUMMARY|DESCRIPTION|DUE|PRIORITY)[;:]/i;
   const dropStamp = /^(LAST-MODIFIED|DTSTAMP):/i;
+  // Only removed when the caller has something to say about it. An undefined
+  // rrule means "leave the stored rule alone", which is how a custom rule this
+  // plugin cannot name survives being edited here.
+  const touchesRepeat = edit.rrule !== undefined;
+  const dropRule = /^RRULE[;:]/i;
 
   const lines = unfold(raw)
     .split(/\r?\n/)
@@ -747,11 +840,22 @@ export function updateVTodo(raw: string, edit: TaskEdit, now: Date = new Date())
       if (due) {
         out.push(due);
       }
+      // Written only when there is one. Choosing "None" drops the line, and the
+      // old value went with the rest of the edited properties above.
+      if (edit.priority && edit.priority > 0) {
+        out.push(`PRIORITY:${Math.round(edit.priority)}`);
+      }
+      if (touchesRepeat && edit.rrule) {
+        out.push(`RRULE:${edit.rrule}`);
+      }
       out.push(`DTSTAMP:${stamp}`, `LAST-MODIFIED:${stamp}`, line);
       insideTodo = false;
       continue;
     }
     if (insideTodo && (drop.test(line) || dropStamp.test(line))) {
+      continue;
+    }
+    if (insideTodo && touchesRepeat && dropRule.test(line)) {
       continue;
     }
     out.push(line);
@@ -772,6 +876,16 @@ export interface TaskDraft {
   dueDate?: string;
   /** Local wall-clock time, 'HH:MM'. Ignored unless dueDate is set. */
   dueTime?: string;
+  /** RFC 5545 PRIORITY, 0–9. Omitted or 0 writes no PRIORITY line at all. */
+  priority?: number;
+  /** RRULE without the property name, e.g. `FREQ=WEEKLY`. Omitted writes none. */
+  rrule?: string;
+  /**
+   * UID of the task this one is a step of. Written as
+   * `RELATED-TO;RELTYPE=PARENT`, the same property Task Hub writes, so a step
+   * created here nests in the web view too.
+   */
+  parentUid?: string;
 }
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -858,6 +972,18 @@ export function buildVTodo(task: TaskDraft, now: Date = new Date()): string {
   if (due) {
     lines.push(due);
   }
+  if (task.priority && task.priority > 0) {
+    lines.push(`PRIORITY:${Math.round(task.priority)}`);
+  }
+  if (task.rrule) {
+    lines.push(`RRULE:${task.rrule}`);
+  }
+  // RELTYPE is written explicitly even though PARENT is the RFC 5545 default:
+  // a reader that assumes a different default would otherwise hang this task
+  // off the wrong end of the relationship.
+  if (task.parentUid) {
+    lines.push(`RELATED-TO;RELTYPE=PARENT:${task.parentUid}`);
+  }
   if (task.sourcePath) {
     lines.push(`${SOURCE_PROPERTY}:${escapeText(task.sourcePath)}`);
     if (task.sourcePage !== undefined) {
@@ -869,4 +995,48 @@ export function buildVTodo(task: TaskDraft, now: Date = new Date()): string {
 
   // iCalendar requires CRLF line endings; Radicale rejects bare LF.
   return lines.map(fold).join('\r\n') + '\r\n';
+}
+
+/** One step to create: its title, and a date if the line named one. */
+export interface StepDraft {
+  summary: string;
+  dueDate?: string;
+}
+
+/**
+ * Read the steps box into a list of steps, with dates.
+ *
+ * One step per line, with a leading "-" or "*" stripped so a list written or
+ * pasted as bullets does not arrive with the bullet in its title.
+ *
+ * A line may end with a date, written as `@YYYY-MM-DD`, which becomes that
+ * step's due date:
+ *
+ *     Draft the release notes @2026-09-10
+ *     Bump the version
+ *
+ * ISO order rather than the user's display format, deliberately: this text is
+ * typed, and 03/04 is a different day depending on where you learned to write
+ * dates. A line whose trailing @… is not a real date keeps it as part of the
+ * title rather than silently dropping it — somebody writing "email @dave" meant
+ * the words.
+ *
+ * Steps that name no date fall back to whatever the caller passes, which is
+ * normally the parent task's own due date.
+ */
+export function parseSteps(text: string): StepDraft[] {
+  const out: StepDraft[] = [];
+  for (const raw of (text || '').split(/\r?\n/)) {
+    const line = raw.trim().replace(/^[-*]+/, '').trim();
+    if (!line) {
+      continue;
+    }
+    const dated = /^(.*?)\s+@(\d{4}-\d{2}-\d{2})$/.exec(line);
+    if (dated && isValidDate(dated[2]) && dated[1].trim()) {
+      out.push({summary: dated[1].trim(), dueDate: dated[2]});
+    } else {
+      out.push({summary: line});
+    }
+  }
+  return out;
 }

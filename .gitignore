@@ -85,6 +85,7 @@ android/app/.cxx/
 
 # Vendor build script backup, kept locally for diffing the patch.
 buildPlugin.ps1.orig
+buildPlugin.sh.orig
 
 # Local editor / tooling config
 .mcp.json
