@@ -61,6 +61,8 @@ import {
   StatusLine,
   Tabs,
   TaskRow,
+  SCREEN_HEIGHT,
+  UI_SCALE,
   styles,
   type Status,
 } from './src/components/common';
@@ -153,6 +155,7 @@ import {
 import {
   createDailyNote,
   createMeetingNote,
+  deviceName,
   findExistingNotes,
   findPeriodNotes,
   createPeriodNote,
@@ -318,6 +321,11 @@ export default function App(): React.JSX.Element {
    * a step should not appear expanded because nobody had folded it yet.
    */
   const [openSteps, setOpenSteps] = useState<Set<string>>(new Set());
+  /**
+   * Whether the month view's task list is open. Folded by default: the grid is
+   * the point of that screen, and a day's tasks are a detail below it.
+   */
+  const [monthTasksOpen, setMonthTasksOpen] = useState(false);
   const toggleSteps = useCallback((uid: string) => {
     setOpenSteps(previous => {
       const next = new Set(previous);
@@ -333,6 +341,8 @@ export default function App(): React.JSX.Element {
   const [ask, setAsk] = useState<Ask | null>(null);
   const [loading, setLoading] = useState(false);
   const [storePath, setStorePath] = useState<string | null>(null);
+  /** The device's own name, shown in settings beside how the layout is scaled. */
+  const [device, setDevice] = useState<string | null>(null);
   const [noteFiles, setNoteFiles] = useState<string[]>([]);
   /**
    * Note paths under each period's own root. Separate from `noteFiles` because
@@ -798,6 +808,7 @@ export default function App(): React.JSX.Element {
         void refresh();
       }
       setStorePath(await settingsLocation());
+      setDevice(await deviceName());
     })();
   }, [restored, screen, refresh]);
 
@@ -2425,18 +2436,39 @@ will not duplicate them.`}
                       </Pressable>
                     </View>
                   ))}
-                  {dayTasks.map(task => (
-                    <TaskRow
-                      key={task.uid}
-                      task={task}
-                      dateFormat={dateFormat}
-                      timeFormat={timeFormat}
-                      listLabel={task.collectionLabel}
-                      onToggle={() => askComplete(task)}
-                      onEdit={() => openTaskEditor(task)}
-                      onOpenSource={() => openSource(task)}
-                    />
-                  ))}
+                  {/*
+                    Folded away by default, and in the same tight type as the
+                    events above. A month grid plus a full-size task list pushed
+                    everything that matters off the bottom of the panel; the
+                    count says whether opening it is worth the tap.
+                  */}
+                  {dayTasks.length > 0 && (
+                    <>
+                      <Pressable
+                        style={styles.monthTasksHead}
+                        onPress={() => setMonthTasksOpen(v => !v)}
+                        hitSlop={8}>
+                        <Text style={styles.monthTasksHeadText}>
+                          {monthTasksOpen ? '▾' : '▸'} Tasks ({dayTasks.length})
+                        </Text>
+                      </Pressable>
+                      {monthTasksOpen &&
+                        dayTasks.map(task => (
+                          <Pressable
+                            key={task.uid}
+                            style={styles.agendaItemTight}
+                            onPress={() => openTaskEditor(task)}>
+                            <Text style={styles.agendaTitleTight}>
+                              {task.completed ? '☑' : '☐'} {task.summary}
+                            </Text>
+                            <Text style={styles.agendaMetaTight}>
+                              {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} · ` : ''}
+                              {task.collectionLabel}
+                            </Text>
+                          </Pressable>
+                        ))}
+                    </>
+                  )}
                 </>
               )}
 
@@ -2519,6 +2551,7 @@ will not duplicate them.`}
           onDiscover={() => void discover()}
           onSave={saveSettingsAndExit}
           onCancel={cancelSettings}
+          device={device}
           dirty={settingsDirty}
           onWipe={askWipe}
           storePath={storePath}
@@ -2750,6 +2783,8 @@ function SettingsScreen(props: {
   dirty: boolean;
   /** Leave without saving, after confirming. */
   onCancel: () => void;
+  /** The device's own name, or null when the host does not report one. */
+  device: string | null;
   onWipe: () => void;
   onClose: () => void;
 }): React.JSX.Element {
@@ -2791,6 +2826,7 @@ function SettingsScreen(props: {
     onSave,
     dirty,
     onCancel,
+    device,
     onWipe,
     onClose,
   } = props;
@@ -3279,6 +3315,24 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         */}
         <Button label="Cancel setup" onPress={onCancel} />
       </View>
+
+      <Fold
+        title="This device"
+        hint={'What the plugin has detected, and how it has sized itself to suit.'}
+        open={openFolds.has('device')}
+        onToggle={() => toggleFold('device')}>
+        <Text style={styles.noteCompact}>
+          {`Model: ${device ?? 'not reported by the host'}
+Panel height: ${Math.round(SCREEN_HEIGHT)}
+Text scale: ${Math.round(UI_SCALE * 100)}%`}
+        </Text>
+        <Text style={styles.noteCompact}>
+          Type is scaled from the height the panel reports, so a smaller device such as the
+          Nomad fits the same amount on screen instead of needing more scrolling. Borders and
+          the controls you tap are left at full size — a shrunken fold arrow is harder to hit,
+          which would be the opposite of the point.
+        </Text>
+      </Fold>
 
       <Fold
         title="Storage and starting over"

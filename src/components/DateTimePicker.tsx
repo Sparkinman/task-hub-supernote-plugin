@@ -13,6 +13,7 @@ import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 
 import {MONTHS, WEEKDAYS, chunkWeeks, monthGrid, shiftMonth} from '../calendar';
 import {formatTime, type TimeFormat} from '../format';
+import {fs} from './common';
 import {toDateInput} from '../ical';
 
 interface Props {
@@ -365,41 +366,41 @@ const styles = StyleSheet.create({
   wrap: {borderWidth: 1, borderColor: '#000', padding: 10, marginBottom: 12},
   quickRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10},
   chip: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 12, paddingVertical: 7},
-  chipText: {fontSize: 21, color: '#000'},
+  chipText: {fontSize: fs(21), color: '#000'},
   monthRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
   nav: {paddingHorizontal: 16, paddingVertical: 6, borderWidth: 1, borderColor: '#000'},
-  navText: {fontSize: 30, color: '#000', lineHeight: 33},
-  monthLabel: {fontSize: 24, fontWeight: '700', color: '#000'},
+  navText: {fontSize: fs(30), color: '#000', lineHeight: fs(33)},
+  monthLabel: {fontSize: fs(24), fontWeight: '700', color: '#000'},
   week: {flexDirection: 'row', marginTop: 4},
-  weekday: {flex: 1, textAlign: 'center', fontSize: 18, color: '#555', paddingVertical: 4},
+  weekday: {flex: 1, textAlign: 'center', fontSize: fs(18), color: '#555', paddingVertical: 4},
   // Tall cells: a finger on e-ink needs a bigger target than a mouse does.
   cell: {flex: 1, height: 40, alignItems: 'center', justifyContent: 'center', margin: 1},
   cellOn: {borderWidth: 1, borderColor: '#999'},
   cellSelected: {backgroundColor: '#000', borderColor: '#000'},
-  cellText: {fontSize: 22, color: '#000'},
+  cellText: {fontSize: fs(22), color: '#000'},
   cellTextSelected: {color: '#fff', fontWeight: '700'},
   cellTextToday: {fontWeight: '700', textDecorationLine: 'underline'},
   timeBlock: {marginTop: 14, borderTopWidth: 1, borderTopColor: '#999', paddingTop: 10},
-  timeLabel: {fontSize: 21, color: '#000', marginBottom: 6},
+  timeLabel: {fontSize: fs(21), color: '#000', marginBottom: 6},
   timeControls: {flexDirection: 'row', alignItems: 'center', gap: 10},
   spinner: {alignItems: 'center'},
-  spinnerCaption: {fontSize: 15, color: '#777', marginVertical: 1},
+  spinnerCaption: {fontSize: fs(15), color: '#777', marginVertical: 1},
   arrow: {paddingHorizontal: 10, paddingVertical: 2},
-  arrowText: {fontSize: 22, color: '#000', lineHeight: 26},
+  arrowText: {fontSize: fs(22), color: '#000', lineHeight: fs(26)},
   timeInput: {
     borderWidth: 2,
     borderColor: '#000',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    fontSize: 36,
+    fontSize: fs(36),
     fontWeight: '700',
     color: '#000',
     minWidth: 156,
     textAlign: 'center',
   },
   timeAside: {flex: 1},
-  timePreview: {fontSize: 21, color: '#000', fontWeight: '700'},
-  clearLink: {fontSize: 18, color: '#555', textDecorationLine: 'underline', marginTop: 3},
+  timePreview: {fontSize: fs(21), color: '#000', fontWeight: '700'},
+  clearLink: {fontSize: fs(18), color: '#555', textDecorationLine: 'underline', marginTop: 3},
   addTime: {
     borderWidth: 1,
     borderColor: '#000',
@@ -408,5 +409,5 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     alignSelf: 'flex-start',
   },
-  addTimeText: {fontSize: 21, color: '#000'},
+  addTimeText: {fontSize: fs(21), color: '#000'},
 });

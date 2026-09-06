@@ -1,4 +1,4 @@
-import {PluginCommAPI, PluginFileAPI} from 'sn-plugin-lib';
+import {PluginCommAPI, PluginFileAPI, PluginManager} from 'sn-plugin-lib';
 
 import {dailyNotePath, parentDir, type DailyNoteConfig} from './dailynote';
 import {periodNotePath, type Period, type PeriodNoteConfig} from './periodnote';
@@ -368,4 +368,29 @@ export async function openDailyNote(
   await openNote(relative);
 }
 
+/** Device models, as PointUtils numbers them. */
+const MACHINE_NAMES: Record<number, string> = {
+  0: 'A5',
+  1: 'A6',
+  2: 'A6X',
+  3: 'A5X',
+  4: 'Nomad',
+  5: 'Manta',
+};
 
+/**
+ * Which Supernote this is, by name, or null when the host will not say.
+ *
+ * Read for display only. The interface scales from the height the window
+ * reports rather than from this: that number is available synchronously, when
+ * the stylesheet is built, and this is not.
+ */
+export async function deviceName(): Promise<string | null> {
+  try {
+    const type = await PluginManager.getDeviceType();
+    const value = typeof type === 'number' ? type : (type as {result?: number})?.result;
+    return typeof value === 'number' ? (MACHINE_NAMES[value] ?? `type ${value}`) : null;
+  } catch {
+    return null;
+  }
+}
