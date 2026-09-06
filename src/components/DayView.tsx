@@ -7,7 +7,7 @@
  * be clipped instead of pushing the row taller.
  */
 
-import React from 'react';
+import React, {useState} from 'react';
 import {Pressable, Text, View} from 'react-native';
 
 import {eventsOnDay, taskSpan, tasksOnDay, tasksRunningOn} from '../agenda';
@@ -16,7 +16,7 @@ import {WEEKDAYS_SHORT} from '../calendar';
 import {formatDate, formatTime, type DateFormat, type TimeFormat} from '../format';
 import {toDateInput} from '../ical';
 import type {RemoteEvent, RemoteTask} from '../tasks';
-import {styles} from './common';
+import {SCREEN_HEIGHT, styles} from './common';
 
 /**
  * The hours the grid shows, from the user's chosen window.
@@ -121,6 +121,9 @@ function DayViewImpl(props: {
   // fold arrow. A family is shown when the parent OR any of its steps falls on
   // this day, and opening it then reveals every step — including the ones due
   // another day, which is usually the point of opening it.
+  /** How tall to make the agenda block, once we know where it begins. */
+  const [fillHeight, setFillHeight] = useState<number | null>(null);
+
   const dueToday = new Set(tasksOnDay(openTasks, day).map(t => t.uid));
   const families = arrange(openTasks, 'due-asc');
   const familyOf = (row: (typeof families)[number]) =>
@@ -180,7 +183,22 @@ function DayViewImpl(props: {
         </View>
       )}
 
-      <View style={styles.dayWrap}>
+      {/*
+        Measured rather than guessed. The block used to take a fixed fraction of
+        the panel, which left a Manta with a hand's width of blank page under it
+        and would have overshot on a smaller one. Measuring where the block
+        actually starts and filling the rest of the window works on any panel,
+        and costs one layout pass.
+      */}
+      <View
+        style={[styles.dayWrap, fillHeight !== null && {minHeight: fillHeight}]}
+        onLayout={event => {
+          const {y} = event.nativeEvent.layout;
+          // A little breathing room at the foot, and never so small that the
+          // grid collapses if the measurement is odd.
+          const next = Math.max(320, Math.round(SCREEN_HEIGHT - y - 24));
+          setFillHeight(previous => (previous === next ? previous : next));
+        }}>
       <View style={styles.dayGrid}>
         {allDay.length > 0 && (
           <View style={styles.hourRow}>

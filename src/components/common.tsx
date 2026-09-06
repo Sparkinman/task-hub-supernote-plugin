@@ -677,8 +677,22 @@ export const SCREEN_HEIGHT = Dimensions.get('window').height || 1872;
  * comfortable to read on e-ink, and unreadable text is a worse problem than
  * scrolling.
  */
-const SCALE_REFERENCE = 1850;
-export const UI_SCALE = Math.max(0.8, Math.min(1, SCREEN_HEIGHT / SCALE_REFERENCE));
+/**
+ * The height the type sizes were chosen against: a Manta, the largest panel.
+ *
+ * This was 1850 in the first attempt, which was the mistake — a Manta reports
+ * about 2560 and a Nomad about 1872, so BOTH divided out above 1 and clamped to
+ * full size. Nothing scaled anywhere. The reference has to be the big panel for
+ * the smaller ones to come out below it.
+ */
+const SCALE_REFERENCE = 2560;
+
+/**
+ * Floor at 0.72 rather than 0.8: a Nomad works out at roughly 0.73 against a
+ * Manta, and clamping that back up to 0.8 would throw away most of the
+ * correction it needs.
+ */
+export const UI_SCALE = Math.max(0.72, Math.min(1, SCREEN_HEIGHT / SCALE_REFERENCE));
 
 /**
  * A font size, scaled for this panel.
@@ -1140,7 +1154,9 @@ export const styles = StyleSheet.create({
   // fills the page. Without it a day set to run 9 to 5 drew eight rows and
   // stopped, leaving the divider between the grid and the tasks as a stub a
   // third of the way down.
-  dayWrap: {flexDirection: 'row', gap: 12, minHeight: Math.round(SCREEN_HEIGHT * 0.66)},
+  // The minimum is a floor for the first render only; DayView measures where
+  // the block actually starts and fills the rest of the window from there.
+  dayWrap: {flexDirection: 'row', gap: 12, minHeight: Math.round(SCREEN_HEIGHT * 0.5)},
   dayGrid: {flex: 3},
   // Hour rows share out whatever height is left over, so the grid spans the
   // block however many hours are in it.
