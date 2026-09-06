@@ -12,18 +12,23 @@ import {Pressable, Text, View} from 'react-native';
 
 import type {DayMarks} from '../agenda';
 import {MONTHS, WEEKDAYS, chunkWeeks, monthGrid, shiftMonth} from '../calendar';
+import {weekNumber} from '../periodnote';
 import {toDateInput} from '../ical';
 import {styles} from './common';
 
-export function MonthView(props: {
+function MonthViewImpl(props: {
   year: number;
   month: number;
   selected: string;
   marks: Record<string, DayMarks>;
   onSelect: (iso: string) => void;
   onMonth: (year: number, month: number) => void;
+  /** Which weeks already have a weekly note, keyed by the week's Sunday. */
+  weekNotes: Set<string>;
+  /** Opens or creates the weekly note for the week whose number was tapped. */
+  onWeekNote: (iso: string, exists: boolean) => void;
 }): React.JSX.Element {
-  const {year, month, selected, marks, onSelect, onMonth} = props;
+  const {year, month, selected, marks, onSelect, onMonth, weekNotes, onWeekNote} = props;
   const today = toDateInput(new Date());
   const weeks = chunkWeeks(monthGrid(year, month));
 
@@ -52,6 +57,8 @@ export function MonthView(props: {
       </View>
 
       <View style={styles.week}>
+        {/* Gutter head, keeping the weekday letters over their own columns. */}
+        <Text style={styles.monthWeekNumHead}>Wk</Text>
         {WEEKDAYS.map((d, i) => (
           <Text key={i} style={styles.weekday}>
             {d}
@@ -59,8 +66,26 @@ export function MonthView(props: {
         ))}
       </View>
 
-      {weeks.map((row, i) => (
+      {weeks.map((row, i) => {
+        const firstReal = row.find(c => c.iso);
+        const weekStart = firstReal?.iso ?? '';
+        const hasWeekNote = !!weekStart && weekNotes.has(weekStartOf(weekStart));
+        return (
         <View key={i} style={styles.week}>
+          {/*
+            The week number, tappable: it opens that week's note, or offers to
+            make one. A weekly note is otherwise only reachable by switching to
+            the week view first, which is a lot of taps for something the month
+            grid is already showing you the week of.
+          */}
+          <Pressable
+            style={styles.monthWeekNum}
+            disabled={!weekStart}
+            onPress={() => weekStart && onWeekNote(weekStart, hasWeekNote)}>
+            <Text style={[styles.monthWeekNumText, hasWeekNote && styles.monthWeekNumHas]}>
+              {weekStart ? weekNumber(weekStart) : ''}
+            </Text>
+          </Pressable>
           {row.map((cell, j) => {
             if (!cell.iso) {
               return <View key={j} style={styles.dayCell} />;
@@ -85,7 +110,22 @@ export function MonthView(props: {
             );
           })}
         </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
+
+/** The Sunday a day belongs to, matching how weekly notes are keyed. */
+function weekStartOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() - d.getDay());
+  return toDateInput(d);
+}
+
+/**
+ * Memoised. These grids are pure functions of their props, and on an e-ink panel
+ * an avoidable re-render is an avoidable full-panel repaint — the calendar was
+ * rebuilding every view on any state change anywhere in the app.
+ */
+export const MonthView = React.memo(MonthViewImpl);

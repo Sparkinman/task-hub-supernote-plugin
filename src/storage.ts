@@ -2,8 +2,15 @@ import {NativeModules} from 'react-native';
 
 import {ensureFileAccess} from './permissions';
 import {EMPTY_CONFIG, type RadicaleConfig} from './settings';
-import {isMarkStyle} from './markstyle';
+import {isMarkStyle, isShadeColor} from './markstyle';
 import {DEFAULT_DAILY_NOTE, type DailyNoteConfig} from './dailynote';
+import {
+  DEFAULT_MONTH_NOTE,
+  DEFAULT_QUARTER_NOTE,
+  DEFAULT_WEEK_NOTE,
+  DEFAULT_YEAR_NOTE,
+  type PeriodNoteConfig,
+} from './periodnote';
 import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from './meetingnote';
 
 /**
@@ -22,6 +29,8 @@ interface SettingsStore {
   externalRoot(): Promise<string>;
   makeDirs(relativePath: string): Promise<boolean>;
   listNotes(relativeRoot: string): Promise<string[]>;
+  listFiles?(relativeRoot: string, suffixes: string): Promise<string[]>;
+  listFilesHere?(relativePath: string, suffixes: string): Promise<string[]>;
   listDirs(relativePath: string): Promise<string[]>;
   writeLinkImage(relativePath: string, base64: string, caption: string): Promise<string>;
 }
@@ -83,11 +92,38 @@ export function sanitise(raw: unknown): Partial<RadicaleConfig> {
     timeFormat: value.timeFormat === '12' || value.timeFormat === '24' ? value.timeFormat : undefined,
     markStyle: isMarkStyle(value.markStyle) ? value.markStyle : undefined,
     markShade: typeof value.markShade === 'boolean' ? value.markShade : undefined,
+    markShadeColor: isShadeColor(value.markShadeColor)
+      ? (value.markShadeColor as string)
+      : undefined,
     markLabel: typeof value.markLabel === 'boolean' ? value.markLabel : undefined,
     dailyNote: sanitiseDailyNote(value.dailyNote),
+    // A settings file written before these existed simply has no such key, and
+    // each falls back to its own default rather than to the daily note's.
+    weekNote: sanitisePeriodNote(value.weekNote, DEFAULT_WEEK_NOTE),
+    monthNote: sanitisePeriodNote(value.monthNote, DEFAULT_MONTH_NOTE),
+    quarterNote: sanitisePeriodNote(value.quarterNote, DEFAULT_QUARTER_NOTE),
+    yearNote: sanitisePeriodNote(value.yearNote, DEFAULT_YEAR_NOTE),
     meetingNote: sanitiseMeetingNote(value.meetingNote),
     meetingLinks: sanitiseLinks(value.meetingLinks),
+    lastDay:
+      typeof value.lastDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.lastDay)
+        ? value.lastDay
+        : undefined,
   });
+}
+
+/** Same rules as a daily note, against whichever period's defaults apply. */
+function sanitisePeriodNote(raw: unknown, fallback: PeriodNoteConfig): PeriodNoteConfig {
+  if (typeof raw !== 'object' || raw === null) {
+    return {...fallback};
+  }
+  const value = raw as Partial<PeriodNoteConfig>;
+  return {
+    root: typeof value.root === 'string' && value.root.trim() ? value.root : fallback.root,
+    layout:
+      typeof value.layout === 'string' && value.layout.trim() ? value.layout : fallback.layout,
+    template: typeof value.template === 'string' ? value.template : '',
+  };
 }
 
 function sanitiseDailyNote(raw: unknown): DailyNoteConfig {
@@ -166,6 +202,53 @@ export async function listDirs(relativePath: string): Promise<string[]> {
 }
 
 /** Every .note under the daily-note root, relative to shared storage. */
+/**
+ * Files under a folder with any of the given extensions.
+ *
+ * Separate from `listNotes`, which only reports `.note` files — the templates a
+ * user keeps in MyStyle are images, and were invisible to it.
+ *
+ * Optional on the native side: a build without the method simply reports
+ * nothing, so an older app.npk degrades to the built-in templates rather than
+ * failing to open the settings screen.
+ */
+export async function listFiles(
+  relativeRoot: string,
+  suffixes: string[],
+): Promise<string[]> {
+  if (!store?.listFiles || !relativeRoot) {
+    return [];
+  }
+  try {
+    await ensureFileAccess();
+    return await store.listFiles(relativeRoot, suffixes.join(','));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Matching files in one directory, not descending into it.
+ *
+ * For the template picker's file browser, which shows a directory at a time
+ * beside `listDirs`. Optional on the native side for the same reason as
+ * `listFiles`: an older app.npk reports nothing rather than failing.
+ */
+export async function listFilesHere(
+  relativePath: string,
+  suffixes: string[],
+): Promise<string[]> {
+  if (!store?.listFilesHere) {
+    return [];
+  }
+  try {
+    await ensureFileAccess();
+    return await store.listFilesHere(relativePath, suffixes.join(','));
+  } catch {
+    return [];
+  }
+}
+
 export async function listNotes(relativeRoot: string): Promise<string[]> {
   if (!store || !relativeRoot) {
     return [];

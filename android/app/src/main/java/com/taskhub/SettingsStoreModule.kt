@@ -147,24 +147,35 @@ class SettingsStoreModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  /** Greedy word wrap, so a longer caption does not run off the canvas. */
+  /**
+   * Greedy word wrap that also honours explicit newlines.
+   *
+   * Newlines matter now that the caption has two parts — what to do, and why the
+   * link cannot do more than this. Splitting on them first keeps that break
+   * where it was written instead of running the two together into one
+   * paragraph.
+   */
   private fun wrap(text: String, paint: Paint, maxWidth: Float): List<String> {
-    val words = text.split(" ").filter { it.isNotEmpty() }
-    if (words.isEmpty()) {
-      return emptyList()
-    }
     val lines = mutableListOf<String>()
-    var line = StringBuilder(words.first())
-    for (word in words.drop(1)) {
-      val candidate = line.toString() + " " + word
-      if (paint.measureText(candidate) <= maxWidth) {
-        line = StringBuilder(candidate)
-      } else {
-        lines.add(line.toString())
-        line = StringBuilder(word)
+    for (paragraph in text.split("\n")) {
+      val words = paragraph.split(" ").filter { it.isNotEmpty() }
+      if (words.isEmpty()) {
+        // A blank line in the caption is a deliberate gap; keep it.
+        lines.add("")
+        continue
       }
+      var line = StringBuilder(words.first())
+      for (word in words.drop(1)) {
+        val candidate = line.toString() + " " + word
+        if (paint.measureText(candidate) <= maxWidth) {
+          line = StringBuilder(candidate)
+        } else {
+          lines.add(line.toString())
+          line = StringBuilder(word)
+        }
+      }
+      lines.add(line.toString())
     }
-    lines.add(line.toString())
     return lines
   }
 
@@ -214,6 +225,83 @@ class SettingsStoreModule(reactContext: ReactApplicationContext) :
       promise.resolve(out)
     } catch (e: Exception) {
       promise.reject("LIST_DIRS_FAILED", e.message ?: "Could not list folders", e)
+    }
+  }
+
+  /**
+   * The matching files in ONE directory, without descending into it.
+   *
+   * `listFiles` walks a whole tree, which is right for finding every template
+   * under MyStyle but wrong for browsing: a file browser shows one directory at
+   * a time, alongside `listDirs` for the folders in it.
+   */
+  @ReactMethod
+  fun listFilesHere(relativePath: String, suffixes: String, promise: Promise) {
+    try {
+      val root = Environment.getExternalStorageDirectory()
+      val dir = if (relativePath.isBlank()) root else File(root, relativePath)
+      val out = Arguments.createArray()
+      if (!dir.isDirectory) {
+        promise.resolve(out)
+        return
+      }
+      val wanted = suffixes.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+      dir.listFiles()
+          ?.filter { file ->
+            file.isFile && !file.isHidden &&
+                (wanted.isEmpty() || wanted.any { file.name.lowercase().endsWith(it) })
+          }
+          ?.sortedBy { it.name.lowercase() }
+          ?.take(MAX_NOTES)
+          ?.forEach { out.pushString(it.name) }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("LIST_HERE_FAILED", e.message ?: "Could not list files", e)
+    }
+  }
+
+  /**
+   * Files under `relativeRoot` whose name ends with one of `suffixes`.
+   *
+   * Added for the templates the user keeps in MyStyle, which listNotes cannot
+   * see because it only reports `.note` files. Same iterative walk and the same
+   * hard cap, for the same reason: this is pointed at a directory the user
+   * chose and an unbounded recursive walk would block the bridge.
+   */
+  @ReactMethod
+  fun listFiles(relativeRoot: String, suffixes: String, promise: Promise) {
+    try {
+      val root = Environment.getExternalStorageDirectory()
+      val start = File(root, relativeRoot)
+      val out = Arguments.createArray()
+      if (!start.isDirectory) {
+        promise.resolve(out)
+        return
+      }
+
+      val wanted = suffixes.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+      val prefix = root.absolutePath.trimEnd('/') + "/"
+      var seen = 0
+      val stack = ArrayDeque(listOf(start))
+      while (stack.isNotEmpty() && seen < MAX_NOTES) {
+        val dir = stack.removeLast()
+        val children = dir.listFiles() ?: continue
+        for (child in children) {
+          if (seen >= MAX_NOTES) break
+          if (child.isDirectory) {
+            stack.addLast(child)
+          } else {
+            val name = child.name.lowercase()
+            if (wanted.isEmpty() || wanted.any { name.endsWith(it) }) {
+              out.pushString(child.absolutePath.removePrefix(prefix))
+              seen++
+            }
+          }
+        }
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("LIST_FILES_FAILED", e.message ?: "Could not list files", e)
     }
   }
 

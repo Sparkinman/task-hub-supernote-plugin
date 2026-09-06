@@ -1,6 +1,7 @@
 import {PluginCommAPI, PluginFileAPI} from 'sn-plugin-lib';
 
 import {dailyNotePath, parentDir, type DailyNoteConfig} from './dailynote';
+import {periodNotePath, type Period, type PeriodNoteConfig} from './periodnote';
 import {
   meetingNotePath,
   proposeMeetingPath,
@@ -9,7 +10,7 @@ import {
 } from './meetingnote';
 import type {VEvent} from './ical';
 import type {DateFormat} from './format';
-import {ensureDir, externalRoot, listNotes} from './storage';
+import {ensureDir, externalRoot, listFiles, listNotes} from './storage';
 
 /**
  * Daily notes: create one for a date, or open the existing one.
@@ -75,6 +76,12 @@ export interface NoteTemplate {
   /** Portrait template URI — what createNote wants when isPortrait is true. */
   vUri: string;
   hUri: string;
+  /**
+   * Set only for a user's own template from MyStyle: its path relative to
+   * shared storage. `createAt` tries this as well as the name, because which
+   * form the firmware accepts for a custom template is undocumented.
+   */
+  userPath?: string;
 }
 
 /**
@@ -97,6 +104,53 @@ export async function listSystemTemplates(): Promise<NoteTemplate[]> {
     console.log(`${TAG} getNoteSystemTemplates failed: ${String(err)}`);
     return [];
   }
+}
+
+/**
+ * Where the device keeps the templates a user has added themselves.
+ *
+ * MyStyle is the folder the Supernote uses for user content of this kind — it
+ * is also where a .snplg is dropped to install a plugin. The templates in it are
+ * images, which is why `listNotes` could never see them.
+ */
+export const MY_STYLE_ROOT = 'MyStyle';
+/**
+ * The image formats Ratta's SDK accepts as a custom template. PDF is not one of
+ * them — `insertImage` and the `Picture` type both say png, jpg and jpeg only.
+ */
+const TEMPLATE_SUFFIXES = ['.png', '.jpg', '.jpeg'];
+
+/**
+ * The user's own templates, from MyStyle, alongside the built-in ones.
+ *
+ * A custom template is offered by name, and `createAt` already tries several
+ * forms of whatever it is given — bare name, URI, path — because which one the
+ * firmware accepts is undocumented. The file path is carried in `vUri` so the
+ * picker can show a real thumbnail of a PNG template rather than a placeholder.
+ *
+ * Nothing here fails loudly: a device with no MyStyle folder, or an app.npk too
+ * old to have the native lister, simply offers the built-in templates.
+ */
+export async function listUserTemplates(): Promise<NoteTemplate[]> {
+  const files = await listFiles(MY_STYLE_ROOT, TEMPLATE_SUFFIXES);
+  const root = await externalRoot();
+  return files
+    .filter(path => !path.toLowerCase().endsWith('.snplg'))
+    .map(path => {
+      const name = path.slice(path.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '');
+      const uri = root ? `file://${root}/${path}` : '';
+      return {name, vUri: uri, hUri: uri, userPath: path};
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Built-in templates first, then the user's own from MyStyle. */
+export async function listAllTemplates(): Promise<NoteTemplate[]> {
+  const [system, user] = await Promise.all([listSystemTemplates(), listUserTemplates()]);
+  // A user template whose name collides with a built-in still appears: they are
+  // different files, and silently dropping one would be worse than two rows
+  // with the same label.
+  return [...system, ...user];
 }
 
 /** ISO days under the configured root that already have a note. */
@@ -161,13 +215,39 @@ async function createAt(relative: string, preferred: string): Promise<void> {
   await ensureDir(parentDir(relative));
   const path = await absolute(relative);
 
-  const templates = await listSystemTemplates();
+  // User templates are included in the search so a MyStyle choice is recognised
+  // and its several possible spellings are all tried, rather than falling
+  // straight through to the host default.
+  const templates = await listAllTemplates();
   const chosen = templates.find(t => t.vUri === preferred);
 
   const candidates: string[] = [];
-  if (chosen) {
+  if (chosen?.userPath) {
+    // createNote documents a custom template as "a custom template image path",
+    // so the path forms go first — the absolute one, then the one relative to
+    // shared storage. The name and URI follow only as fallbacks, since which
+    // spelling a given firmware accepts is not documented.
+    const absoluteRoot = await externalRoot();
+    if (absoluteRoot) {
+      candidates.push(`${absoluteRoot}/${chosen.userPath}`);
+    }
+    candidates.push(chosen.userPath, chosen.name, chosen.vUri);
+  } else if (chosen) {
+    // A built-in template is chosen by name, per the same documentation.
     candidates.push(chosen.name, chosen.vUri);
   } else if (preferred) {
+    // A template chosen through the file browser is stored as a file:// URI and
+    // is in no list to look up. createNote wants a path, so the bare path is
+    // tried first and the URI kept only as a fallback.
+    if (preferred.startsWith('file://')) {
+      const absolutePath = preferred.slice('file://'.length);
+      candidates.push(absolutePath);
+      const storageRoot = await externalRoot();
+      if (storageRoot && absolutePath.startsWith(`${storageRoot}/`)) {
+        candidates.push(absolutePath.slice(storageRoot.length + 1));
+      }
+      candidates.push(absolutePath.slice(absolutePath.lastIndexOf('/') + 1));
+    }
     candidates.push(preferred);
   }
   candidates.push('');
@@ -234,6 +314,48 @@ export async function openMeetingNote(
 }
 
 /** Open a day's note. Call after the plugin view has been dismissed. */
+
+/**
+ * Create the note for a week, month or quarter (or a day, which routes through
+ * the daily note rules unchanged).
+ *
+ * Split from opening for the same reason `createDailyNote` is: the caller has to
+ * dismiss the plugin view between the two, or the host keeps believing the
+ * plugin is still showing and the next press merely closes it.
+ */
+export async function createPeriodNote(
+  period: Period,
+  config: PeriodNoteConfig,
+  iso: string,
+  dateFormat: DateFormat,
+): Promise<string> {
+  const relative = periodNotePath(period, config, iso, dateFormat);
+  if (!relative) {
+    throw new Error('Could not build a note path for that period.');
+  }
+  await createAt(relative, config.template);
+  return relative;
+}
+
+/** Open an existing period note. */
+export async function openPeriodNote(
+  period: Period,
+  config: PeriodNoteConfig,
+  iso: string,
+  dateFormat: DateFormat,
+): Promise<void> {
+  const relative = periodNotePath(period, config, iso, dateFormat);
+  if (!relative) {
+    throw new Error('Could not build a note path for that period.');
+  }
+  await openNote(relative);
+}
+
+/** Every note path under a period's configured root, for existence checks. */
+export async function findPeriodNotes(config: PeriodNoteConfig): Promise<string[]> {
+  return listNotes(config.root);
+}
+
 export async function openDailyNote(
   config: DailyNoteConfig,
   iso: string,

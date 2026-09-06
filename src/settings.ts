@@ -1,5 +1,12 @@
 import type {TaskCollection} from './discovery';
 import {DEFAULT_DAILY_NOTE, type DailyNoteConfig} from './dailynote';
+import {
+  DEFAULT_MONTH_NOTE,
+  DEFAULT_QUARTER_NOTE,
+  DEFAULT_WEEK_NOTE,
+  DEFAULT_YEAR_NOTE,
+  type PeriodNoteConfig,
+} from './periodnote';
 import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from './meetingnote';
 import type {DateFormat, TimeFormat} from './format';
 import type {MarkStyle} from './markstyle';
@@ -36,14 +43,35 @@ export interface RadicaleConfig {
    * values read from one device, and the box alone is already a clear marker.
    */
   markShade: boolean;
+  /** Which of the documented marker colours the wash uses. See `markstyle.ts`. */
+  markShadeColor: string;
   /** Write "Task Hub Task" under the boxed handwriting. */
   markLabel: boolean;
   /** Where per-day notes live and how their folders are laid out. */
   dailyNote: DailyNoteConfig;
+  /**
+   * Notes for a whole week, month or quarter, each configured independently of
+   * the daily note and of each other — somebody who keeps a weekly review in one
+   * folder and a quarterly plan in another should not have to pick one scheme
+   * for all of them. See `periodnote.ts`.
+   */
+  weekNote: PeriodNoteConfig;
+  monthNote: PeriodNoteConfig;
+  quarterNote: PeriodNoteConfig;
+  yearNote: PeriodNoteConfig;
   /** Where per-event notes live. Device-only; never written back to CalDAV. */
   meetingNote: MeetingNoteConfig;
   /** event UID -> note path. Keeps note filenames free of encoded ids. */
   meetingLinks: MeetingLinks;
+  /**
+   * The day the calendar was showing when the plugin last handed over to a note.
+   *
+   * A link inside a note cannot open a plugin — the SDK's link types are pages,
+   * files, documents, images and URLs, and none of them is "come back here". So
+   * the nearest thing to a back button is for the plugin to reopen on the day it
+   * was left, which is what this remembers. Empty means "start on today".
+   */
+  lastDay: string;
 }
 
 export const EMPTY_CONFIG: RadicaleConfig = {
@@ -58,10 +86,16 @@ export const EMPTY_CONFIG: RadicaleConfig = {
   timeFormat: '24',
   markStyle: 'dashed',
   markShade: false,
+  markShadeColor: 'light',
   markLabel: false,
   dailyNote: {...DEFAULT_DAILY_NOTE},
+  weekNote: {...DEFAULT_WEEK_NOTE},
+  monthNote: {...DEFAULT_MONTH_NOTE},
+  quarterNote: {...DEFAULT_QUARTER_NOTE},
+  yearNote: {...DEFAULT_YEAR_NOTE},
   meetingNote: {...DEFAULT_MEETING_NOTE},
   meetingLinks: {},
+  lastDay: '',
 };
 
 export function hasCalendars(config: RadicaleConfig): boolean {
@@ -137,6 +171,10 @@ export function getConfig(): RadicaleConfig {
     collectionUrls: [...current.collectionUrls],
     calendarUrls: [...current.calendarUrls],
     dailyNote: {...current.dailyNote},
+    weekNote: {...current.weekNote},
+    monthNote: {...current.monthNote},
+    quarterNote: {...current.quarterNote},
+    yearNote: {...current.yearNote},
     meetingNote: {...current.meetingNote},
     meetingLinks: {...current.meetingLinks},
   };
@@ -148,6 +186,10 @@ export function setConfig(next: RadicaleConfig): void {
     collectionUrls: [...next.collectionUrls],
     calendarUrls: [...next.calendarUrls],
     dailyNote: {...next.dailyNote},
+    weekNote: {...next.weekNote},
+    monthNote: {...next.monthNote},
+    quarterNote: {...next.quarterNote},
+    yearNote: {...next.yearNote},
     meetingNote: {...next.meetingNote},
     meetingLinks: {...next.meetingLinks},
   };
