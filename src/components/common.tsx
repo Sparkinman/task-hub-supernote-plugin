@@ -688,14 +688,17 @@ export const SCREEN_HEIGHT = Dimensions.get('window').height || 1872;
  * identical, which is the tell that the reference was in the wrong units.
  *
  * The scales are the ones that actually read well on each panel, judged on the
- * hardware rather than derived: 85% on a Manta, 65% on a Nomad. Anything
+ * hardware rather than derived: full size on a Manta, 70% on a Nomad. Anything
  * between is interpolated, and anything outside is clamped to a sane range so
  * an unfamiliar device still gets readable text.
+ *
+ * These two numbers are the whole calibration. If a panel reads wrong, change
+ * the one for that panel — nothing else here needs touching.
  */
 const NOMAD_HEIGHT = 998;
-const NOMAD_SCALE = 0.65;
+const NOMAD_SCALE = 0.7;
 const MANTA_HEIGHT = 1365;
-const MANTA_SCALE = 0.95;
+const MANTA_SCALE = 1;
 
 export const UI_SCALE = (() => {
   const slope = (MANTA_SCALE - NOMAD_SCALE) / (MANTA_HEIGHT - NOMAD_HEIGHT);
