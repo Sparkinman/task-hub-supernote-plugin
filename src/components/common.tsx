@@ -678,21 +678,32 @@ export const SCREEN_HEIGHT = Dimensions.get('window').height || 1872;
  * scrolling.
  */
 /**
- * The height the type sizes were chosen against: a Manta, the largest panel.
+ * Calibration points, measured on real devices.
  *
- * This was 1850 in the first attempt, which was the mistake — a Manta reports
- * about 2560 and a Nomad about 1872, so BOTH divided out above 1 and clamped to
- * full size. Nothing scaled anywhere. The reference has to be the big panel for
- * the smaller ones to come out below it.
+ * The window reports density-independent pixels, not the panel's pixels: a
+ * Manta comes back as 1365 and a Nomad as 998, not 2560 and 1872. Both earlier
+ * attempts got this wrong — the first used a reference of 1850 so both devices
+ * divided out above 1 and clamped to full size, the second used 2560 so both
+ * fell below the floor and clamped to 0.72. Either way the two panels came out
+ * identical, which is the tell that the reference was in the wrong units.
+ *
+ * The scales are the ones that actually read well on each panel, judged on the
+ * hardware rather than derived: 85% on a Manta, 65% on a Nomad. Anything
+ * between is interpolated, and anything outside is clamped to a sane range so
+ * an unfamiliar device still gets readable text.
  */
-const SCALE_REFERENCE = 2560;
+const NOMAD_HEIGHT = 998;
+const NOMAD_SCALE = 0.65;
+const MANTA_HEIGHT = 1365;
+const MANTA_SCALE = 0.85;
 
-/**
- * Floor at 0.72 rather than 0.8: a Nomad works out at roughly 0.73 against a
- * Manta, and clamping that back up to 0.8 would throw away most of the
- * correction it needs.
- */
-export const UI_SCALE = Math.max(0.72, Math.min(1, SCREEN_HEIGHT / SCALE_REFERENCE));
+export const UI_SCALE = (() => {
+  const slope = (MANTA_SCALE - NOMAD_SCALE) / (MANTA_HEIGHT - NOMAD_HEIGHT);
+  const scale = NOMAD_SCALE + (SCREEN_HEIGHT - NOMAD_HEIGHT) * slope;
+  // Never so small that e-ink text stops being comfortable, never so large that
+  // a panel bigger than a Manta gets type nobody asked for.
+  return Math.max(0.6, Math.min(1.05, Math.round(scale * 100) / 100));
+})();
 
 /**
  * A font size, scaled for this panel.

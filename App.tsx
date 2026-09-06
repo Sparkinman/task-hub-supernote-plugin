@@ -3328,9 +3328,11 @@ Text scale: ${Math.round(UI_SCALE * 100)}%`}
         </Text>
         <Text style={styles.noteCompact}>
           Type is scaled from the height the panel reports, so a smaller device such as the
-          Nomad fits the same amount on screen instead of needing more scrolling. Borders and
-          the controls you tap are left at full size — a shrunken fold arrow is harder to hit,
-          which would be the opposite of the point.
+          Nomad fits the same amount on screen instead of needing more scrolling. The scale is
+          calibrated against real measurements — a Manta reports 1365 and reads well at 85%, a
+          Nomad reports 998 and reads well at 65% — and anything between is interpolated.
+          Borders and the controls you tap are left at full size: a shrunken fold arrow is
+          harder to hit, which would be the opposite of the point.
         </Text>
       </Fold>
 
