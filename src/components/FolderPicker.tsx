@@ -8,10 +8,10 @@
  */
 
 import React, {useCallback, useEffect, useState} from 'react';
-import {ActivityIndicator, Modal, Pressable, ScrollView, Text, View} from 'react-native';
+import {Modal, Pressable, ScrollView, Text, View} from 'react-native';
 
 import {listDirs} from '../storage';
-import {Button, styles} from './common';
+import {Busy, Button, styles} from './common';
 
 export function FolderPicker(props: {
   visible: boolean;
@@ -61,7 +61,7 @@ export function FolderPicker(props: {
           </View>
 
           <ScrollView style={styles.pickerList}>
-            {busy && <ActivityIndicator color="#000" />}
+            {busy && <Busy />}
             {!busy && dirs.length === 0 && (
               <Text style={styles.weekEmpty}>No subfolders here.</Text>
             )}

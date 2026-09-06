@@ -1,9 +1,35 @@
 <resources>
 
-    <!-- Base application theme. -->
+    <!--
+      Base application theme.
+
+      Every window animation is switched off deliberately. This panel is e-ink:
+      a fade or a scale that looks like polish on an LCD is rendered here as a
+      sequence of full-screen refreshes, so a dialog "growing" into place is
+      slower AND uglier than the same dialog simply appearing. React Native's
+      Modal already passes animationType="none", but that only governs the
+      content — the window itself is animated by the Android theme, which is
+      what produced the small-then-full-screen opening.
+    -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowAnimationStyle">@style/NoWindowAnimation</item>
+        <item name="android:windowContentTransitions">false</item>
+        <item name="android:windowActivityTransitions">false</item>
+    </style>
+
+    <!-- Used for both the activity and the dialogs Modal creates. -->
+    <style name="NoWindowAnimation" parent="@android:style/Animation">
+        <item name="android:windowEnterAnimation">@null</item>
+        <item name="android:windowExitAnimation">@null</item>
+        <item name="android:activityOpenEnterAnimation">@null</item>
+        <item name="android:activityOpenExitAnimation">@null</item>
+        <item name="android:activityCloseEnterAnimation">@null</item>
+        <item name="android:activityCloseExitAnimation">@null</item>
+        <item name="android:taskOpenEnterAnimation">@null</item>
+        <item name="android:taskOpenExitAnimation">@null</item>
+        <item name="android:taskCloseEnterAnimation">@null</item>
+        <item name="android:taskCloseExitAnimation">@null</item>
     </style>
 
 </resources>

@@ -1,7 +1,6 @@
 import React, {useRef} from 'react';
 import {
-  ActivityIndicator,
-  Modal,
+  Dimensions,
   Pressable,
   StyleSheet,
   Text,
@@ -13,6 +12,7 @@ import {
 import {formatDue, type DateFormat, type TimeFormat} from '../format';
 import type {VTodo} from '../ical';
 import {originIsNamed, originLabel} from '../origin';
+import {bandOf, priorityLabel} from '../priority';
 import {FullLogo, Logo} from './Brand';
 
 export type Status =
@@ -33,6 +33,8 @@ export function Header(props: {
   title: string;
   onClose: () => void;
   masthead?: boolean;
+  /** Held back while a write is in flight, so leaving cannot interrupt it. */
+  closeDisabled?: boolean;
 }): React.JSX.Element {
   if (props.masthead) {
     return (
@@ -41,8 +43,14 @@ export function Header(props: {
           <FullLogo />
           <Text style={styles.mastheadTitle}>{props.title}</Text>
         </View>
-        <Pressable style={styles.close} onPress={props.onClose} hitSlop={10}>
-          <Text style={styles.closeText}>{'Done & Exit'}</Text>
+        <Pressable
+          style={[styles.close, props.closeDisabled && styles.buttonDisabled]}
+          disabled={props.closeDisabled}
+          onPress={props.onClose}
+          hitSlop={10}>
+          <Text style={[styles.closeText, props.closeDisabled && styles.buttonTextDisabled]}>
+            {props.closeDisabled ? 'Saving…' : 'Done & Exit'}
+          </Text>
         </Pressable>
       </View>
     );
@@ -65,8 +73,14 @@ export function Header(props: {
           <Text style={styles.heading}>{props.title}</Text>
         </View>
       </View>
-      <Pressable style={styles.close} onPress={props.onClose} hitSlop={10}>
-        <Text style={styles.closeText}>{'Done & Exit'}</Text>
+      <Pressable
+        style={[styles.close, props.closeDisabled && styles.buttonDisabled]}
+        disabled={props.closeDisabled}
+        onPress={props.onClose}
+        hitSlop={10}>
+        <Text style={[styles.closeText, props.closeDisabled && styles.buttonTextDisabled]}>
+          {props.closeDisabled ? 'Saving…' : 'Done & Exit'}
+        </Text>
       </Pressable>
     </View>
   );
@@ -75,9 +89,17 @@ export function Header(props: {
 /**
  * Blocking yes/no confirmation.
  *
- * Uses core RN Modal rather than Alert: Alert's styling is not controllable, and
- * on a monochrome panel its default chrome is low-contrast. This also gives the
- * question room to name the task being acted on.
+ * Drawn as an overlay in the app's own window rather than in a Modal.
+ *
+ * RN's Modal creates a whole new Android window, and on e-ink that is a slow,
+ * visible event: the panel does a full refresh to put the window up and another
+ * to take it down, which is why confirming a save felt heavy for a question with
+ * two buttons in it. An absolutely positioned View costs one repaint of the area
+ * it covers.
+ *
+ * Not an Alert either: Alert's styling is not controllable, and on a monochrome
+ * panel its default chrome is low-contrast. This also gives the question room to
+ * name the task being acted on.
  */
 export function Confirm(props: {
   visible: boolean;
@@ -86,20 +108,21 @@ export function Confirm(props: {
   confirmLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  if (!props.visible) {
+    return null;
+  }
   return (
-    <Modal visible={props.visible} transparent animationType="none" onRequestClose={props.onCancel}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>{props.title}</Text>
-          {!!props.body && <Text style={styles.modalBody}>{props.body}</Text>}
-          <View style={styles.modalActions}>
-            <Button label={props.confirmLabel ?? 'Yes'} primary onPress={props.onConfirm} />
-            <Button label="No" onPress={props.onCancel} />
-          </View>
+    <View style={styles.overlay} pointerEvents="auto">
+      <View style={styles.modalCard}>
+        <Text style={styles.modalTitle}>{props.title}</Text>
+        {!!props.body && <Text style={styles.modalBody}>{props.body}</Text>}
+        <View style={styles.modalActions}>
+          <Button label={props.confirmLabel ?? 'Yes'} primary onPress={props.onConfirm} />
+          <Button label="No" onPress={props.onCancel} />
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -108,7 +131,7 @@ export function Confirm(props: {
  *
  * Separate from Confirm rather than a variant of it: a Yes/No pair on a message
  * that decides nothing invites the user to look for the difference between the
- * two buttons.
+ * two buttons. Drawn as an overlay for the same reason Confirm is.
  */
 export function Notice(props: {
   visible: boolean;
@@ -116,19 +139,20 @@ export function Notice(props: {
   body?: string;
   label?: string;
   onDismiss: () => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  if (!props.visible) {
+    return null;
+  }
   return (
-    <Modal visible={props.visible} transparent animationType="none" onRequestClose={props.onDismiss}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>{props.title}</Text>
-          {!!props.body && <Text style={styles.modalBody}>{props.body}</Text>}
-          <View style={styles.modalActions}>
-            <Button label={props.label ?? 'OK'} primary onPress={props.onDismiss} />
-          </View>
+    <View style={styles.overlay} pointerEvents="auto">
+      <View style={styles.modalCard}>
+        <Text style={styles.modalTitle}>{props.title}</Text>
+        {!!props.body && <Text style={styles.modalBody}>{props.body}</Text>}
+        <View style={styles.modalActions}>
+          <Button label={props.label ?? 'OK'} primary onPress={props.onDismiss} />
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -193,7 +217,52 @@ export function Section(props: {
   );
 }
 
-export function TaskRow(props: {
+
+/**
+ * A folder, drawn rather than typed.
+ *
+ * The obvious thing is a glyph — 🗀 or 📁 — but the device's font does not have
+ * them and Android renders a missing glyph as a box with a cross through it,
+ * which is what appeared on the settings page. Two plain Views always render, on
+ * every generation of the hardware, whatever fonts the firmware ships.
+ */
+export function FolderIcon(props: {size?: number}): React.JSX.Element {
+  const size = props.size ?? 22;
+  const tabHeight = Math.round(size * 0.22);
+  return (
+    <View style={[styles.folderIcon, {width: size, height: size}]}>
+      {/* The raised tab along the top-left of a hanging folder. */}
+      <View style={[styles.folderTab, {width: Math.round(size * 0.45), height: tabHeight}]} />
+      <View style={[styles.folderBody, {width: size, height: size - tabHeight}]} />
+    </View>
+  );
+}
+
+/**
+ * A calendar, drawn rather than typed.
+ *
+ * Same reason as FolderIcon: the device's font has no calendar glyph, and
+ * Android draws a missing one as a box with a cross through it. Plain Views
+ * always render.
+ */
+export function CalendarIcon(props: {size?: number}): React.JSX.Element {
+  const size = props.size ?? 24;
+  const bandHeight = Math.max(3, Math.round(size * 0.2));
+  return (
+    <View style={[styles.calendarIcon, {width: size, height: size}]}>
+      {/* The two hanging rings along the top. */}
+      <View style={styles.calendarRings}>
+        <View style={styles.calendarRing} />
+        <View style={styles.calendarRing} />
+      </View>
+      <View style={[styles.calendarBody, {width: size, height: size - 4}]}>
+        <View style={[styles.calendarBand, {height: bandHeight}]} />
+      </View>
+    </View>
+  );
+}
+
+function TaskRowImpl(props: {
   task: VTodo;
   busy?: boolean;
   dateFormat: DateFormat;
@@ -206,14 +275,52 @@ export function TaskRow(props: {
   onEdit?: () => void;
   /** Offered only when the task records the note it was captured from. */
   onOpenSource?: () => void;
+  /** 1 when this task is a step of another, which indents it under its parent. */
+  depth?: number;
+  /** Steps this task has, and how many are done. Absent when it has none. */
+  stepCount?: number;
+  stepsDone?: number;
+  /** Whether this task's steps are showing; absent when it has none. */
+  stepsOpen?: boolean;
+  onToggleSteps?: () => void;
 }): React.JSX.Element {
-  const {task, busy, dateFormat, timeFormat, listLabel, showNoDue, onToggle, onEdit, onOpenSource} =
-    props;
+  const {
+    task,
+    busy,
+    dateFormat,
+    timeFormat,
+    listLabel,
+    showNoDue,
+    onToggle,
+    onEdit,
+    onOpenSource,
+    depth = 0,
+    stepCount = 0,
+    stepsDone = 0,
+    stepsOpen = false,
+    onToggleSteps,
+  } = props;
   const overdue = !task.completed && task.dueAt !== null && task.dueAt < Date.now();
   const due = formatDue(task.dueDate, task.dueTime, dateFormat, timeFormat);
+  const priority = priorityLabel(task.priority);
 
   return (
-    <View style={styles.task}>
+    <View style={[styles.task, depth > 0 && styles.taskStep]}>
+      {/*
+        A step is marked by a rail rather than indentation alone: on a 1-bit
+        panel a few points of whitespace is not a visible difference, and the
+        rail survives a row whose title wraps to three lines.
+      */}
+      {depth > 0 && <View style={styles.stepRail} />}
+      {stepCount > 0 && !!onToggleSteps ? (
+        <Pressable onPress={onToggleSteps} hitSlop={18} style={styles.foldHit}>
+          <Text style={styles.fold}>{stepsOpen ? '▾' : '▸'}</Text>
+        </Pressable>
+      ) : (
+        // Keeps every tick box on the same vertical line whether or not the
+        // task has steps.
+        <View style={styles.foldHit} />
+      )}
       <Pressable
         onPress={onToggle}
         disabled={!onToggle || task.completed || busy}
@@ -228,6 +335,26 @@ export function TaskRow(props: {
             <Text style={[styles.due, overdue && styles.overdue]}>Due {due}</Text>
           ) : (
             showNoDue && <Text style={styles.noDue}>No due date</Text>
+          )}
+          {stepCount > 0 && (
+            <Text style={styles.stepCount}>
+              {stepsDone}/{stepCount} steps
+            </Text>
+          )}
+          {/*
+            High gets the filled badge and the others an outline, the same
+            device this row already uses for origins: a 1-bit panel has no
+            colour to lean on, so weight is the only thing that separates
+            "deal with this" from "noted".
+          */}
+          {!!priority && (
+            <Text
+              style={[
+                styles.priorityTag,
+                bandOf(task.priority) === 'high' && styles.priorityTagHigh,
+              ]}>
+              {priority}
+            </Text>
           )}
           {!!listLabel && <Text style={styles.listTag}>{listLabel}</Text>}
           {/*
@@ -251,9 +378,22 @@ export function TaskRow(props: {
           <Text style={styles.sourceChipLabel}>page</Text>
         </Pressable>
       )}
-      {busy && <ActivityIndicator color="#000" />}
+      {busy && <Busy />}
     </View>
   );
+}
+
+
+/**
+ * A still marker for "something is happening", in place of a spinner.
+ *
+ * ActivityIndicator animates continuously, and on an e-ink panel every frame of
+ * that is a partial refresh: the spinner itself costs more redraws than the work
+ * it is reporting on, and it makes the whole screen feel slow while it is up.
+ * A static glyph says the same thing for nothing.
+ */
+export function Busy(): React.JSX.Element {
+  return <Text style={styles.busyMark}>⋯</Text>;
 }
 
 /**
@@ -269,7 +409,7 @@ export function LoadingLine(props: {visible: boolean}): React.JSX.Element | null
   }
   return (
     <View style={styles.statusRow}>
-      <ActivityIndicator color="#000" />
+      <Busy />
       <Text style={styles.status}>Loading…</Text>
     </View>
   );
@@ -283,7 +423,7 @@ export function StatusLine(props: {status: Status}): React.JSX.Element | null {
   if (status.kind === 'working') {
     return (
       <View style={styles.statusRow}>
-        <ActivityIndicator color="#000" />
+        <Busy />
         <Text style={styles.status}>{status.message}</Text>
       </View>
     );
@@ -293,7 +433,7 @@ export function StatusLine(props: {status: Status}): React.JSX.Element | null {
   );
 }
 
-export function Field(props: {
+function FieldImpl(props: {
   label: string;
   value: string;
   placeholder?: string;
@@ -350,12 +490,28 @@ export function Button(props: {
   label: string;
   onPress: () => void;
   primary?: boolean;
+  /**
+   * Greys the button out and stops it responding. Used while a write is in
+   * flight, so Save cannot be pressed twice and Done & Exit cannot leave with
+   * the write half done.
+   */
+  disabled?: boolean;
 }): React.JSX.Element {
   return (
     <Pressable
-      style={[styles.button, props.primary && styles.buttonPrimary]}
+      style={[
+        styles.button,
+        props.primary && styles.buttonPrimary,
+        props.disabled && styles.buttonDisabled,
+      ]}
+      disabled={props.disabled}
       onPress={props.onPress}>
-      <Text style={[styles.buttonText, props.primary && styles.buttonTextPrimary]}>
+      <Text
+        style={[
+          styles.buttonText,
+          props.primary && styles.buttonTextPrimary,
+          props.disabled && styles.buttonTextDisabled,
+        ]}>
         {props.label}
       </Text>
     </Pressable>
@@ -384,14 +540,35 @@ export function Choice(props: {
   );
 }
 
+/**
+ * The panel height at load, for the few places a list has to be capped.
+ *
+ * A fixed 420pt cap is a different fraction of the screen on every Supernote
+ * generation — most of an A5X, less than a third of a Manta. Reading it once
+ * here keeps those lists proportionate on all of them. Read once rather than
+ * subscribed to: these panels do not rotate or resize during a session.
+ */
+const SCREEN_HEIGHT = Dimensions.get('window').height || 1872;
+
+// Settings text is deliberately larger than a phone app's would be. The panel is
+// read at arm's length in whatever light the room has, the explanations here are
+// the only documentation the plugin has, and the page already scrolls — so there
+// is nothing to be won by squeezing them.
+//
 // High-contrast, flat styling — e-ink has no colour and slow refresh, so avoid
 // gradients, shadows and animation. Selection is shown by fill inversion, which
 // survives a monochrome panel; colour alone would not.
 export const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: '#fff'},
+  /** Holds the scrolling page and the overlays that cover it. */
+  appRoot: {flex: 1, backgroundColor: '#fff'},
   content: {padding: 14, paddingBottom: 40},
   // Extra tail room so the last field can still scroll clear of the keyboard.
-  contentKeyboard: {paddingBottom: 420},
+  // NOTE: the keyboard's bottom padding is no longer a constant. It is applied
+  // inline in App.tsx from the height the host reports for the keyboard, because
+  // that height differs between an A5X and a Manta and a fixed value can only
+  // ever be right on one of them.
+
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -418,12 +595,12 @@ export const styles = StyleSheet.create({
   },
   inputTall: {minHeight: 96, textAlignVertical: 'top'},
   fieldCompact: {marginBottom: 7},
-  labelCompact: {fontSize: 17, color: '#000', marginBottom: 2},
+  labelCompact: {fontSize: 20, color: '#000', marginBottom: 3},
   inputCompact: {paddingHorizontal: 8, paddingVertical: 5, fontSize: 18},
   inputTallCompact: {minHeight: 58, textAlignVertical: 'top'},
-  subheadingCompact: {fontSize: 18, fontWeight: '700', color: '#000', marginTop: 10, marginBottom: 3},
-  helpStepCompact: {fontSize: 15, color: '#333', lineHeight: 21, marginBottom: 6},
-  noteCompact: {fontSize: 14, color: '#555', marginBottom: 6},
+  subheadingCompact: {fontSize: 23, fontWeight: '700', color: '#000', marginTop: 16, marginBottom: 4},
+  helpStepCompact: {fontSize: 18, color: '#222', lineHeight: 25, marginBottom: 8},
+  noteCompact: {fontSize: 17, color: '#444', lineHeight: 23, marginBottom: 8},
   /**
    * Demo-build banner. Inverted rather than tinted: a grey wash is close to
    * invisible on e-ink, and this label has to be unmissable.
@@ -451,7 +628,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 6,
     marginBottom: 5,
   },
-  optionTextCompact: {fontSize: 18, color: '#000'},
+  optionTextCompact: {fontSize: 20, color: '#000'},
   actionsTight: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8},
   grow: {flex: 1},
   choiceRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12},
@@ -473,6 +650,22 @@ export const styles = StyleSheet.create({
     marginBottom: 8,
   },
   tinyButton: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 10, paddingVertical: 4},
+  /**
+   * Covers the app's window, in the app's window. Positioned absolutely against
+   * the root View so it sits over the scrolling content without scrolling with
+   * it, and without the cost of a second Android window.
+   */
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -517,7 +710,84 @@ export const styles = StyleSheet.create({
   tappableLabel: {textDecorationLine: 'underline'},
   week: {flexDirection: 'row', marginTop: 4},
   weekday: {flex: 1, textAlign: 'center', fontSize: 18, color: '#555', paddingVertical: 4},
-  noteButtonRow: {alignItems: 'center', marginTop: 10, marginBottom: 4},
+  noteButtonRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  // Three months on one panel. Everything here is sized down from the month
+  // view rather than reflowed: the point of the quarter view is the shape of
+  // twelve weeks at a glance, and a day cell only has to be tappable, not
+  // readable in detail.
+  quarterMonth: {marginTop: 12},
+  quarterMonthLabel: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 2,
+    textDecorationLine: 'underline',
+  },
+  quarterWeek: {flexDirection: 'row'},
+  quarterWeekday: {flex: 1, textAlign: 'center', fontSize: 13, color: '#555', paddingVertical: 2},
+  quarterCell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 3,
+    // A floor rather than a fixed height: without it a row whose cells are all
+    // empty collapses to nothing and the grid loses its shape, which is what
+    // made the quarter view look wrong rather than merely small.
+    minHeight: 30,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  // An empty padding cell: holds its place in the row and nothing else.
+  quarterCellEmpty: {flex: 1, paddingVertical: 3, minHeight: 30},
+  // Selection is a solid fill with inverted text — on a monochrome panel a
+  // pale wash and a slightly darker border were nearly the same thing, which is
+  // why the selected day was hard to pick out.
+  quarterCellSelected: {backgroundColor: '#000', borderColor: '#000'},
+  quarterCellToday: {borderColor: '#000', borderWidth: 3},
+  quarterCellText: {fontSize: 15, color: '#000'},
+  quarterCellTextSelected: {color: '#fff', fontWeight: '700'},
+  // A bar rather than the month view's boxed letters: at this size a letter is
+  // unreadable, so it says "something is here" and the month view says what.
+  quarterDot: {height: 3, width: 12, backgroundColor: '#000', marginTop: 1},
+  // The year view: twelve grids, three to a row. Smaller again than the
+  // quarter's, and with no marker beside the number — at this size the number
+  // itself goes bold to say a day has something on it.
+  yearQuarterLabel: {fontSize: 18, fontWeight: '700', color: '#000', marginTop: 10},
+  yearRow: {flexDirection: 'row', gap: 6},
+  yearMonth: {flex: 1},
+  yearMonthLabel: {fontSize: 15, fontWeight: '700', color: '#000', marginBottom: 1},
+  yearWeek: {flexDirection: 'row'},
+  yearCell: {flex: 1, alignItems: 'center', paddingVertical: 1},
+  yearCellSelected: {backgroundColor: '#000'},
+  yearCellToday: {borderWidth: 2, borderColor: '#000'},
+  yearCellText: {fontSize: 10, color: '#333'},
+  yearCellBusy: {fontWeight: '700', color: '#000'},
+  yearCellTextSelected: {color: '#fff', fontWeight: '700'},
+  // The week number gutter down the left of each month grid.
+  yearWeekNum: {width: 16, alignItems: 'center', justifyContent: 'center'},
+  yearWeekNumText: {fontSize: 9, color: '#888'},
+  // The month grid's week-number gutter. Wider than the year view's because it
+  // is a real target here: tapping it opens that week's note.
+  monthWeekNum: {width: 34, alignItems: 'center', justifyContent: 'center'},
+  monthWeekNumHead: {width: 34, textAlign: 'center', fontSize: 15, color: '#555'},
+  monthWeekNumText: {fontSize: 17, color: '#777'},
+  // A week that already has a note is shown filled in, so the gutter says which
+  // weeks are written up without anything being tapped.
+  monthWeekNumHas: {color: '#000', fontWeight: '700', textDecorationLine: 'underline'},
+  // Nested tasks in the day view's pane. Smaller than the Tasks tab's fold
+  // control because the pane is a column, not the full width — but still a pen
+  // target rather than a decoration.
+  paneTaskRow: {flexDirection: 'row', alignItems: 'flex-start'},
+  paneFoldHit: {width: 34, alignItems: 'center'},
+  paneFold: {fontSize: 34, color: '#000', lineHeight: 34},
+  paneTaskStep: {paddingLeft: 18, backgroundColor: '#ededed'},
   browseRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 8},
   miniCell: {flex: 1, height: 52, alignItems: 'center', justifyContent: 'center', margin: 1},
   miniCellOn: {borderWidth: 1, borderColor: '#999'},
@@ -547,7 +817,7 @@ export const styles = StyleSheet.create({
   },
   templateSummaryText: {fontSize: 18, color: '#000'},
   templateSummaryHint: {fontSize: 13, color: '#666', marginTop: 2},
-  templateScroll: {maxHeight: 420},
+  templateScroll: {maxHeight: Math.round(SCREEN_HEIGHT * 0.42)},
   templateGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12},
   templateTile: {borderWidth: 1, borderColor: '#999', padding: 4, width: 116},
   templateTileOn: {borderWidth: 3, borderColor: '#000'},
@@ -572,6 +842,33 @@ export const styles = StyleSheet.create({
     marginTop: 24,
   },
   browseIcon: {fontSize: 22, color: '#000', lineHeight: 24},
+  folderIcon: {justifyContent: 'flex-end'},
+  // The template file browser: one directory at a time.
+  browserRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4},
+  browserUp: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 12, paddingVertical: 8},
+  browserUpText: {fontSize: 18, color: '#000'},
+  browserFolder: {borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: 10},
+  browserFolderText: {fontSize: 20, color: '#000'},
+  folderTab: {borderColor: '#000', borderWidth: 2, borderBottomWidth: 0},
+  calendarIcon: {alignItems: 'center'},
+  // The steps' own date, offered beside the box that creates them.
+  stepsDateRow: {flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8},
+  stepsDateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#000',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  stepsDateLabel: {fontSize: 18, color: '#000'},
+  clearLink: {fontSize: 17, color: '#000', textDecorationLine: 'underline'},
+  calendarRings: {flexDirection: 'row', gap: 6, height: 4},
+  calendarRing: {width: 3, height: 4, backgroundColor: '#000'},
+  calendarBody: {borderWidth: 2, borderColor: '#000'},
+  calendarBand: {backgroundColor: '#000'},
+  folderBody: {borderColor: '#000', borderWidth: 2},
   browseLabel: {fontSize: 14, color: '#000'},
   pastText: {color: '#9a9a9a'},
   nowRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
@@ -588,7 +885,7 @@ export const styles = StyleSheet.create({
   },
   pickerPath: {fontSize: 17, color: '#333', marginBottom: 8},
   pickerNav: {flexDirection: 'row', gap: 10, marginBottom: 10},
-  pickerList: {borderWidth: 1, borderColor: '#000', maxHeight: 380, padding: 6},
+  pickerList: {borderWidth: 1, borderColor: '#000', maxHeight: Math.round(SCREEN_HEIGHT * 0.38), padding: 6},
   pickerRow: {paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#ddd'},
   pickerRowText: {fontSize: 20, color: '#000'},
   agendaItem: {borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: 10},
@@ -684,6 +981,46 @@ export const styles = StyleSheet.create({
     borderBottomColor: '#ccc',
     paddingVertical: 11,
   },
+  // A step sits in from its parent, with a rail down the gap. On a 1-bit panel
+  // indentation alone is too weak a signal, and the rail also survives a title
+  // that wraps onto three lines.
+  // A step is washed light grey as well as indented. Indentation alone was not
+  // enough to read as "belongs to the row above" on the panel, and a filled band
+  // survives a title that wraps to three lines in a way a thin rail does not.
+  // Kept light: the text on top is pure black and has to stay comfortable.
+  // Indented much further than the first attempt: on a panel this size a step
+  // sitting 26pt in still read as a slightly odd top-level task rather than as
+  // something belonging to the row above.
+  taskStep: {paddingLeft: 56, backgroundColor: '#ededed'},
+  stepRail: {
+    position: 'absolute',
+    left: 22,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    backgroundColor: '#666',
+  },
+  // Always present, so every tick box lines up whether or not a task has steps.
+  // Sized to the tick box beside it rather than to the text: this is a pen
+  // target on an e-ink panel, and at 15pt it was half the size of everything
+  // else in the row and easy to miss altogether.
+  // Twice the size again. This is a pen target on an e-ink panel and it is the
+  // control that reveals a whole piece of work, so it is now the largest thing
+  // in the row by some margin — deliberately, because at 30pt it was still
+  // being missed.
+  foldHit: {width: 96, paddingTop: 1, alignItems: 'center', justifyContent: 'flex-start'},
+  fold: {fontSize: 108, color: '#000', lineHeight: 96},
+  stepCount: {
+    // Was 12, which made it the smallest thing in a row where every other badge
+    // is 16.
+    fontSize: 16,
+    color: '#000',
+    borderWidth: 1,
+    borderColor: '#666',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginTop: 2,
+  },
   boxHit: {paddingRight: 2},
   box: {fontSize: 30, color: '#000', lineHeight: 33},
   taskTitle: {fontSize: 24, color: '#000'},
@@ -712,6 +1049,16 @@ export const styles = StyleSheet.create({
     marginTop: 2,
   },
   originTagNamed: {backgroundColor: '#000', color: '#fff', borderColor: '#000'},
+  priorityTag: {
+    fontSize: 16,
+    color: '#000',
+    borderWidth: 1,
+    borderColor: '#777',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginTop: 2,
+  },
+  priorityTagHigh: {backgroundColor: '#000', color: '#fff', borderColor: '#000'},
   listTag: {
     fontSize: 16,
     color: '#000',
@@ -725,6 +1072,7 @@ export const styles = StyleSheet.create({
   empty: {fontSize: 22, color: '#555', marginVertical: 16},
   note: {fontSize: 18, color: '#555', marginBottom: 10},
   statusRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 8},
+  busyMark: {fontSize: 24, color: '#000'},
   status: {fontSize: 22, color: '#000', marginVertical: 8},
   error: {fontWeight: '700'},
   actions: {flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8},
@@ -732,7 +1080,67 @@ export const styles = StyleSheet.create({
   buttonPrimary: {backgroundColor: '#000'},
   buttonText: {fontSize: 22, color: '#000'},
   buttonTextPrimary: {color: '#fff'},
+  buttonDisabled: {borderColor: '#aaa', backgroundColor: '#eee'},
+  buttonTextDisabled: {color: '#888'},
 });
 
 /** Re-export so screens can resolve their ScrollView to a node handle. */
 export {findNodeHandle};
+
+/**
+ * Memoised on its data, deliberately ignoring the callbacks.
+ *
+ * Every call site passes fresh arrow functions — `onEdit={() => openTaskEditor(task)}`
+ * and friends — so a plain React.memo would never hit: the props differ on every
+ * render even when nothing about the task has. Comparing the data alone is what
+ * makes the memo worth having, and a long task list on an e-ink panel is exactly
+ * where an avoidable repaint hurts.
+ *
+ * Safe because those closures capture the task, which IS compared, and handlers
+ * that are stable for the life of the screen. If a callback ever needs to close
+ * over something that changes independently of the task, it must be added to
+ * this comparison or the row will call a stale one.
+ */
+export const TaskRow = React.memo(TaskRowImpl, (before, after) => {
+  return (
+    before.task === after.task &&
+    before.busy === after.busy &&
+    before.dateFormat === after.dateFormat &&
+    before.timeFormat === after.timeFormat &&
+    before.listLabel === after.listLabel &&
+    before.showNoDue === after.showNoDue &&
+    before.depth === after.depth &&
+    before.stepCount === after.stepCount &&
+    before.stepsDone === after.stepsDone &&
+    before.stepsOpen === after.stepsOpen &&
+    // Presence matters even when identity does not: a row that gains or loses
+    // an action has to re-render to show or hide the control.
+    !!before.onToggle === !!after.onToggle &&
+    !!before.onEdit === !!after.onEdit &&
+    !!before.onOpenSource === !!after.onOpenSource &&
+    !!before.onToggleSteps === !!after.onToggleSteps
+  );
+});
+
+/**
+ * Memoised on its own value.
+ *
+ * Typing re-renders the whole screen, because every field's value lives in the
+ * form's state. Without this, one keystroke in the sub tasks box re-rendered
+ * every other field, picker and note on the form — on an e-ink panel that is a
+ * repaint per character, which is exactly what "slow to type into" feels like.
+ *
+ * The callbacks are excluded for the same reason as in TaskRow: call sites pass
+ * fresh arrows every render, so comparing them would defeat the memo entirely.
+ */
+export const Field = React.memo(FieldImpl, (before, after) => {
+  return (
+    before.value === after.value &&
+    before.label === after.label &&
+    before.placeholder === after.placeholder &&
+    before.multiline === after.multiline &&
+    before.compact === after.compact &&
+    before.secure === after.secure &&
+    before.scrollHandle === after.scrollHandle
+  );
+});

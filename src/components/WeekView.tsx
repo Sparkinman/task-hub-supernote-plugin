@@ -35,7 +35,7 @@ export function shiftWeek(iso: string, weeks: number): string {
   return toDateInput(d);
 }
 
-export function WeekView(props: {
+function WeekViewImpl(props: {
   anchor: string;
   events: RemoteEvent[];
   tasks: RemoteTask[];
@@ -47,6 +47,8 @@ export function WeekView(props: {
   onSelectDay: (iso: string) => void;
   onEditEvent: (event: RemoteEvent) => void;
   onDailyNote: (iso: string, exists: boolean) => void;
+  /** Jump to the note page a task was captured from, when it has one. */
+  onOpenSource: (task: RemoteTask) => void;
   /** Event UIDs that already have a meeting note. */
   eventNotes: Set<string>;
   onEventNote: (event: RemoteEvent, exists: boolean) => void;
@@ -63,6 +65,7 @@ export function WeekView(props: {
     onSelectDay,
     onEditEvent,
     onDailyNote,
+    onOpenSource,
     eventNotes,
     onEventNote,
     onPickWeek,
@@ -141,11 +144,23 @@ export function WeekView(props: {
             ))}
 
             {dayTasks.map(task => (
-              <Text key={task.uid} style={styles.weekEntry}>
-                <Text style={styles.mark}>T</Text>{' '}
-                {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} ` : ''}
-                {task.summary} <Text style={styles.listTag}>{task.collectionLabel}</Text>
-              </Text>
+              <View key={task.uid} style={styles.eventRow}>
+                <Text style={[styles.weekEntry, styles.grow]}>
+                  <Text style={styles.mark}>T</Text>{' '}
+                  {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} ` : ''}
+                  {task.summary} <Text style={styles.listTag}>{task.collectionLabel}</Text>
+                </Text>
+                {/* Back to the page this was lassoed from, when it was. */}
+                {!!task.sourcePath && (
+                  <Pressable
+                    style={styles.sourceChip}
+                    onPress={() => onOpenSource(task)}
+                    hitSlop={6}>
+                    <Text style={styles.sourceChipText}>↩</Text>
+                    <Text style={styles.sourceChipLabel}>page</Text>
+                  </Pressable>
+                )}
+              </View>
             ))}
             {running.map(task => {
               const span = taskSpan(task);
@@ -162,3 +177,10 @@ export function WeekView(props: {
     </View>
   );
 }
+
+/**
+ * Memoised. These grids are pure functions of their props, and on an e-ink panel
+ * an avoidable re-render is an avoidable full-panel repaint — the calendar was
+ * rebuilding every view on any state change anywhere in the app.
+ */
+export const WeekView = React.memo(WeekViewImpl);

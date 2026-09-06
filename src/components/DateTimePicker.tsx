@@ -8,7 +8,7 @@
  * renders as static high-contrast blocks.
  */
 
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 
 import {MONTHS, WEEKDAYS, chunkWeeks, monthGrid, shiftMonth} from '../calendar';
@@ -16,6 +16,13 @@ import {formatTime, type TimeFormat} from '../format';
 import {toDateInput} from '../ical';
 
 interface Props {
+  /**
+   * The scroll container and a way to scroll to a y position, so the time box
+   * is brought above the keyboard when it takes focus — the same treatment
+   * every other text input on these forms gets.
+   */
+  scrollHandle?: number | null;
+  onScrollTo?: (y: number) => void;
   /** Canonical 'YYYY-MM-DD', or '' for unset. */
   date: string;
   /** Canonical 24-hour 'HH:MM', or '' for unset. */
@@ -37,10 +44,28 @@ function toHM(hours: number, minutes: number): string {
 }
 
 export function DateTimePicker(props: Props): React.JSX.Element {
-  const {date, time, timeFormat, onChange} = props;
+  const {date, time, timeFormat, onChange, scrollHandle, onScrollTo} = props;
+  const timeInputRef = useRef<TextInput>(null);
+
+  const handleTimeFocus = () => {
+    if (!scrollHandle || !onScrollTo) {
+      return;
+    }
+    timeInputRef.current?.measureLayout(scrollHandle, (_x, y) => onScrollTo(y));
+  };
 
   const anchor = date ? new Date(`${date}T00:00:00`) : new Date();
   const [view, setView] = useState({year: anchor.getFullYear(), month: anchor.getMonth()});
+
+  /**
+   * Whether the time controls are showing, separately from whether a time is
+   * set. They are not the same thing: opening the row leaves the time blank for
+   * the user to type, and a blank time has to keep the row on screen rather
+   * than collapsing it back to the button that opened it.
+   */
+  const [timeOpen, setTimeOpen] = useState(false);
+  // A time arriving from outside — editing an item that has one — opens the row.
+  const showTime = timeOpen || !!time;
 
   // Follow an externally-set date (a quick-pick) into its month.
   useEffect(() => {
@@ -63,13 +88,16 @@ export function DateTimePicker(props: Props): React.JSX.Element {
     onChange(toDateInput(target), time);
   };
 
-  // Noon: a sane default for "some time that day" that is unambiguous in both
-  // 12- and 24-hour display, unlike 00:00 which reads as "no time set".
-  const DEFAULT_TIME = '12:00';
+  // Where the steppers start from when no time has been typed yet. Noon is
+  // unambiguous in both 12- and 24-hour display, unlike 00:00 which reads as
+  // "no time set". It is only a starting point for the arrows now — opening the
+  // time row no longer sets it, because a time chosen for you is one you have
+  // to notice and correct.
+  const STEPPER_START = '12:00';
 
   const bumpTime = (deltaHours: number, deltaMinutes: number) => {
     // Setting a time only makes sense against a date; default to today.
-    const base = time || DEFAULT_TIME;
+    const base = time || STEPPER_START;
     const {hours, minutes} = parseHM(base);
     onChange(date || today, toHM(hours + deltaHours, minutes + deltaMinutes));
   };
@@ -147,7 +175,7 @@ export function DateTimePicker(props: Props): React.JSX.Element {
       <View style={styles.timeBlock}>
         <Text style={styles.timeLabel}>Time</Text>
 
-        {time ? (
+        {showTime ? (
           <View style={styles.timeControls}>
             <View style={styles.spinner}>
               <Arrow label="▲" onPress={() => bumpTime(-1, 0)} />
@@ -156,6 +184,8 @@ export function DateTimePicker(props: Props): React.JSX.Element {
             </View>
 
             <TextInput
+              ref={timeInputRef}
+              onFocus={handleTimeFocus}
               style={styles.timeInput}
               value={time}
               onChangeText={next => onChange(date || today, next)}
@@ -171,8 +201,15 @@ export function DateTimePicker(props: Props): React.JSX.Element {
             </View>
 
             <View style={styles.timeAside}>
-              <Text style={styles.timePreview}>{formatTime(time, timeFormat)}</Text>
-              <Pressable onPress={() => onChange(date, '')} hitSlop={8}>
+              <Text style={styles.timePreview}>
+                {time ? formatTime(time, timeFormat) : 'No time set'}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setTimeOpen(false);
+                  onChange(date, '');
+                }}
+                hitSlop={8}>
                 <Text style={styles.clearLink}>Remove time</Text>
               </Pressable>
             </View>
@@ -180,8 +217,13 @@ export function DateTimePicker(props: Props): React.JSX.Element {
         ) : (
           <Pressable
             style={styles.addTime}
-            onPress={() => onChange(date || today, DEFAULT_TIME)}>
-            <Text style={styles.addTimeText}>+ Add a time (starts at noon)</Text>
+            onPress={() => {
+              setTimeOpen(true);
+              // Opens the row without choosing a time. Only the date is passed
+              // through, so nothing is set until the user types or steps.
+              onChange(date || today, '');
+            }}>
+            <Text style={styles.addTimeText}>+ Add a time</Text>
           </Pressable>
         )}
       </View>

@@ -11,6 +11,7 @@ import React from 'react';
 import {Pressable, Text, View} from 'react-native';
 
 import {eventsOnDay, taskSpan, tasksOnDay, tasksRunningOn} from '../agenda';
+import {arrange, visible} from '../subtasks';
 import {WEEKDAYS_SHORT} from '../calendar';
 import {formatDate, formatTime, type DateFormat, type TimeFormat} from '../format';
 import {toDateInput} from '../ical';
@@ -33,10 +34,15 @@ function hourOf(event: RemoteEvent): number | null {
   return match ? Number(match[1]) : null;
 }
 
-export function DayView(props: {
+function DayViewImpl(props: {
   day: string;
   events: RemoteEvent[];
   tasks: RemoteTask[];
+  /** Parent UIDs whose steps are showing. Folded is the resting state. */
+  openSteps: Set<string>;
+  onToggleSteps: (uid: string) => void;
+  /** Jump to the note page a task was captured from, when it has one. */
+  onOpenSource: (task: RemoteTask) => void;
   dateFormat: DateFormat;
   timeFormat: TimeFormat;
   hasNote: boolean;
@@ -52,6 +58,9 @@ export function DayView(props: {
     day,
     events,
     tasks,
+    openSteps,
+    onToggleSteps,
+    onOpenSource,
     dateFormat,
     timeFormat,
     hasNote,
@@ -69,7 +78,11 @@ export function DayView(props: {
 
   // Completed tasks never appear in either panel.
   const openTasks = tasks.filter(t => !t.completed);
-  const todays = tasksOnDay(openTasks, day);
+  // Arranged into families, exactly as the Tasks tab does it, so a task with
+  // steps reads the same here: a fold arrow, a step count, and its steps folded
+  // away until asked for. A step due today still appears in its own right, under
+  // its parent.
+  const todays = visible(arrange(tasksOnDay(openTasks, day), 'due-asc'), openSteps);
   // Multi-day tasks passing through today, shown separately so they are not
   // mistaken for work due today.
   const running = tasksRunningOn(openTasks, day);
@@ -205,16 +218,50 @@ export function DayView(props: {
       <View style={styles.dayTasks}>
         <Text style={styles.paneTitle}>Tasks · {formatDate(day, dateFormat)}</Text>
         {todays.length === 0 && <Text style={styles.weekEmpty}>Nothing due.</Text>}
-        {todays.map(task => {
+        {todays.map(row => {
+          const task = row.todo;
           const over = task.dueAt !== null && task.dueAt < Date.now();
           return (
-          <Pressable key={task.uid} onPress={() => onCompleteTask(task)} style={styles.paneTask}>
-            <Text style={[styles.paneTaskText, over && styles.pastText]}>
-              ☐ {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} ` : ''}
-              {task.summary}
-            </Text>
-            <Text style={styles.slotMeta}>{task.collectionLabel}</Text>
-          </Pressable>
+            <View key={task.uid} style={styles.paneTaskRow}>
+              {row.stepCount > 0 ? (
+                <Pressable
+                  onPress={() => onToggleSteps(task.uid)}
+                  hitSlop={14}
+                  style={styles.paneFoldHit}>
+                  <Text style={styles.paneFold}>{openSteps.has(task.uid) ? '▾' : '▸'}</Text>
+                </Pressable>
+              ) : (
+                // Keeps every tick box on one line whether or not a task has
+                // steps, the same as the task list.
+                <View style={styles.paneFoldHit} />
+              )}
+              <Pressable
+                onPress={() => onCompleteTask(task)}
+                style={[styles.grow, row.depth > 0 && styles.paneTaskStep]}>
+                <Text style={[styles.paneTaskText, over && styles.pastText]}>
+                  ☐ {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} ` : ''}
+                  {task.summary}
+                </Text>
+                <Text style={styles.slotMeta}>
+                  {task.collectionLabel}
+                  {row.stepCount > 0 ? `  ·  ${row.stepCount} steps` : ''}
+                </Text>
+              </Pressable>
+              {/*
+                A task captured by lassoing handwriting knows the page it came
+                from. The chip goes back to it — the same affordance the Tasks
+                tab has, which this pane was missing.
+              */}
+              {!!task.sourcePath && (
+                <Pressable
+                  style={styles.sourceChip}
+                  onPress={() => onOpenSource(task)}
+                  hitSlop={6}>
+                  <Text style={styles.sourceChipText}>↩</Text>
+                  <Text style={styles.sourceChipLabel}>page</Text>
+                </Pressable>
+              )}
+            </View>
           );
         })}
 
@@ -261,3 +308,10 @@ export function DayView(props: {
     </>
   );
 }
+
+/**
+ * Memoised. These grids are pure functions of their props, and on an e-ink panel
+ * an avoidable re-render is an avoidable full-panel repaint — the calendar was
+ * rebuilding every view on any state change anywhere in the app.
+ */
+export const DayView = React.memo(DayViewImpl);
