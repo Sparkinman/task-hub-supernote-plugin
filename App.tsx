@@ -52,6 +52,7 @@ import {
   Confirm,
   CalendarIcon,
   Field,
+  Fold,
   FolderIcon,
   Header,
   LoadingLine,
@@ -640,7 +641,13 @@ export default function App(): React.JSX.Element {
       if (isConfigured(cfg)) {
         setStatus(null);
       } else {
-        setStatus({kind: 'error', message: 'Choose a task list in settings before saving.'});
+        // Not an error in the sense of something having gone wrong: capturing a
+        // task is the one feature that genuinely needs a server to put it on.
+        setStatus({
+          kind: 'error',
+          message:
+            'Saving a task needs a task list. Add a CalDAV server in settings, or use the note features, which work without one.',
+        });
       }
     } catch (err) {
       setStatus({kind: 'error', message: describe(err)});
@@ -1370,12 +1377,16 @@ export default function App(): React.JSX.Element {
     if (blockedInDemo()) {
       return;
     }
-    if (!hasCollections(config) && !hasCalendars(config)) {
-      setStatus({kind: 'error', message: 'Tick at least one task list or calendar first.'});
-      return;
-    }
+    // Deliberately no requirement to have ticked anything. The note features —
+    // daily, weekly, monthly, quarterly and yearly notes, meeting notes, the
+    // templates and folders they use — need no server at all, and refusing to
+    // save settings until a task list was chosen made those unreachable for
+    // anybody not running a CalDAV server.
     setConfig(config);
-    const summary = `${config.collectionUrls.length} task list(s) and ${config.calendarUrls.length} calendar(s)`;
+    const summary =
+      hasCollections(config) || hasCalendars(config)
+        ? `${config.collectionUrls.length} task list(s) and ${config.calendarUrls.length} calendar(s)`
+        : 'note settings (no server configured)';
 
     if (!storageAvailable()) {
       setStatus({kind: 'done', message: `Saved for this session — ${summary}.`});
@@ -2044,7 +2055,16 @@ will not duplicate them.`}
               <StatusLine status={status} />
               <LoadingLine visible={loading} />
 
-              {listed.length === 0 && !loading && (
+              {listed.length === 0 && !loading && !hasCollections(config) && (
+                <Text style={styles.note}>
+                  No task server is set up, so there are no tasks to show. Tasks need a CalDAV
+                  server such as Task Hub — the Calendar tab and everything it creates (daily,
+                  weekly, monthly, quarterly and yearly notes, and meeting notes) works without
+                  one.
+                </Text>
+              )}
+
+              {listed.length === 0 && !loading && hasCollections(config) && (
                 <Text style={styles.empty}>No open tasks match.</Text>
               )}
               {listed.map(row => (
@@ -2148,7 +2168,10 @@ will not duplicate them.`}
 
               {!hasCalendars(config) && (
                 <Text style={styles.note}>
-                  No calendars selected — pick VEVENT collections in settings.
+                  No calendar server is set up, so no events are shown. Everything else on this
+                  tab works without one: the day, week, month, quarter and year views, and the
+                  notes each of them creates. Add a CalDAV calendar in settings to see events
+                  here too.
                 </Text>
               )}
 
@@ -2500,6 +2523,26 @@ function SettingsScreen(props: {
   onWipe: () => void;
   onClose: () => void;
 }): React.JSX.Element {
+  /**
+   * Which settings groups are open.
+   *
+   * Independent rather than an accordion: somebody comparing the weekly and
+   * monthly note layouts wants both on screen, and closing one to open another
+   * is a repaint they did not ask for. The server group opens by default
+   * because it is the one thing a new user must decide about.
+   */
+  const [openFolds, setOpenFolds] = useState<Set<string>>(() => new Set(['server']));
+  const toggleFold = (key: string) =>
+    setOpenFolds(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+
   const {
     config,
     collections,
@@ -2578,6 +2621,34 @@ function SettingsScreen(props: {
           Android asks for permission — decline it and every request fails silently, so allow it.
         </Text>
       </Section>
+
+      <Fold
+        title="Task and calendar server"
+        hint={'Optional. Task Hub or any CalDAV server gives you tasks and calendar events. It is recommended for task management and calendars, but it is NOT required — every note feature below works without it.'}
+        open={openFolds.has('server')}
+        onToggle={() => toggleFold('server')}>
+      {/*
+        Said plainly, and said here rather than only in the help: somebody who
+        does not run a server should be able to stop reading at this point and
+        still have a working plugin.
+      */}
+      <Text style={styles.noteCompact}>
+        {`A CalDAV server is RECOMMENDED for task management and calendars, and is NOT required
+for the plugin's note features. Without one you still get the day, week, month, quarter and
+year views and every note they create, page marks on captured handwriting, and templates.
+What needs a server: tasks, calendar events, and capturing handwriting as a task.`}
+      </Text>
+      <Text style={styles.noteCompact}>
+        {`Task Hub is the server this plugin is built alongside — self-hosted, and it runs on a
+Raspberry Pi. It installs with one command from:`}
+      </Text>
+      <Text selectable style={styles.linkText}>
+        https://github.com/Sparkinman/task-hub
+      </Text>
+      <Text style={styles.noteCompact}>
+        Any other CalDAV server works too — Radicale, or anything that speaks the same
+        protocol. The fields below are the same either way.
+      </Text>
 
       <Text style={styles.subheadingCompact}>Server</Text>
       <Field
@@ -2682,6 +2753,13 @@ function SettingsScreen(props: {
         }
       />
 
+      </Fold>
+
+      <Fold
+        title="Notes"
+        hint={'Daily, weekly, monthly, quarterly, yearly and meeting notes: where each lives, how its path is built, and which template a new one starts from. None of this needs a server.'}
+        open={openFolds.has('notes')}
+        onToggle={() => toggleFold('notes')}>
       <Text style={styles.subheadingCompact}>Daily notes</Text>
       <Text style={styles.noteCompact}>
         One note per day, created and opened from the Day, Week and Month views. The button on
@@ -2826,6 +2904,13 @@ function SettingsScreen(props: {
         onPick={v => onChange({...config, meetingNote: {...config.meetingNote, template: v}})}
       />
 
+      </Fold>
+
+      <Fold
+        title="Date and time format"
+        hint={'How dates and times are written throughout the plugin.'}
+        open={openFolds.has('formats')}
+        onToggle={() => toggleFold('formats')}>
       <Text style={styles.subheadingCompact}>Date format</Text>
       <Choice
         options={DATE_FORMATS.map(f => ({key: f.key, label: `${f.label}  ${f.example}`}))}
@@ -2840,6 +2925,13 @@ function SettingsScreen(props: {
         onPick={k => onChange({...config, timeFormat: k as TimeFormat})}
       />
 
+      </Fold>
+
+      <Fold
+        title="Marks left on a captured page"
+        hint={'What the plugin draws on a note page when handwriting there becomes a task.'}
+        open={openFolds.has('marks')}
+        onToggle={() => toggleFold('marks')}>
       <Text style={styles.subheadingCompact}>Mark the page a task came from</Text>
       <Text style={styles.noteCompact}>
         When you lasso handwriting into a task, the strokes are boxed on the page so you can
@@ -2893,7 +2985,10 @@ function SettingsScreen(props: {
           )}
         </>
       )}
+      </Fold>
 
+      {/* Outside every fold: the bottom Save has to be reachable whatever is
+          open, the same as the one at the top. */}
       <Text style={styles.noteCompact}>
         {storePath
           ? `Saved to ${storePath} — survives plugin updates and reinstalls. Plain text on shared storage, so prefer a Radicale credential scoped to these collections.`
@@ -2908,14 +3003,20 @@ function SettingsScreen(props: {
         />
       </View>
 
-      <Text style={styles.subheadingCompact}>Start over</Text>
-      <Text style={styles.noteCompact}>
-        Uninstalling the plugin does not remove the saved file — it is kept outside the
-        plugin's own storage so settings survive updates. This is the way to clear it.
-      </Text>
-      <View style={styles.actionsTight}>
-        <Button label="Wipe All Save Data" onPress={onWipe} />
-      </View>
+      <Fold
+        title="Storage and starting over"
+        hint={'Where these settings are kept on the device, and how to clear them.'}
+        open={openFolds.has('storage')}
+        onToggle={() => toggleFold('storage')}>
+        <Text style={styles.subheadingCompact}>Start over</Text>
+        <Text style={styles.noteCompact}>
+          Uninstalling the plugin does not remove the saved file — it is kept outside the
+          plugin's own storage so settings survive updates. This is the way to clear it.
+        </Text>
+        <View style={styles.actionsTight}>
+          <Button label="Wipe All Save Data" onPress={onWipe} />
+        </View>
+      </Fold>
 
       <StatusLine status={status} />
     </>

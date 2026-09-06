@@ -198,6 +198,38 @@ export function CheckRow(props: {
   );
 }
 
+/**
+ * A collapsible block of settings.
+ *
+ * Separate from `Section`, which counts the rows it holds — a settings group
+ * has no count worth showing, and it does have a line of explanation that
+ * belongs on the outside where it can be read before deciding to open it.
+ *
+ * The settings page is long: a server, its lists, five kinds of note, page
+ * marks and formats. Shown all at once it reads as a wall, and the thing most
+ * people came to change is somewhere in the middle of it.
+ */
+export function Fold(props: {
+  title: string;
+  /** One line, shown whether or not the block is open. */
+  hint?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <View style={styles.settingsFold}>
+      <Pressable style={styles.settingsFoldHead} onPress={props.onToggle} hitSlop={6}>
+        <Text style={styles.settingsFoldTitle}>
+          {props.open ? '▾' : '▸'} {props.title}
+        </Text>
+      </Pressable>
+      {!!props.hint && <Text style={styles.settingsFoldHint}>{props.hint}</Text>}
+      {props.open && <View style={styles.settingsFoldBody}>{props.children}</View>}
+    </View>
+  );
+}
+
 export function Section(props: {
   title: string;
   open: boolean;
@@ -967,6 +999,20 @@ export const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   tinyButtonText: {fontSize: 20, color: '#000'},
+  settingsFold: {borderTopWidth: 2, borderTopColor: '#000', marginTop: 18, paddingTop: 8},
+  settingsFoldHead: {paddingVertical: 6},
+  settingsFoldTitle: {fontSize: 26, fontWeight: '700', color: '#000'},
+  settingsFoldHint: {fontSize: 17, color: '#444', lineHeight: 23, marginBottom: 6},
+  settingsFoldBody: {marginTop: 4},
+  // An address to read and type elsewhere, not a tappable link: the plugin has
+  // no browser to hand off to, so it is set to be selectable and left legible.
+  linkText: {
+    fontSize: 18,
+    color: '#000',
+    fontWeight: '700',
+    marginBottom: 8,
+    textDecorationLine: 'underline',
+  },
   section: {marginTop: 16},
   sectionHead: {borderTopWidth: 1, borderTopColor: '#000', paddingVertical: 10},
   sectionTitle: {fontSize: 22, fontWeight: '700', color: '#000'},
