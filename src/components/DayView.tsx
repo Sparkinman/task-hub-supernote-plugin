@@ -46,6 +46,8 @@ function DayViewImpl(props: {
   dateFormat: DateFormat;
   timeFormat: TimeFormat;
   hasNote: boolean;
+  /** False when daily notes are switched off in settings. */
+  notesEnabled: boolean;
   onShiftDay: (days: number) => void;
   onEditEvent: (event: RemoteEvent) => void;
   onCompleteTask: (task: RemoteTask) => void;
@@ -64,6 +66,7 @@ function DayViewImpl(props: {
     dateFormat,
     timeFormat,
     hasNote,
+    notesEnabled,
     onShiftDay,
     onEditEvent,
     onCompleteTask,
@@ -119,15 +122,17 @@ function DayViewImpl(props: {
         </Pressable>
       </View>
 
-      <View style={styles.noteButtonRow}>
-        <Pressable
-          style={[styles.button, styles.buttonPrimary]}
-          onPress={() => onDailyNote(day, hasNote)}>
-          <Text style={styles.buttonTextPrimary}>
-            {hasNote ? 'Open existing note' : 'Create daily note'}
-          </Text>
-        </Pressable>
-      </View>
+      {notesEnabled && (
+        <View style={styles.noteButtonRow}>
+          <Pressable
+            style={[styles.button, styles.buttonPrimary]}
+            onPress={() => onDailyNote(day, hasNote)}>
+            <Text style={styles.buttonTextPrimary}>
+              {hasNote ? 'Open existing note' : 'Create daily note'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
 
       <View style={styles.dayWrap}>
       <View style={styles.dayGrid}>

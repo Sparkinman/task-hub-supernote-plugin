@@ -23,8 +23,11 @@ function MonthViewImpl(props: {
   marks: Record<string, DayMarks>;
   onSelect: (iso: string) => void;
   onMonth: (year: number, month: number) => void;
-  /** Which weeks already have a weekly note, keyed by the week's Sunday. */
-  weekNotes: Set<string>;
+  /**
+   * Which weeks already have a weekly note, keyed by the week's Sunday.
+   * Undefined when weekly notes are switched off, which hides the gutter.
+   */
+  weekNotes?: Set<string>;
   /** Opens or creates the weekly note for the week whose number was tapped. */
   onWeekNote: (iso: string, exists: boolean) => void;
 }): React.JSX.Element {
@@ -69,7 +72,7 @@ function MonthViewImpl(props: {
       {weeks.map((row, i) => {
         const firstReal = row.find(c => c.iso);
         const weekStart = firstReal?.iso ?? '';
-        const hasWeekNote = !!weekStart && weekNotes.has(weekStartOf(weekStart));
+        const hasWeekNote = !!weekStart && !!weekNotes?.has(weekStartOf(weekStart));
         return (
         <View key={i} style={styles.week}>
           {/*
@@ -80,7 +83,7 @@ function MonthViewImpl(props: {
           */}
           <Pressable
             style={styles.monthWeekNum}
-            disabled={!weekStart}
+            disabled={!weekStart || !weekNotes}
             onPress={() => weekStart && onWeekNote(weekStart, hasWeekNote)}>
             <Text style={[styles.monthWeekNumText, hasWeekNote && styles.monthWeekNumHas]}>
               {weekStart ? weekNumber(weekStart) : ''}

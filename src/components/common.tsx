@@ -35,6 +35,12 @@ export function Header(props: {
   masthead?: boolean;
   /** Held back while a write is in flight, so leaving cannot interrupt it. */
   closeDisabled?: boolean;
+  /**
+   * Hides the corner close entirely. The settings screen does this: leaving is
+   * a decision between saving and discarding, so it belongs on the two labelled
+   * buttons at the foot of the page rather than in a corner that says neither.
+   */
+  hideClose?: boolean;
 }): React.JSX.Element {
   if (props.masthead) {
     return (
@@ -43,15 +49,17 @@ export function Header(props: {
           <FullLogo />
           <Text style={styles.mastheadTitle}>{props.title}</Text>
         </View>
-        <Pressable
-          style={[styles.close, props.closeDisabled && styles.buttonDisabled]}
-          disabled={props.closeDisabled}
-          onPress={props.onClose}
-          hitSlop={10}>
-          <Text style={[styles.closeText, props.closeDisabled && styles.buttonTextDisabled]}>
-            {props.closeDisabled ? 'Saving…' : 'Done & Exit'}
-          </Text>
-        </Pressable>
+        {!props.hideClose && (
+          <Pressable
+            style={[styles.close, props.closeDisabled && styles.buttonDisabled]}
+            disabled={props.closeDisabled}
+            onPress={props.onClose}
+            hitSlop={10}>
+            <Text style={[styles.closeText, props.closeDisabled && styles.buttonTextDisabled]}>
+              {props.closeDisabled ? 'Saving…' : 'Done & Exit'}
+            </Text>
+          </Pressable>
+        )}
       </View>
     );
   }
@@ -73,15 +81,17 @@ export function Header(props: {
           <Text style={styles.heading}>{props.title}</Text>
         </View>
       </View>
-      <Pressable
-        style={[styles.close, props.closeDisabled && styles.buttonDisabled]}
-        disabled={props.closeDisabled}
-        onPress={props.onClose}
-        hitSlop={10}>
-        <Text style={[styles.closeText, props.closeDisabled && styles.buttonTextDisabled]}>
-          {props.closeDisabled ? 'Saving…' : 'Done & Exit'}
-        </Text>
-      </Pressable>
+      {!props.hideClose && (
+        <Pressable
+          style={[styles.close, props.closeDisabled && styles.buttonDisabled]}
+          disabled={props.closeDisabled}
+          onPress={props.onClose}
+          hitSlop={10}>
+          <Text style={[styles.closeText, props.closeDisabled && styles.buttonTextDisabled]}>
+            {props.closeDisabled ? 'Saving…' : 'Done & Exit'}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }

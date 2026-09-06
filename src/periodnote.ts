@@ -25,7 +25,7 @@ import {dailyNotePath, type DailyNoteConfig} from './dailynote';
 
 export type Period = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
-/** Same shape as a daily note's: a root, a token layout, and a template. */
+/** Same shape as a daily note's: a switch, a root, a token layout, a template. */
 export type PeriodNoteConfig = DailyNoteConfig;
 
 export const PERIODS: {key: Period; label: string; noun: string}[] = [
@@ -37,24 +37,28 @@ export const PERIODS: {key: Period; label: string; noun: string}[] = [
 ];
 
 export const DEFAULT_WEEK_NOTE: PeriodNoteConfig = {
+  enabled: true,
   root: 'Note/Weekly',
   layout: '{YYYY}/W{WW}',
   template: '',
 };
 
 export const DEFAULT_MONTH_NOTE: PeriodNoteConfig = {
+  enabled: true,
   root: 'Note/Monthly',
   layout: '{YYYY}/{MM}-{MMMM}',
   template: '',
 };
 
 export const DEFAULT_QUARTER_NOTE: PeriodNoteConfig = {
+  enabled: true,
   root: 'Note/Quarterly',
   layout: '{YYYY}/{QQ}',
   template: '',
 };
 
 export const DEFAULT_YEAR_NOTE: PeriodNoteConfig = {
+  enabled: true,
   root: 'Note/Yearly',
   layout: '{YYYY}',
   template: '',

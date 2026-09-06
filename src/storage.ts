@@ -119,6 +119,10 @@ function sanitisePeriodNote(raw: unknown, fallback: PeriodNoteConfig): PeriodNot
   }
   const value = raw as Partial<PeriodNoteConfig>;
   return {
+    // Absent in a file written before the switches existed, which must mean on:
+    // those users already have these notes and turning them off silently would
+    // be a change nobody asked for.
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
     root: typeof value.root === 'string' && value.root.trim() ? value.root : fallback.root,
     layout:
       typeof value.layout === 'string' && value.layout.trim() ? value.layout : fallback.layout,
@@ -132,6 +136,7 @@ function sanitiseDailyNote(raw: unknown): DailyNoteConfig {
   }
   const value = raw as Partial<DailyNoteConfig>;
   return {
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
     root: typeof value.root === 'string' && value.root.trim() ? value.root : DEFAULT_DAILY_NOTE.root,
     layout:
       typeof value.layout === 'string' && value.layout.trim()

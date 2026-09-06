@@ -10,6 +10,18 @@ import {formatDate, type DateFormat} from './format';
  */
 
 export interface DailyNoteConfig {
+  /**
+   * Whether this kind of note is offered at all.
+   *
+   * Turning one off hides its buttons from the views rather than deleting
+   * anything: somebody who keeps a weekly review but no monthly one should not
+   * have a Create month note button on the screen they use every day, and the
+   * settings for it are still there if they change their mind.
+   *
+   * Always set — the sanitiser fills it in as true for a settings file written
+   * before the switches existed, since those users already have these notes.
+   */
+  enabled: boolean;
   /** Folder under shared storage, e.g. 'Note/Daily'. */
   root: string;
   /** Token template for the path below the root, without the .note extension. */
@@ -19,6 +31,7 @@ export interface DailyNoteConfig {
 }
 
 export const DEFAULT_DAILY_NOTE: DailyNoteConfig = {
+  enabled: true,
   root: 'Note/Daily',
   layout: '{YYYY}/{MM}-{MMMM}/{DATE}',
   template: '',

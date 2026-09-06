@@ -171,7 +171,7 @@ describe('layout tokens', () => {
       for (const preset of presets) {
         const path = periodNotePath(
           period as Period,
-          {root: 'Note/X', layout: preset.layout, template: ''},
+          {enabled: true, root: 'Note/X', layout: preset.layout, template: ''},
           '2026-09-09',
           'iso',
         );
@@ -227,6 +227,31 @@ describe('the year period', () => {
   it('files it where the default promises', () => {
     expect(periodNotePath('year', DEFAULT_YEAR_NOTE, '2026-06-15', 'iso')).toBe(
       'Note/Yearly/2026.note',
+    );
+  });
+});
+
+describe('the enable switches', () => {
+  it('starts every kind of note switched on', () => {
+    // A user who has never seen these settings should find the plugin behaving
+    // exactly as it did before they existed.
+    for (const config of [
+      DEFAULT_WEEK_NOTE,
+      DEFAULT_MONTH_NOTE,
+      DEFAULT_QUARTER_NOTE,
+      DEFAULT_YEAR_NOTE,
+    ]) {
+      expect(config.enabled).toBe(true);
+    }
+    expect(DEFAULT_DAILY_NOTE.enabled).toBe(true);
+  });
+
+  it('does not change where a note is filed', () => {
+    // The switch decides whether the button is offered, not the path.
+    const on = {...DEFAULT_WEEK_NOTE, enabled: true};
+    const off = {...DEFAULT_WEEK_NOTE, enabled: false};
+    expect(periodNotePath('week', off, '2026-09-09', 'iso')).toBe(
+      periodNotePath('week', on, '2026-09-09', 'iso'),
     );
   });
 });

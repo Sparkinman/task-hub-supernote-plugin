@@ -567,14 +567,14 @@ export default function App(): React.JSX.Element {
 
 
   /** Dismiss once the confirmation has been read, cancelling any earlier one. */
-  const scheduleClose = useCallback(() => {
+  const scheduleClose = useCallback((delayMs = 1200) => {
     if (closeTimer.current !== null) {
       clearTimeout(closeTimer.current);
     }
     closeTimer.current = setTimeout(() => {
       closeTimer.current = null;
       close();
-    }, 1200);
+    }, delayMs);
   }, [close]);
 
   /**
@@ -878,6 +878,22 @@ export default function App(): React.JSX.Element {
    * Nothing on this page takes effect until Save, so closing with changes
    * pending throws them away. That is worth one question.
    */
+  /** Leave settings without saving, after saying plainly what that means. */
+  const cancelSettings = useCallback(() => {
+    setAsk({
+      title: 'Exit without saving?',
+      body: 'Any changes you have made on this page will be discarded.',
+      label: 'Yes, discard and exit',
+      run: async () => {
+        // Put the form back to what is stored, so reopening settings does not
+        // show discarded edits as though they were still pending.
+        setLocalConfig(getConfig());
+        close();
+        return '';
+      },
+    });
+  }, [close]);
+
   const closeSettings = useCallback(() => {
     if (!settingsDirty) {
       close();
@@ -1373,9 +1389,15 @@ export default function App(): React.JSX.Element {
     }
   }, [config, blockedInDemo]);
 
-  const persistSettings = useCallback(async () => {
+  /**
+   * Write the settings, reporting whether they were stored.
+   *
+   * Returns false when nothing was saved — the demo build, or a storage
+   * failure — so the caller can decline to say "Setup saved" and leave.
+   */
+  const persistSettings = useCallback(async (): Promise<boolean> => {
     if (blockedInDemo()) {
-      return;
+      return false;
     }
     // Deliberately no requirement to have ticked anything. The note features —
     // daily, weekly, monthly, quarterly and yearly notes, meeting notes, the
@@ -1391,7 +1413,7 @@ export default function App(): React.JSX.Element {
     if (!storageAvailable()) {
       setStatus({kind: 'done', message: `Saved for this session — ${summary}.`});
       void refresh();
-      return;
+      return true;
     }
 
     setStatus({kind: 'working', message: 'Saving settings…'});
@@ -1408,7 +1430,31 @@ export default function App(): React.JSX.Element {
       });
     }
     void refresh();
+    return true;
   }, [config, refresh, blockedInDemo]);
+
+  /**
+   * Save the settings, say so, and leave.
+   *
+   * The confirmation is shown before the plugin closes rather than after —
+   * "Setup saved" is the whole point of pressing the button, and a message that
+   * flashes past as the view disappears has not been read.
+   */
+  const saveSettingsAndExit = useCallback(() => {
+    void (async () => {
+      const ok = await persistSettings();
+      if (!ok) {
+        // persistSettings has already said what went wrong; staying on the page
+        // is what lets the user do something about it.
+        return;
+      }
+      setStatus({kind: 'done', message: 'Settings saved'});
+      // Long enough to read, short enough not to be a wait. No dialog: the save
+      // worked, and there is nothing to decide.
+      scheduleClose(2500);
+    })();
+  }, [persistSettings, scheduleClose]);
+
 
   /**
    * Erase everything stored on the device.
@@ -2181,6 +2227,7 @@ will not duplicate them.`}
                   selected={day}
                   marks={marks}
                   hasNote={hasYearNote}
+                  notesEnabled={config.yearNote.enabled}
                   onSelect={openDayOn}
                   onYear={shiftToYear}
                   onOpenMonth={openMonthAt}
@@ -2197,6 +2244,7 @@ will not duplicate them.`}
                   selected={day}
                   marks={marks}
                   hasNote={hasQuarterNote}
+                  notesEnabled={config.quarterNote.enabled}
                   onSelect={openDayOn}
                   onQuarter={shiftToQuarter}
                   onOpenMonth={openMonthAt}
@@ -2206,15 +2254,17 @@ will not duplicate them.`}
 
               {calView === 'month' && (
                 <>
-                  <View style={styles.noteButtonRow}>
-                    <Pressable
-                      style={[styles.button, styles.buttonPrimary]}
-                      onPress={() => askPeriodNote('month', day, hasMonthNote)}>
-                      <Text style={styles.buttonTextPrimary}>
-                        {hasMonthNote ? 'Open month note' : 'Create month note'}
-                      </Text>
-                    </Pressable>
-                  </View>
+                  {config.monthNote.enabled && (
+                    <View style={styles.noteButtonRow}>
+                      <Pressable
+                        style={[styles.button, styles.buttonPrimary]}
+                        onPress={() => askPeriodNote('month', day, hasMonthNote)}>
+                        <Text style={styles.buttonTextPrimary}>
+                          {hasMonthNote ? 'Open month note' : 'Create month note'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
                   <MonthView
                     year={view.year}
                     month={view.month}
@@ -2222,7 +2272,7 @@ will not duplicate them.`}
                     marks={marks}
                     onSelect={setDay}
                     onMonth={(year, month) => setView({year, month})}
-                    weekNotes={weekNotesInView}
+                    weekNotes={config.weekNote.enabled ? weekNotesInView : undefined}
                     onWeekNote={(iso, exists) => askPeriodNote('week', iso, exists)}
                   />
                   <Text style={styles.legend}>
@@ -2242,15 +2292,17 @@ will not duplicate them.`}
                     they act on different things and sat together looking like a
                     pair.
                   */}
-                  <View style={styles.noteButtonRow}>
-                    <Pressable
-                      style={[styles.button, styles.buttonPrimary]}
-                      onPress={() => askDailyNote(day, dayHasNote)}>
-                      <Text style={styles.buttonTextPrimary}>
-                        {dayHasNote ? 'Open note for this day' : 'Create note for this day'}
-                      </Text>
-                    </Pressable>
-                  </View>
+                  {config.dailyNote.enabled && (
+                    <View style={styles.noteButtonRow}>
+                      <Pressable
+                        style={[styles.button, styles.buttonPrimary]}
+                        onPress={() => askDailyNote(day, dayHasNote)}>
+                        <Text style={styles.buttonTextPrimary}>
+                          {dayHasNote ? 'Open note for this day' : 'Create note for this day'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
                   {dayEvents.length === 0 && dayTasks.length === 0 && (
                     <Text style={styles.empty}>Nothing scheduled.</Text>
                   )}
@@ -2288,7 +2340,7 @@ will not duplicate them.`}
                 </>
               )}
 
-              {calView === 'week' && (
+              {calView === 'week' && config.weekNote.enabled && (
                 <View style={styles.noteButtonRow}>
                   <Pressable
                     style={[styles.button, styles.buttonPrimary]}
@@ -2333,6 +2385,7 @@ will not duplicate them.`}
                   dateFormat={dateFormat}
                   timeFormat={timeFormat}
                   hasNote={dayHasNote}
+                  notesEnabled={config.dailyNote.enabled}
                   onDailyNote={askDailyNote}
                   onPickDate={() => setPickingDate('day')}
                   eventNotes={eventNotes}
@@ -2362,7 +2415,8 @@ will not duplicate them.`}
           onToggleHelp={() => setShowHelp(v => !v)}
           onChange={setLocalConfig}
           onDiscover={() => void discover()}
-          onSave={() => void persistSettings()}
+          onSave={saveSettingsAndExit}
+          onCancel={cancelSettings}
           dirty={settingsDirty}
           onWipe={askWipe}
           storePath={storePath}
@@ -2445,6 +2499,20 @@ function PeriodNoteSettings(props: {
     <>
       <Text style={styles.subheadingCompact}>{title}</Text>
       <Text style={styles.noteCompact}>{hint}</Text>
+      <CheckRow
+        compact
+        label={`${title} enabled`}
+        checked={note.enabled}
+        onToggle={() => set({enabled: !note.enabled})}
+      />
+      {!note.enabled && (
+        <Text style={styles.noteCompact}>
+          Switched off, so its buttons are hidden from the calendar views. These settings are
+          kept, and turning it back on restores them exactly as they are.
+        </Text>
+      )}
+      {note.enabled && (
+      <>
       <View style={styles.browseRow}>
         <View style={styles.grow}>
           <Field
@@ -2498,6 +2566,8 @@ function PeriodNoteSettings(props: {
         value={note.template}
         onPick={v => set({template: v})}
       />
+      </>
+      )}
     </>
   );
 }
@@ -2518,8 +2588,10 @@ function SettingsScreen(props: {
   onChange: (config: RadicaleConfig) => void;
   onDiscover: () => void;
   onSave: () => void;
-  /** True when the form differs from what is stored, which both Saves report. */
+  /** True when the form differs from what is stored, which the Save reports. */
   dirty: boolean;
+  /** Leave without saving, after confirming. */
+  onCancel: () => void;
   onWipe: () => void;
   onClose: () => void;
 }): React.JSX.Element {
@@ -2560,6 +2632,7 @@ function SettingsScreen(props: {
     onDiscover,
     onSave,
     dirty,
+    onCancel,
     onWipe,
     onClose,
   } = props;
@@ -2569,24 +2642,12 @@ function SettingsScreen(props: {
 
   return (
     <>
-      <Header title="Setup" onClose={onClose} masthead />
+      <Header title="Setup" onClose={onClose} masthead hideClose />
 
-      {/*
-        A Save at the top as well as the bottom. This page is long — server,
-        collections, four kinds of period note, meeting notes, page marks — and
-        a change made in the first screenful otherwise needs a scroll past
-        everything else to commit it.
-      */}
-      <View style={styles.actionsTight}>
-        <Button
-          label={dirty ? 'Save settings •' : 'Save settings'}
-          primary
-          onPress={onSave}
-        />
-      </View>
       {dirty && (
         <Text style={styles.noteCompact}>
-          You have unsaved changes. Nothing here takes effect until you save.
+          You have unsaved changes. Nothing here takes effect until you save and exit, at the
+          foot of this page.
         </Text>
       )}
 
@@ -2765,6 +2826,17 @@ Raspberry Pi. It installs with one command from:`}
         One note per day, created and opened from the Day, Week and Month views. The button on
         those views says "Create" or "Open" depending on whether the day already has one.
       </Text>
+      <CheckRow
+        compact
+        label="Daily notes enabled"
+        checked={config.dailyNote.enabled}
+        onToggle={() =>
+          onChange({
+            ...config,
+            dailyNote: {...config.dailyNote, enabled: !config.dailyNote.enabled},
+          })
+        }
+      />
       <View style={styles.browseRow}>
         <View style={styles.grow}>
           <Field
@@ -2843,20 +2915,6 @@ Raspberry Pi. It installs with one command from:`}
       />
 
       <PeriodNoteSettings
-        title="Yearly notes"
-        period="year"
-        noteKey="yearNote"
-        hint="One note per year, created from the year view."
-        tokens="{YYYY}"
-        config={config}
-        templates={templates}
-        scrollHandle={scrollHandle}
-        onScrollTo={onScrollTo}
-        onBrowse={() => onBrowsePeriod('year')}
-        onChange={onChange}
-      />
-
-      <PeriodNoteSettings
         title="Quarterly notes"
         period="quarter"
         noteKey="quarterNote"
@@ -2870,6 +2928,30 @@ Raspberry Pi. It installs with one command from:`}
         onChange={onChange}
       />
 
+      <PeriodNoteSettings
+        title="Yearly notes"
+        period="year"
+        noteKey="yearNote"
+        hint="One note per year, created from the year view."
+        tokens="{YYYY}"
+        config={config}
+        templates={templates}
+        scrollHandle={scrollHandle}
+        onScrollTo={onScrollTo}
+        onBrowse={() => onBrowsePeriod('year')}
+        onChange={onChange}
+      />
+
+      </Fold>
+
+      <Fold
+        title="Meeting notes"
+        hint={
+          'Notes attached to a calendar event. These need a calendar, so they are the one ' +
+          'kind of note that does depend on a server.'
+        }
+        open={openFolds.has('meetings')}
+        onToggle={() => toggleFold('meetings')}>
       <Text style={styles.subheadingCompact}>Meeting notes</Text>
       <Text style={styles.noteCompact}>
         Notes linked to calendar events. Stored on this device only — nothing is written back
@@ -2995,12 +3077,17 @@ Raspberry Pi. It installs with one command from:`}
           : 'This build has no on-device storage, so settings last only for this session.'}
       </Text>
 
-      <View style={styles.actionsTight}>
+      <View style={styles.actions}>
         <Button
-          label={dirty ? 'Save settings •' : 'Save settings'}
+          label={dirty ? 'Save and exit •' : 'Save and exit'}
           primary
           onPress={onSave}
         />
+        {/*
+          Not filled: leaving without saving should not look like the thing to
+          press. It is the same weight as the other secondary buttons.
+        */}
+        <Button label="Cancel setup" onPress={onCancel} />
       </View>
 
       <Fold

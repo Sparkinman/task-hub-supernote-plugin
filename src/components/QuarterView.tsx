@@ -102,6 +102,8 @@ function QuarterViewImpl(props: {
   marks: Record<string, DayMarks>;
   /** Whether this quarter already has a note, which changes the button. */
   hasNote: boolean;
+  /** False when this kind of note is switched off in settings. */
+  notesEnabled: boolean;
   onSelect: (iso: string) => void;
   /** Move by whole quarters. */
   onQuarter: (iso: string) => void;
@@ -109,7 +111,17 @@ function QuarterViewImpl(props: {
   onOpenMonth: (year: number, month: number) => void;
   onQuarterNote: (iso: string, exists: boolean) => void;
 }): React.JSX.Element {
-  const {anchor, selected, marks, hasNote, onSelect, onQuarter, onOpenMonth, onQuarterNote} = props;
+  const {
+    anchor,
+    selected,
+    marks,
+    hasNote,
+    notesEnabled,
+    onSelect,
+    onQuarter,
+    onOpenMonth,
+    onQuarterNote,
+  } = props;
   const today = toDateInput(new Date());
   const months = quarterMonths(anchor);
   const year = months.length ? Number(months[0].slice(0, 4)) : new Date().getFullYear();
@@ -128,6 +140,7 @@ function QuarterViewImpl(props: {
         </Pressable>
       </View>
 
+      {notesEnabled && (
       <View style={styles.noteButtonRow}>
         <Pressable
           style={[styles.button, styles.buttonPrimary]}
@@ -137,6 +150,7 @@ function QuarterViewImpl(props: {
           </Text>
         </Pressable>
       </View>
+      )}
 
       {months.map(first => {
         const monthIndex = Number(first.slice(5, 7)) - 1;

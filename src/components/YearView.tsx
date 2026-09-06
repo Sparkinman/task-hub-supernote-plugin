@@ -101,6 +101,8 @@ function YearViewImpl(props: {
   marks: Record<string, DayMarks>;
   /** Whether this year already has a note, which changes the button. */
   hasNote: boolean;
+  /** False when this kind of note is switched off in settings. */
+  notesEnabled: boolean;
   /** Opens the day view on the day tapped — the year view is for finding, not reading. */
   onSelect: (iso: string) => void;
   onYear: (year: number) => void;
@@ -116,6 +118,7 @@ function YearViewImpl(props: {
     selected,
     marks,
     hasNote,
+    notesEnabled,
     onSelect,
     onYear,
     onOpenMonth,
@@ -149,6 +152,7 @@ function YearViewImpl(props: {
         </Pressable>
       </View>
 
+      {notesEnabled && (
       <View style={styles.noteButtonRow}>
         <Pressable
           style={[styles.button, styles.buttonPrimary]}
@@ -158,6 +162,7 @@ function YearViewImpl(props: {
           </Text>
         </Pressable>
       </View>
+      )}
 
       {[0, 1, 2, 3].map(quarter => (
         <View key={quarter}>
