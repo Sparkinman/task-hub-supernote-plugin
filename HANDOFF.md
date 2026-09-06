@@ -1,7 +1,8 @@
-# Task Hub — state as of 2026-09-03
+# Task Hub — state as of 2026-09-06
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-259 tests across 13 suites; `tsc` and eslint clean.
+350 tests across 17 suites; `tsc` and eslint clean. Current build 0.49.0
+(versionCode 64).
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`).
 
@@ -13,7 +14,7 @@ Two plugins ship from this one tree: **Task Hub** (`vfmnvjq0i1hxf8gu`) and
 ```powershell
 npx tsc --noEmit                              # MUST pass before building
 npx eslint . --ext .ts,.tsx,.js
-npx jest                                      # 259 tests, 13 suites
+npx jest                                      # 350 tests, 17 suites
 .uildPlugin.ps1                             # ~15 s -> build/outputs/TaskHub.snplg (6.91 MB)
 .uildDemo.ps1                               # -> build/outputs/TaskHubDemo.snplg, restores the tree
 ```
@@ -21,10 +22,16 @@ npx jest                                      # 259 tests, 13 suites
 Metro does not typecheck, so a type error still produces a `.snplg` that crashes
 on device. Never build on a failing `tsc`.
 
-`build/generated` is never cleared by `buildPlugin.ps1`, and step 14 zips
-whatever is in it — so a bundle left by the other variant gets packaged
-alongside the real one. `buildDemo.ps1` clears it either side of its run; clear
-it by hand if the two are ever built another way.
+`build/generated` is never cleared, and the packaging step zips whatever is in
+it — so a bundle left by the other variant gets packaged alongside the real one.
+`buildDemo.ps1` clears it either side of its run; clear it by hand if the two are
+ever built another way.
+
+`buildPlugin.sh` now EXITS 1 if the APK step fails rather than carrying on. It
+used to print "APK build failed" in red and then package the stale `app.npk` left
+in `build/generated`, finishing with "Plugin package created" — a new JS bundle
+around an old native payload, reported as a success. The usual cause is a shell
+without `JAVA_HOME`: `source ~/.plugin-env` first.
 
 The environment needs `JAVA_HOME`, `ANDROID_HOME` and Node on PATH. In a fresh
 terminal those are already set machine-wide; from a tool session they may need
@@ -295,7 +302,14 @@ their own. The exception was the caption's font clamp, now expressed as a fracti
   left it at `'hub'`, so the next opening never refetched. `openHub` refreshes
   directly on the button press.
 
-## Next session — test these on device
+## Tested on device and settled
+
+The four items this section used to list — shading drawing at all, the caption
+appearing, save being available immediately, completion clearing everything —
+have all been tested on hardware and fixed. See *Page marks* above for what each
+turned out to be. What follows is kept for the shape of the checks.
+
+## Previously: next session — test these on device
 
 None of it could be verified off-device, and all of it changed last:
 
@@ -307,6 +321,72 @@ None of it could be verified off-device, and all of it changed last:
 3. **Save is available immediately** after a lasso — the capture screen no longer fetches
    anything.
 4. **Completing a captured task clears box, caption and shading together.**
+
+
+## What changed since 2026-09-03
+
+A large batch, all on `main` and all released. In rough order of how much of the
+code they touch:
+
+- **Sub tasks.** `RELATED-TO;RELTYPE=PARENT` read and written; families arranged
+  by their soonest outstanding step, folded by default, in the task list and the
+  day view. Steps can be added one per line, take the parent's due date, and a
+  line ending `@2026-09-10` dates that step on its own. The same rule is
+  implemented in the Task Hub web app (`parse_step_line`) so the same text
+  produces the same tasks wherever it is typed.
+- **Priority** across the whole RFC 5545 range, stored as the raw number so
+  another client's `PRIORITY:3` survives an unrelated edit.
+- **Repeats** matching the web page's five choices; a rule the menu cannot name
+  reads as `custom` and is left byte-identical.
+- **Period notes** — week, month, quarter and year alongside daily, each with
+  its own folder, layout, template and on/off switch. `periodnote.ts` is the
+  pure module; every day inside a period must produce the same path, which is
+  what its tests are mostly about.
+- **Year and quarter views**, week numbers in the month gutter, configurable
+  agenda hours.
+- **Templates** from MyStyle and from anywhere on the device, via a new native
+  `listFiles` / `listFilesHere`.
+- **Page marks fixed** — see *Page marks* below.
+- **Runs without a server.** Settings used to refuse to save until a task list
+  was ticked, which put every note feature behind a CalDAV server none of them
+  needs.
+- **e-ink work**: no Modals anywhere (each was a second Android window), no
+  spinners, no translucent scrims, memoised grids and rows, scoped reloads,
+  panel-relative sizing.
+
+## Page marks — what was wrong and why
+
+Four separate bugs, all found by reading Ratta's own documentation through their
+MCP server rather than the SDK sources:
+
+1. `getLassoRect` requires a live selection, and `markPage` was reading it AFTER
+   `setLassoStrokeLink` had consumed the lasso. Both inserts were handed the
+   bounds of a selection that no longer existed.
+2. `insertTextLink` and `insertGeometry` report their real outcome in `result`
+   (0 success, -1 failure), not in `success`. Reading only `success` treated a
+   refusal as a success, which is why nothing appeared and nothing was said.
+3. `penColor: 202` is not a value `insertGeometry` accepts — the Geometry
+   reference documents 0, 157, 201 and 254. 202 was read off a hand-drawn
+   stroke, which is a different list.
+4. `saveCurrentNote` is required before `reloadFile`, or the reload re-reads the
+   file and discards both unsaved inserts.
+
+The caption is now a plain TextBox (`insertText`), not a second link, so one
+captured task leaves exactly one link on the page. Cleanup finds it by its text
+and position rather than by a destination it no longer has, and matches both the
+below-the-box and beside-the-box placements that shipped.
+
+## Panel sizing
+
+`UI_SCALE` in `src/components/common.tsx` interpolates between two measured
+points: a Nomad reports a window height of 998 and reads well at 70%, a Manta
+reports 1365 and runs at full size. Note those are density-independent pixels,
+NOT the panel's own — this was got wrong twice, first with a reference of 1850
+(both devices clamped to 100%) and then 2560 (both clamped to the floor). Both
+times the tell was that the two panels reported the same scale.
+
+`fs()` scales type, `sp()` scales padding, margins, gaps and minimum heights.
+Borders are deliberately not scaled, and positive spacing never rounds to zero.
 
 ## Open threads
 
