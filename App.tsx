@@ -353,6 +353,16 @@ export default function App(): React.JSX.Element {
   const [pickingDate, setPickingDate] = useState<'day' | 'week' | null>(null);
   const [templates, setTemplates] = useState<NoteTemplate[]>([]);
   const [restored, setRestored] = useState(false);
+  /**
+   * Whether the user has edited the settings form since it was last seeded.
+   *
+   * The restore below reads the settings file asynchronously, and on a device
+   * that read is slow enough to finish *after* somebody has opened settings and
+   * started typing. Applying it then wipes what they entered, which looks like
+   * the fields clearing themselves. A ref rather than state: it must be readable
+   * from inside that async callback without re-running the effect.
+   */
+  const settingsEditedRef = useRef(false);
 
   const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_SORT);
   const [query, setQuery] = useState('');
@@ -749,7 +759,12 @@ export default function App(): React.JSX.Element {
       const stored = await loadSettings();
       if (stored) {
         setConfig(stored);
-        setLocalConfig(stored);
+        // The store is always updated, because getConfig() feeds capture and
+        // the note paths. The visible form is only seeded when the user has
+        // not already started editing it -- see settingsEditedRef.
+        if (!settingsEditedRef.current) {
+          setLocalConfig(stored);
+        }
         // Seed the capture screen's list from the settings just loaded.
         //
         // capture() reads getConfig() when the lasso button is pressed, and on
@@ -796,6 +811,7 @@ export default function App(): React.JSX.Element {
     const configButton = PluginManager.registerConfigButtonListener({
       onClick: () => {
         viewShowing.current = true;
+        settingsEditedRef.current = false;
         setLocalConfig(getConfig());
         setLocalCollections(getCollections());
         setStatus(null);
@@ -951,6 +967,7 @@ export default function App(): React.JSX.Element {
       run: async () => {
         // Put the form back to what is stored, so reopening settings does not
         // show discarded edits as though they were still pending.
+        settingsEditedRef.current = false;
         setLocalConfig(getConfig());
         close();
         return '';
@@ -971,6 +988,7 @@ export default function App(): React.JSX.Element {
       run: async () => {
         // Put the form back to what is stored, so reopening settings does not
         // show discarded edits as though they were still pending.
+        settingsEditedRef.current = false;
         setLocalConfig(getConfig());
         close();
         return 'Changes discarded.';
@@ -1415,6 +1433,20 @@ export default function App(): React.JSX.Element {
     });
   }, [eventForm, editingEvent, eventTarget, config.dateFormat]);
 
+  /**
+   * The settings form's change handler.
+   *
+   * Marks the form as edited before forwarding, so a settings load still in
+   * flight does not overwrite what is being typed.
+   */
+  const changeConfig = useCallback<React.Dispatch<React.SetStateAction<RadicaleConfig>>>(
+    update => {
+      settingsEditedRef.current = true;
+      setLocalConfig(update);
+    },
+    [],
+  );
+
   // ---- settings ----
 
   const discover = useCallback(async () => {
@@ -1521,6 +1553,7 @@ export default function App(): React.JSX.Element {
       run: async () => {
         await wipeSettings();
         setConfig(EMPTY_CONFIG);
+        settingsEditedRef.current = false;
         setLocalConfig(EMPTY_CONFIG);
         setCollections([]);
         setLocalCollections([]);
@@ -2500,7 +2533,7 @@ will not duplicate them.`}
           templates={templates}
           showHelp={showHelp}
           onToggleHelp={() => setShowHelp(v => !v)}
-          onChange={setLocalConfig}
+          onChange={changeConfig}
           onDiscover={() => void discover()}
           onSave={saveSettingsAndExit}
           onCancel={cancelSettings}
