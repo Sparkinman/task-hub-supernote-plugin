@@ -2619,7 +2619,7 @@ function PeriodNoteSettings(props: {
   scrollHandle: number | null;
   onScrollTo: (y: number) => void;
   onBrowse: () => void;
-  onChange: (config: RadicaleConfig) => void;
+  onChange: React.Dispatch<React.SetStateAction<RadicaleConfig>>;
 }): React.JSX.Element {
   const {
     title,
@@ -2635,7 +2635,8 @@ function PeriodNoteSettings(props: {
     onChange,
   } = props;
   const note = config[noteKey];
-  const set = (next: Partial<typeof note>) => onChange({...config, [noteKey]: {...note, ...next}});
+  const set = (next: Partial<typeof note>) =>
+    onChange(c => ({...c, [noteKey]: {...c[noteKey], ...next}}));
   const presets = PERIOD_LAYOUT_PRESETS[period as 'week' | 'month' | 'quarter' | 'year'];
   const today = toDateInput(new Date());
 
@@ -2729,7 +2730,7 @@ function SettingsScreen(props: {
   templates: NoteTemplate[];
   showHelp: boolean;
   onToggleHelp: () => void;
-  onChange: (config: RadicaleConfig) => void;
+  onChange: React.Dispatch<React.SetStateAction<RadicaleConfig>>;
   onDiscover: () => void;
   onSave: () => void;
   /** True when the form differs from what is stored, which the Save reports. */
@@ -2873,7 +2874,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         label="Server URL"
         value={config.serverUrl}
         placeholder="https://host:5232"
-        onChange={v => onChange({...config, serverUrl: v})}
+        onChange={v => onChange(c => ({...c, serverUrl: v}))}
       />
       <Field
         scrollHandle={scrollHandle}
@@ -2881,7 +2882,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         compact
         label="Username"
         value={config.username}
-        onChange={v => onChange({...config, username: v})}
+        onChange={v => onChange(c => ({...c, username: v}))}
       />
       <Field
         scrollHandle={scrollHandle}
@@ -2890,7 +2891,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         label="Password"
         value={config.password}
         secure
-        onChange={v => onChange({...config, password: v})}
+        onChange={v => onChange(c => ({...c, password: v}))}
       />
       <Field
         scrollHandle={scrollHandle}
@@ -2899,7 +2900,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         label="Collections owner (only if different from username)"
         value={config.owner}
         placeholder={config.username || 'your-username'}
-        onChange={v => onChange({...config, owner: v})}
+        onChange={v => onChange(c => ({...c, owner: v}))}
       />
 
       <View style={styles.actionsTight}>
@@ -2926,7 +2927,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
             {checked && !isDefault && (
               <Pressable
                 style={styles.tinyButton}
-                onPress={() => onChange({...config, defaultCollectionUrl: collection.url})}>
+                onPress={() => onChange(c => ({...c, defaultCollectionUrl: collection.url}))}>
                 <Text style={styles.tinyButtonText}>Set</Text>
               </Pressable>
             )}
@@ -3000,7 +3001,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
             label="Folder under device storage"
             value={config.dailyNote.root}
             placeholder="Note/Daily"
-            onChange={v => onChange({...config, dailyNote: {...config.dailyNote, root: v}})}
+            onChange={v => onChange(c => ({...c, dailyNote: {...c.dailyNote, root: v}}))}
           />
         </View>
         <Pressable style={styles.browseButton} onPress={onBrowse}>
@@ -3012,7 +3013,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
       <Choice
         options={LAYOUT_PRESETS.map(p => ({key: p.layout, label: p.label}))}
         value={config.dailyNote.layout}
-        onPick={k => onChange({...config, dailyNote: {...config.dailyNote, layout: k}})}
+        onPick={k => onChange(c => ({...c, dailyNote: {...c.dailyNote, layout: k}}))}
       />
       <Field
         scrollHandle={scrollHandle}
@@ -3020,7 +3021,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         compact
         label="Custom layout — {YYYY} {MM} {MMM} {MMMM} {DD} {DATE} {ISO}"
         value={config.dailyNote.layout}
-        onChange={v => onChange({...config, dailyNote: {...config.dailyNote, layout: v}})}
+        onChange={v => onChange(c => ({...c, dailyNote: {...c.dailyNote, layout: v}}))}
       />
       <Text style={styles.noteCompact}>
         {`Today would be: ${
@@ -3037,7 +3038,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         templates={templates}
         label="Daily note template"
         value={config.dailyNote.template}
-        onPick={v => onChange({...config, dailyNote: {...config.dailyNote, template: v}})}
+        onPick={v => onChange(c => ({...c, dailyNote: {...c.dailyNote, template: v}}))}
       />
 
       <PeriodNoteSettings
@@ -3120,7 +3121,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
             label="Folder under device storage"
             value={config.meetingNote.root}
             placeholder="Note/Meetings"
-            onChange={v => onChange({...config, meetingNote: {...config.meetingNote, root: v}})}
+            onChange={v => onChange(c => ({...c, meetingNote: {...c.meetingNote, root: v}}))}
           />
         </View>
         <Pressable style={styles.browseButton} onPress={onBrowseMeetings}>
@@ -3137,7 +3138,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         templates={templates}
         label="Meeting note template"
         value={config.meetingNote.template}
-        onPick={v => onChange({...config, meetingNote: {...config.meetingNote, template: v}})}
+        onPick={v => onChange(c => ({...c, meetingNote: {...c.meetingNote, template: v}}))}
       />
 
       </Fold>
@@ -3157,13 +3158,13 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
       <Choice
         options={AGENDA_HOURS.map(h => ({key: String(h), label: hourLabel(h, config.timeFormat)}))}
         value={String(config.agendaStartHour)}
-        onPick={k => onChange({...config, agendaStartHour: Number(k)})}
+        onPick={k => onChange(c => ({...c, agendaStartHour: Number(k)}))}
       />
       <Text style={styles.labelCompact}>Day ends at</Text>
       <Choice
         options={AGENDA_HOURS.map(h => ({key: String(h), label: hourLabel(h, config.timeFormat)}))}
         value={String(config.agendaEndHour)}
-        onPick={k => onChange({...config, agendaEndHour: Number(k)})}
+        onPick={k => onChange(c => ({...c, agendaEndHour: Number(k)}))}
       />
       {config.agendaEndHour < config.agendaStartHour && (
         <Text style={styles.noteCompact}>
@@ -3176,14 +3177,14 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
       <Choice
         options={DATE_FORMATS.map(f => ({key: f.key, label: `${f.label}  ${f.example}`}))}
         value={config.dateFormat}
-        onPick={k => onChange({...config, dateFormat: k as DateFormat})}
+        onPick={k => onChange(c => ({...c, dateFormat: k as DateFormat}))}
       />
 
       <Text style={styles.subheadingCompact}>Time format</Text>
       <Choice
         options={TIME_FORMATS.map(f => ({key: f.key, label: `${f.label}  ${f.example}`}))}
         value={config.timeFormat}
-        onPick={k => onChange({...config, timeFormat: k as TimeFormat})}
+        onPick={k => onChange(c => ({...c, timeFormat: k as TimeFormat}))}
       />
 
       </Fold>
@@ -3203,7 +3204,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
       <Choice
         options={MARK_STYLES.map(m => ({key: m.key, label: m.label}))}
         value={config.markStyle}
-        onPick={k => onChange({...config, markStyle: k as MarkStyle})}
+        onPick={k => onChange(c => ({...c, markStyle: k as MarkStyle}))}
       />
       {config.markStyle !== 'off' && (
         <>
@@ -3211,7 +3212,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
             compact
             label={`Also write "${TASK_LABEL}" underneath`}
             checked={config.markLabel}
-            onToggle={() => onChange({...config, markLabel: !config.markLabel})}
+            onToggle={() => onChange(c => ({...c, markLabel: !c.markLabel}))}
           />
           <Text style={styles.noteCompact}>
             A short caption under the boxed writing, so the box explains itself without being
@@ -3221,7 +3222,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
             compact
             label="Also shade it with the marker pen"
             checked={config.markShade}
-            onToggle={() => onChange({...config, markShade: !config.markShade})}
+            onToggle={() => onChange(c => ({...c, markShade: !c.markShade}))}
           />
           <Text style={styles.noteCompact}>
             Draws marker passes across the handwriting so a captured task stands out without
@@ -3235,7 +3236,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
               <Choice
                 options={SHADE_COLORS.map(c => ({key: c.key, label: c.label}))}
                 value={config.markShadeColor}
-                onPick={k => onChange({...config, markShadeColor: k})}
+                onPick={k => onChange(c => ({...c, markShadeColor: k}))}
               />
               <Text style={styles.noteCompact}>
                 Light grey is the easiest to read handwriting through. Black draws a real
