@@ -89,7 +89,6 @@ export function MiniCalendar(props: {
 
   return (
     <View style={styles.overlayScrim}>
-      <View style={styles.sheetHolder}>
         <View style={styles.pickerCard}>
           <View style={styles.calendarNav}>
             <Pressable
@@ -166,7 +165,6 @@ export function MiniCalendar(props: {
             <Button label="Cancel" onPress={onCancel} />
           </View>
         </View>
-      </View>
     </View>
   );
 }

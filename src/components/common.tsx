@@ -41,6 +41,13 @@ export function Header(props: {
    * buttons at the foot of the page rather than in a corner that says neither.
    */
   hideClose?: boolean;
+  /**
+   * An action shown beside the close, for a form long enough that its own Save
+   * is off the bottom of the screen. Typing a title and a couple of steps is
+   * enough to push it out of view, and scrolling back down to a button you
+   * cannot see is a poor way to finish a task.
+   */
+  action?: {label: string; onPress: () => void; disabled?: boolean};
 }): React.JSX.Element {
   if (props.masthead) {
     return (
@@ -49,6 +56,21 @@ export function Header(props: {
           <FullLogo />
           <Text style={styles.mastheadTitle}>{props.title}</Text>
         </View>
+        {!!props.action && (
+          <Pressable
+            style={[styles.headerAction, props.action.disabled && styles.buttonDisabled]}
+            disabled={props.action.disabled}
+            onPress={props.action.onPress}
+            hitSlop={8}>
+            <Text
+              style={[
+                styles.headerActionText,
+                props.action.disabled && styles.buttonTextDisabled,
+              ]}>
+              {props.action.label}
+            </Text>
+          </Pressable>
+        )}
         {!props.hideClose && (
           <Pressable
             style={[styles.close, props.closeDisabled && styles.buttonDisabled]}
@@ -81,6 +103,18 @@ export function Header(props: {
           <Text style={styles.heading}>{props.title}</Text>
         </View>
       </View>
+      {!!props.action && (
+        <Pressable
+          style={[styles.headerAction, props.action.disabled && styles.buttonDisabled]}
+          disabled={props.action.disabled}
+          onPress={props.action.onPress}
+          hitSlop={8}>
+          <Text
+            style={[styles.headerActionText, props.action.disabled && styles.buttonTextDisabled]}>
+            {props.action.label}
+          </Text>
+        </Pressable>
+      )}
       {!props.hideClose && (
         <Pressable
           style={[styles.close, props.closeDisabled && styles.buttonDisabled]}
@@ -656,6 +690,15 @@ export const styles = StyleSheet.create({
   mastheadTitle: {fontSize: 27, fontWeight: '700', color: '#000', alignSelf: 'flex-end', marginBottom: 4},
   heading: {fontSize: 30, fontWeight: '700', color: '#000'},
   close: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 12, paddingVertical: 5},
+  headerAction: {
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: '#000',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginRight: 10,
+  },
+  headerActionText: {fontSize: 20, color: '#fff', fontWeight: '700'},
   closeText: {fontSize: 24, color: '#000', lineHeight: 30},
   field: {marginBottom: 12},
   label: {fontSize: 21, color: '#000', marginBottom: 4},
@@ -766,8 +809,6 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  /** Just a wrapper now that the scrim is the overlay itself. */
-  sheetHolder: {width: '100%', alignItems: 'center'},
   modalCard: {backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', padding: 18, width: '100%', maxWidth: 460},
   modalTitle: {fontSize: 26, fontWeight: '700', color: '#000', marginBottom: 8},
   modalBody: {fontSize: 21, color: '#333', lineHeight: 28, marginBottom: 6},
@@ -852,10 +893,11 @@ export const styles = StyleSheet.create({
   // Selection is a solid fill with inverted text — on a monochrome panel a
   // pale wash and a slightly darker border were nearly the same thing, which is
   // why the selected day was hard to pick out.
-  quarterCellSelected: {backgroundColor: '#000', borderColor: '#000'},
-  quarterCellToday: {borderColor: '#000', borderWidth: 3},
+  // Same reasoning as the year view: an outline, never a fill.
+  quarterCellSelected: {borderColor: '#000', borderWidth: 3, backgroundColor: '#fff'},
+  quarterCellToday: {borderColor: '#000', borderWidth: 2, borderStyle: 'dashed'},
   quarterCellText: {fontSize: 15, color: '#000'},
-  quarterCellTextSelected: {color: '#fff', fontWeight: '700'},
+  quarterCellTextSelected: {color: '#000', fontWeight: '700'},
   // A bar rather than the month view's boxed letters: at this size a letter is
   // unreadable, so it says "something is here" and the month view says what.
   quarterDot: {height: 3, width: 12, backgroundColor: '#000', marginTop: 1},
@@ -868,11 +910,15 @@ export const styles = StyleSheet.create({
   yearMonthLabel: {fontSize: 15, fontWeight: '700', color: '#000', marginBottom: 1},
   yearWeek: {flexDirection: 'row'},
   yearCell: {flex: 1, alignItems: 'center', paddingVertical: 1},
-  yearCellSelected: {backgroundColor: '#000'},
-  yearCellToday: {borderWidth: 2, borderColor: '#000'},
+  // Selection is a heavy outline, not a fill. A black fill relies on every text
+  // style beneath it being overridden to white, and one that is not — the bold
+  // "has something on it" style, for instance — leaves black on black and an
+  // unreadable day. An outline cannot fail that way.
+  yearCellSelected: {borderWidth: 3, borderColor: '#000', backgroundColor: '#fff'},
+  yearCellToday: {borderWidth: 2, borderColor: '#000', borderStyle: 'dashed'},
   yearCellText: {fontSize: 10, color: '#333'},
   yearCellBusy: {fontWeight: '700', color: '#000'},
-  yearCellTextSelected: {color: '#fff', fontWeight: '700'},
+  yearCellTextSelected: {color: '#000', fontWeight: '700'},
   // The week number gutter down the left of each month grid.
   yearWeekNum: {width: 16, alignItems: 'center', justifyContent: 'center'},
   yearWeekNumText: {fontSize: 9, color: '#888'},

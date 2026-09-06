@@ -81,11 +81,24 @@ function DayViewImpl(props: {
 
   // Completed tasks never appear in either panel.
   const openTasks = tasks.filter(t => !t.completed);
-  // Arranged into families, exactly as the Tasks tab does it, so a task with
-  // steps reads the same here: a fold arrow, a step count, and its steps folded
-  // away until asked for. A step due today still appears in its own right, under
-  // its parent.
-  const todays = visible(arrange(tasksOnDay(openTasks, day), 'due-asc'), openSteps);
+  // Families are built from ALL open tasks and only then filtered to this day.
+  //
+  // Filtering first was the bug: a parent due today had its steps removed before
+  // arrange could see them, so it arrived with no children, no step count and no
+  // fold arrow. A family is shown when the parent OR any of its steps falls on
+  // this day, and opening it then reveals every step — including the ones due
+  // another day, which is usually the point of opening it.
+  const dueToday = new Set(tasksOnDay(openTasks, day).map(t => t.uid));
+  const families = arrange(openTasks, 'due-asc');
+  const familyOf = (row: (typeof families)[number]) =>
+    row.depth === 0 ? row.todo.uid : (row.todo.parentUid ?? row.todo.uid);
+  const shownFamilies = new Set(
+    families.filter(row => dueToday.has(row.todo.uid)).map(familyOf),
+  );
+  const todays = visible(
+    families.filter(row => shownFamilies.has(familyOf(row))),
+    openSteps,
+  );
   // Multi-day tasks passing through today, shown separately so they are not
   // mistaken for work due today.
   const running = tasksRunningOn(openTasks, day);

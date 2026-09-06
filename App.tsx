@@ -587,6 +587,39 @@ export default function App(): React.JSX.Element {
    */
   const [writing, setWriting] = useState(false);
 
+  /**
+   * Run a write immediately, with no confirmation.
+   *
+   * The same path as runAsk — demo guard, busy flag, status, scoped reload —
+   * minus the dialog. Used for creating and editing a task, which is the write
+   * done most often and the least consequential: it adds a row that can be
+   * edited or ticked off in two taps. Making somebody confirm it turned every
+   * save into a second full-screen repaint and a second press.
+   *
+   * Everything destructive still goes through runAsk: completing, wiping,
+   * discarding unsaved work.
+   */
+  const runNow = useCallback(async (action: Ask) => {
+    if (blockedInDemo()) {
+      return;
+    }
+    setStatus({kind: 'working', message: 'Saving…'});
+    setWriting(true);
+    try {
+      const message = await action.run();
+      setStatus({kind: 'done', message});
+      if (action.closeAfter) {
+        scheduleClose();
+        return;
+      }
+      void refresh(action.reload ?? 'all');
+    } catch (err) {
+      setStatus({kind: 'error', message: describe(err)});
+    } finally {
+      setWriting(false);
+    }
+  }, [blockedInDemo, refresh, scheduleClose]);
+
   /** Confirm → push → success → reload. The single write path. */
   const runAsk = useCallback(async () => {
     // Every write in the plugin passes through here, which is what makes one
@@ -938,7 +971,7 @@ export default function App(): React.JSX.Element {
       source && config.markStyle !== 'off'
         ? ' The selected handwriting will be boxed on the page.'
         : '';
-    setAsk({
+    void runNow({
       title: 'Create task?',
       reload: 'tasks',
       body: `"${summary}" will be added to ${names}.${marking}`,
@@ -1007,7 +1040,7 @@ export default function App(): React.JSX.Element {
         )}${note}`;
       },
     });
-  }, [draft, targets, source, config.markStyle]);
+  }, [draft, targets, source, config.markStyle, runNow]);
 
   const askSaveTaskForm = useCallback(() => {
     if (!taskForm) {
@@ -1023,7 +1056,7 @@ export default function App(): React.JSX.Element {
       setStatus({kind: 'error', message: 'Tick at least one list to save into.'});
       return;
     }
-    setAsk({
+    void runNow({
       title: editing ? 'Save changes?' : 'Create task?',
       reload: 'tasks',
       body: editing
@@ -1101,7 +1134,7 @@ export default function App(): React.JSX.Element {
         return `Saved successfully — "${summary}".${saidAboutSteps(made, failed)}`;
       },
     });
-  }, [taskForm, editingTask, taskTargets]);
+  }, [taskForm, editingTask, taskTargets, runNow]);
 
   /**
    * The configured note settings for a period. Day keeps its own config so a
@@ -1653,7 +1686,16 @@ export default function App(): React.JSX.Element {
 
       {screen === 'save' && (
         <>
-          <Header title="New task" onClose={closeGuarded} closeDisabled={writing} />
+          <Header
+            title="New task"
+            onClose={closeGuarded}
+            closeDisabled={writing}
+            action={{
+              label: writing ? 'Saving…' : 'Save task',
+              onPress: askSaveCaptured,
+              disabled: writing,
+            }}
+          />
           <Field
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}
@@ -1779,7 +1821,16 @@ export default function App(): React.JSX.Element {
 
       {screen === 'hub' && taskForm && (
         <>
-          <Header title={editingTask ? 'Edit task' : 'New task'} onClose={closeGuarded} closeDisabled={writing} />
+          <Header
+            title={editingTask ? 'Edit task' : 'New task'}
+            onClose={closeGuarded}
+            closeDisabled={writing}
+            action={{
+              label: writing ? 'Saving…' : editingTask ? 'Save' : 'Create',
+              onPress: askSaveTaskForm,
+              disabled: writing,
+            }}
+          />
           <Field
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}
@@ -1910,7 +1961,16 @@ will not duplicate them.`}
 
       {screen === 'hub' && eventForm && (
         <>
-          <Header title={editingEvent ? 'Edit event' : 'New event'} onClose={closeGuarded} closeDisabled={writing} />
+          <Header
+            title={editingEvent ? 'Edit event' : 'New event'}
+            onClose={closeGuarded}
+            closeDisabled={writing}
+            action={{
+              label: writing ? 'Saving…' : editingEvent ? 'Save' : 'Create',
+              onPress: askSaveEvent,
+              disabled: writing,
+            }}
+          />
           <Field
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}

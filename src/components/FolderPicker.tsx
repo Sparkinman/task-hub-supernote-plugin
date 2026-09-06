@@ -58,7 +58,6 @@ export function FolderPicker(props: {
 
   return (
     <View style={styles.overlayScrim}>
-      <View style={styles.sheetHolder}>
         <View style={styles.pickerCard}>
           <Text style={styles.modalTitle}>Choose a folder</Text>
           <Text style={styles.pickerPath}>{path ? `/${path}` : '/ (storage root)'}</Text>
@@ -88,7 +87,6 @@ export function FolderPicker(props: {
             <Button label="Cancel" onPress={onCancel} />
           </View>
         </View>
-      </View>
     </View>
   );
 }
