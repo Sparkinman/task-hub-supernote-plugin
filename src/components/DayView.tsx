@@ -243,8 +243,8 @@ function DayViewImpl(props: {
           const showNowLine = minutes !== null && minutes >= h * 60 && minutes < (h + 1) * 60;
 
           return (
-            <View key={h}>
-              <View style={styles.hourRow}>
+            <View key={h} style={styles.hourSlot}>
+              <View style={[styles.hourRow, styles.hourSlot]}>
                 <Text style={[styles.hourLabel, hourIsPast && styles.pastText]}>
                   {formatTime(`${String(h).padStart(2, '0')}:00`, timeFormat)}
                 </Text>

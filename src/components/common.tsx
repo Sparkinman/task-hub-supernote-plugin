@@ -1095,8 +1095,15 @@ export const styles = StyleSheet.create({
   weekDayHeadToday: {textDecorationLine: 'underline'},
   weekEntry: {fontSize: 20, color: '#000', marginTop: 4, lineHeight: 28},
   weekEmpty: {fontSize: 18, color: '#888', marginTop: 2},
-  dayWrap: {flexDirection: 'row', gap: 12},
+  // A minimum height for the whole two-column block, so a short agenda still
+  // fills the page. Without it a day set to run 9 to 5 drew eight rows and
+  // stopped, leaving the divider between the grid and the tasks as a stub a
+  // third of the way down.
+  dayWrap: {flexDirection: 'row', gap: 12, minHeight: Math.round(SCREEN_HEIGHT * 0.66)},
   dayGrid: {flex: 3},
+  // Hour rows share out whatever height is left over, so the grid spans the
+  // block however many hours are in it.
+  hourSlot: {flexGrow: 1, justifyContent: 'flex-start'},
   hourRow: {flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ccc', minHeight: 40},
   hourLabel: {width: 86, fontSize: 17, color: '#555', paddingTop: 5},
   hourBody: {flex: 1, paddingVertical: 3},

@@ -330,8 +330,13 @@ export async function labelLassoStrokes(rect: Rect): Promise<string | null> {
     // be proportionally larger there.
     const {min, max} = await labelFontBounds();
     const fontSize = Math.min(max, Math.max(min, Math.round((rect.bottom - rect.top) / 3)));
-    const width = Math.round(fontSize * TASK_LABEL.length * 0.62);
-    const height = Math.round(fontSize * 1.4);
+    // Generous on purpose. The width is an estimate — the device reports no
+    // text metrics — and an estimate that is too small wraps the caption onto a
+    // second line, which is what "Task Hub" over two lines was. Too wide costs
+    // nothing: the box has no border and the text is left-aligned inside it.
+    const width = Math.round(fontSize * TASK_LABEL.length * 1.1) + fontSize * 2;
+    // Room for one line and no more, with a little slack for descenders.
+    const height = Math.round(fontSize * 1.6);
 
     // Below the box, aligned to its left edge. Beside it — level with the middle
     // — was tried and read worse: the caption floated off the top-right of the

@@ -1694,6 +1694,10 @@ export default function App(): React.JSX.Element {
   };
 
   const openTaskEditor = (task: RemoteTask | null) => {
+    // The mirror of the New event button: clear the other form so neither can
+    // shadow the one being opened.
+    setEventForm(null);
+    setEditingEvent(null);
     setEditingTask(task);
     setTaskTargets(task ? [task.collectionUrl] : config.defaultCollectionUrl ? [config.defaultCollectionUrl] : []);
     setTaskForm(
@@ -2251,6 +2255,12 @@ will not duplicate them.`}
                   label="+ New event"
                   primary
                   onPress={() => {
+                    // Clear the task form as well. Both forms render from the
+                    // same screen and the task one is checked first, so a task
+                    // form left over from earlier would win and "New event"
+                    // would open a task.
+                    setTaskForm(null);
+                    setEditingTask(null);
                     setEditingEvent(null);
                     setEventTarget(config.calendarUrls[0] ?? '');
                     setEventForm(emptyEvent(day));

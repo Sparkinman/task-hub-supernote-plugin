@@ -31,6 +31,65 @@ interface Props {
   onChange: (date: string, time: string) => void;
 }
 
+/**
+ * A 24-hour HH:MM as the user's own clock reads it.
+ *
+ * Empty stays empty: the field is blank until a time is set, and turning that
+ * into "12:00 am" would be inventing one.
+ */
+function forDisplay(time: string, format: TimeFormat): string {
+  if (!time) {
+    return '';
+  }
+  return format === '12' ? formatTime(time, format) : time;
+}
+
+/**
+ * The reverse: what was typed, back to 24-hour HH:MM, or null while it is not
+ * yet a time.
+ *
+ * Deliberately forgiving about how a 12-hour time is written — "2pm", "2 PM",
+ * "2:05pm" — because it is typed on a device with no keyboard worth the name.
+ */
+function fromDisplay(input: string, format: TimeFormat): string | null {
+  const text = input.trim().toLowerCase();
+  if (!text) {
+    return null;
+  }
+  if (format !== '12') {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(text);
+    if (!match) {
+      return null;
+    }
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    return hours <= 23 && minutes <= 59 ? toHM(hours, minutes) : null;
+  }
+
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/.exec(text);
+  if (!match) {
+    return null;
+  }
+  let hours = Number(match[1]);
+  const minutes = match[2] ? Number(match[2]) : 0;
+  if (hours < 1 || hours > 12 || minutes > 59) {
+    return null;
+  }
+  const suffix = match[3];
+  if (!suffix) {
+    // No am/pm yet — not enough to act on without guessing at the user's
+    // meaning, so wait for it.
+    return null;
+  }
+  if (suffix === 'pm' && hours !== 12) {
+    hours += 12;
+  }
+  if (suffix === 'am' && hours === 12) {
+    hours = 0;
+  }
+  return toHM(hours, minutes);
+}
+
 function parseHM(time: string): {hours: number; minutes: number} {
   const match = /^(\d{1,2}):(\d{2})$/.exec(time);
   return match
@@ -64,6 +123,8 @@ export function DateTimePicker(props: Props): React.JSX.Element {
    * than collapsing it back to the button that opened it.
    */
   const [timeOpen, setTimeOpen] = useState(false);
+  /** What is in the box while it is being typed and does not yet parse. */
+  const [typed, setTyped] = useState<string | null>(null);
   // A time arriving from outside — editing an item that has one — opens the row.
   const showTime = timeOpen || !!time;
 
@@ -183,16 +244,40 @@ export function DateTimePicker(props: Props): React.JSX.Element {
               <Arrow label="▼" onPress={() => bumpTime(1, 0)} />
             </View>
 
+            {/*
+              Typed and displayed in whichever clock the user reads elsewhere.
+              The value handed back is always 24-hour HH:MM — that is what the
+              calendar format needs — but showing 14:00 to somebody whose
+              settings say 2pm is asking them to convert in their head.
+            */}
             <TextInput
               ref={timeInputRef}
               onFocus={handleTimeFocus}
               style={styles.timeInput}
-              value={time}
-              onChangeText={next => onChange(date || today, next)}
-              placeholder="12:00"
+              value={typed ?? forDisplay(time, timeFormat)}
+              onChangeText={next => {
+                // Held as typed until it parses, so a half-written "2:" is not
+                // rewritten under the user's fingers on every keystroke.
+                setTyped(next);
+                const parsed = fromDisplay(next, timeFormat);
+                if (parsed) {
+                  onChange(date || today, parsed);
+                }
+              }}
+              onBlur={() => setTyped(null)}
+              placeholder={timeFormat === '12' ? '2:00 pm' : '14:00'}
               placeholderTextColor="#999"
               keyboardType="numbers-and-punctuation"
             />
+            {timeFormat === '12' && (
+              <View style={styles.spinner}>
+                <Arrow
+                  label={parseHM(time || '12:00').hours < 12 ? 'AM' : 'PM'}
+                  onPress={() => bumpTime(parseHM(time || '12:00').hours < 12 ? 12 : -12, 0)}
+                />
+                <Text style={styles.spinnerCaption}>tap</Text>
+              </View>
+            )}
 
             <View style={styles.spinner}>
               <Arrow label="▲" onPress={() => bumpTime(0, -5)} />
