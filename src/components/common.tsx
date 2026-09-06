@@ -740,6 +740,25 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+  /**
+   * The scrim a sheet sits on, as its own overlay.
+   *
+   * Use this INSTEAD of `overlay` + `modalBackdrop`, never both: nesting the
+   * scrim inside the white overlay paints a white screen with a dithered grey
+   * column down the middle of it, which is what the date and folder pickers
+   * looked like for one release.
+   */
+  overlayScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -747,6 +766,8 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+  /** Just a wrapper now that the scrim is the overlay itself. */
+  sheetHolder: {width: '100%', alignItems: 'center'},
   modalCard: {backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', padding: 18, width: '100%', maxWidth: 460},
   modalTitle: {fontSize: 26, fontWeight: '700', color: '#000', marginBottom: 8},
   modalBody: {fontSize: 21, color: '#333', lineHeight: 28, marginBottom: 6},

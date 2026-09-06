@@ -122,17 +122,19 @@ const TYPE_TEXT = 500;
 /**
  * How far outside the lasso rectangle the wash reaches, in pixels.
  *
- * Zero, after trying 12. The host draws its box a little outside the selected
- * strokes, but it does not report how far, and the SDK offers no way to ask:
- * the only rectangle available is the lasso's own. Guessing at the margin
- * overshot and put the wash outside the box, which looks worse than stopping
- * short of it. So the wash covers exactly what was selected, and the box keeps
- * its clear border.
+ * Negative: the wash is drawn INSIDE the lasso rectangle, not around it.
  *
- * Left as a named constant rather than removed: if the margin is ever
- * measurable, this is the one place to set it.
+ * The host draws its box relative to the selected strokes but never reports
+ * where, and the SDK offers no way to ask — the only rectangle available is the
+ * lasso's own. Two guesses have now been wrong in the same direction: +12 put
+ * the shading well outside the box, and 0 still overshot it. So the rectangle
+ * is wider than the border drawn from it, and the safe error is inwards.
+ *
+ * A small unshaded margin inside the box is a much better failure than a wash
+ * spilling past it, and shading is opt-in either way. This is the one place to
+ * change it if the box's real geometry ever becomes measurable.
  */
-const SHADE_PADDING = 0;
+const SHADE_PADDING = -10;
 
 interface PageElement {
   type?: number;
@@ -468,11 +470,19 @@ export async function shadeLassoStrokes(
     // themselves, so shading the raw selection covers the writing and leaves a
     // visible margin of unshaded paper inside the border. Growing the rectangle
     // by the same margin fills the box.
+    // Clamped, because the inset must never turn a small selection inside out:
+    // a single short word is only a few tens of pixels tall, and taking 10 off
+    // each side of that would leave a rectangle with negative height.
+    const inset = Math.min(
+      -SHADE_PADDING,
+      Math.floor((rect.bottom - rect.top) / 4),
+      Math.floor((rect.right - rect.left) / 4),
+    );
     const padded = {
-      left: rect.left - SHADE_PADDING,
-      right: rect.right + SHADE_PADDING,
-      top: rect.top - SHADE_PADDING,
-      bottom: rect.bottom + SHADE_PADDING,
+      left: rect.left + inset,
+      right: rect.right - inset,
+      top: rect.top + inset,
+      bottom: rect.bottom - inset,
     };
     const rows = shadingLines(padded);
     if (rows.length === 0) {

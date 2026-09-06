@@ -1449,9 +1449,10 @@ export default function App(): React.JSX.Element {
         return;
       }
       setStatus({kind: 'done', message: 'Settings saved'});
-      // Long enough to read, short enough not to be a wait. No dialog: the save
-      // worked, and there is nothing to decide.
-      scheduleClose(2500);
+      // Just long enough for the message to register. 2.5s was tried and felt
+      // like waiting for the plugin rather than reading a confirmation — on a
+      // panel that redraws slowly, the redraw is already most of the pause.
+      scheduleClose(900);
     })();
   }, [persistSettings, scheduleClose]);
 

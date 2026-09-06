@@ -88,8 +88,8 @@ export function MiniCalendar(props: {
   }
 
   return (
-    <View style={styles.overlay}>
-      <View style={styles.modalBackdrop}>
+    <View style={styles.overlayScrim}>
+      <View style={styles.sheetHolder}>
         <View style={styles.pickerCard}>
           <View style={styles.calendarNav}>
             <Pressable

@@ -57,8 +57,8 @@ export function FolderPicker(props: {
   }
 
   return (
-    <View style={styles.overlay}>
-      <View style={styles.modalBackdrop}>
+    <View style={styles.overlayScrim}>
+      <View style={styles.sheetHolder}>
         <View style={styles.pickerCard}>
           <Text style={styles.modalTitle}>Choose a folder</Text>
           <Text style={styles.pickerPath}>{path ? `/${path}` : '/ (storage root)'}</Text>

@@ -157,7 +157,7 @@ export function TemplatePicker(props: {
       </Pressable>
 
       {open && (
-        <View style={styles.overlay}>
+        <View style={styles.overlayScrim}>
           <View style={styles.pickerCard}>
             <Text style={styles.modalTitle}>{label}</Text>
             <Tabs
