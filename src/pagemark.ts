@@ -1,7 +1,15 @@
 import {PluginCommAPI, PluginFileAPI, PluginNoteAPI} from 'sn-plugin-lib';
 
 import type {SourceRef} from './lasso';
-import {MARKER_PEN, STYLE_CODES, isMarkStyle, type MarkStyle} from './markstyle';
+import {
+  MARKER_PEN,
+  SHADE_COLORS,
+  STYLE_CODES,
+  isMarkStyle,
+  shadeColorValue,
+  shadingLines,
+  type MarkStyle,
+} from './markstyle';
 import {LINK_IMAGE_BASE64, LINK_IMAGE_CAPTION, LINK_IMAGE_NAME} from './linkimage';
 import {writeLinkImage} from './storage';
 
@@ -108,11 +116,27 @@ export async function markLassoStrokes(
 /** Element type 600 is a link. */
 const TYPE_LINK = 600;
 
+/** Element type 500 is a plain TextBox — what the caption is now. */
+const TYPE_TEXT = 500;
+
+/**
+ * How far outside the lasso rectangle the wash reaches, in pixels.
+ *
+ * Matched to the gap the host leaves between the selected strokes and the box it
+ * draws around them, so the shading fills the box rather than stopping at the
+ * writing.
+ */
+const SHADE_PADDING = 12;
+
 interface PageElement {
   type?: number;
   numInPage?: number;
   link?: {destPath?: string; X?: number; Y?: number; width?: number; height?: number} | null;
   geometry?: {penType?: number; penColor?: number; points?: {x: number; y: number}[]} | null;
+  textBox?: {
+    textContentFull?: string | null;
+    textRect?: {left?: number; top?: number; right?: number; bottom?: number} | null;
+  } | null;
 }
 
 /** Slack when matching a wash to the box around it, in device units. */
@@ -131,7 +155,11 @@ function isOurShading(element: PageElement, boxes: Required<Rect>[]): boolean {
   if (element.type !== TYPE_GEOMETRY || !geo || !Array.isArray(geo.points)) {
     return false;
   }
-  if (geo.penType !== MARKER_PEN.penType || geo.penColor !== MARKER_PEN.penColor) {
+  // Any colour this plugin is capable of drawing counts, not just the one
+  // currently configured: somebody who marks a page in light grey and later
+  // switches to dark grey must still have the first page tidied up when its
+  // task is completed.
+  if (geo.penType !== MARKER_PEN.penType || !SHADE_COLORS.some(c => c.value === geo.penColor)) {
     return false;
   }
   return boxes.some(box =>
@@ -144,6 +172,40 @@ function isOurShading(element: PageElement, boxes: Required<Rect>[]): boolean {
     ),
   );
 }
+
+/**
+ * Whether this TextBox is a caption this plugin wrote inside one of `boxes`.
+ *
+ * Two tests, as with the shading: our exact caption text, AND a position within
+ * a box we drew. A user who happens to have typed the same words elsewhere on
+ * the page keeps them; only the label sitting under our own mark is removed.
+ *
+ * The caption is written just to the RIGHT of the box, level with its middle, so
+ * the match allows for that: generous horizontally, and within the box's own
+ * vertical span. Captions written by an older version sat below the box, so the
+ * reach downwards is kept too — completing one of those tasks must still tidy
+ * up after it.
+ */
+function isOurCaption(element: PageElement, boxes: Required<Rect>[]): boolean {
+  const box = element.textBox;
+  if (element.type !== TYPE_TEXT || !box || box.textContentFull !== TASK_LABEL) {
+    return false;
+  }
+  const rect = box.textRect;
+  if (!rect || typeof rect.left !== 'number' || typeof rect.top !== 'number') {
+    return false;
+  }
+  return boxes.some(
+    b =>
+      rect.left! >= b.left - CAPTION_WITHIN &&
+      rect.left! <= b.right + CAPTION_WITHIN &&
+      rect.top! >= b.top - CAPTION_WITHIN &&
+      rect.top! <= b.bottom + CAPTION_WITHIN,
+  );
+}
+
+/** How far below its box a caption may sit and still be recognised as ours. */
+const CAPTION_WITHIN = 160;
 
 /**
  * Take the mark off a page once its task is done.
@@ -204,7 +266,10 @@ export async function removePageMark(source: SourceRef): Promise<string | null> 
         bottom: link.Y + link.height,
       }));
 
-    const ours = [...links, ...listed.result.filter(el => isOurShading(el, boxes))]
+    const ours = [
+      ...links,
+      ...listed.result.filter(el => isOurShading(el, boxes) || isOurCaption(el, boxes)),
+    ]
       .map(el => el.numInPage)
       .filter((num): num is number => typeof num === 'number');
 
@@ -231,15 +296,16 @@ export async function removePageMark(source: SourceRef): Promise<string | null> 
 export const TASK_LABEL = 'Task Hub Task';
 
 /**
- * Write a caption under the handwriting, as a link to the same image.
+ * Write a caption under the handwriting, as plain text.
  *
- * A stroke link cannot carry text — `setLassoStrokeLink` takes only a
- * destination and a border style — but a text link can, and it renders its
- * `showText`. Sitting just below the boxed writing, it says what the box is
- * without anyone having to tap it.
+ * It used to be a second link pointing at the same image as the box, which left
+ * two links on the page for one captured task: tapping either opened the Task
+ * Hub logo, and the caption sat under the box looking like a separate thing to
+ * press. `insertText` puts a TextBox on the page instead, so the box remains the
+ * only link and the caption is simply a label.
  *
- * Being a link to this plugin's own image, the completion cleanup finds and
- * removes it by exactly the same test as the box itself.
+ * The completion cleanup finds it by its text and its position inside the box's
+ * own rectangle, rather than by a destination path it no longer has.
  *
  * Takes the rect rather than reading it: `insertTextLink` writes into whatever
  * document is open, and by the time it runs the lasso may already have been
@@ -247,10 +313,6 @@ export const TASK_LABEL = 'Task Hub Task';
  */
 export async function labelLassoStrokes(rect: Rect): Promise<string | null> {
   try {
-    const image = await linkImagePath();
-    if (!image) {
-      return 'the plugin could not work out where to point the label';
-    }
     // Sized to the box rather than fixed: a caption in a constant size looks
     // wrong under both a scrawled word and half a page of writing. The bounds it
     // is clamped between come from the page, not from constants — a Nomad's page
@@ -258,29 +320,44 @@ export async function labelLassoStrokes(rect: Rect): Promise<string | null> {
     // be proportionally larger there.
     const {min, max} = await labelFontBounds();
     const fontSize = Math.min(max, Math.max(min, Math.round((rect.bottom - rect.top) / 3)));
-    const top = rect.bottom + Math.round(fontSize / 3);
+    const width = Math.round(fontSize * TASK_LABEL.length * 0.62);
+    const height = Math.round(fontSize * 1.4);
 
-    const inserted = (await PluginNoteAPI.insertTextLink({
-      destPath: image,
-      destPage: 0,
-      linkType: LINK_TYPE_IMAGE,
-      // Underlined rather than boxed: the writing above already has a box, and a
-      // second one directly beneath it reads as a table.
-      style: STYLE_CODES.underline,
-      rect: {
-        left: rect.left,
+    // Beside the box, not under it. Sitting on the line below read as a separate
+    // thing to press, which is also how it looked when the caption was still a
+    // link of its own. Level with the middle of the box it reads as a label ON
+    // the mark.
+    const left = rect.right + Math.round(fontSize / 2);
+    const top = Math.round((rect.top + rect.bottom) / 2 - height / 2);
+
+    const inserted = (await PluginNoteAPI.insertText({
+      textContentFull: TASK_LABEL,
+      textRect: {
+        left,
         top,
-        right: rect.left + Math.round(fontSize * TASK_LABEL.length * 0.62),
-        bottom: top + Math.round(fontSize * 1.4),
+        right: left + width,
+        bottom: top + height,
       },
       fontSize,
-      fullText: TASK_LABEL,
-      showText: TASK_LABEL,
-      isItalic: 0,
-    })) as LooseResponse<number> | null | undefined;
+      textAlign: 0,
+      textBold: 0,
+      textItalics: 0,
+      textFrameWidthType: 0,
+      // No border: the writing above already has a box, and a second frame
+      // directly beneath it reads as a table.
+      textFrameStyle: 0,
+      // Not editable — it is this plugin's mark on the page, and the cleanup
+      // has to be able to recognise it again by its text.
+      textEditable: 1,
+    })) as LooseResponse<boolean> | null | undefined;
 
     if (!inserted?.success) {
       return inserted?.error?.message ?? 'the device refused the label';
+    }
+    // insertText answers with a boolean, and a false is a refusal that reports
+    // no error of its own.
+    if (inserted.result !== true) {
+      return 'the device accepted the caption but wrote nothing';
     }
     return null;
   } catch (err) {
@@ -342,15 +419,30 @@ async function lassoRect(): Promise<Rect | string> {
   if (!response?.success || !rect) {
     return response?.error?.message ?? 'the selection had no bounds';
   }
+  // A rectangle with no area is not a usable one, and it is not obviously an
+  // error to the host: insertGeometry would draw a line of zero length and
+  // insertTextLink documents that its rect "must be non-zero area", so both
+  // would fail to show anything without either of them saying so. Catch it here
+  // where it can still be reported.
+  if (rect.right - rect.left <= 0 || rect.bottom - rect.top <= 0) {
+    return 'the selection reported an empty rectangle';
+  }
   return rect;
 }
 
 /**
  * Wash the captured handwriting with the marker pen.
  *
- * One horizontal stroke through the middle of the lasso rectangle, which is how
- * a highlighter is used by hand — a broad pen drawn across the words, not a
- * filled shape behind them.
+ * Parallel horizontal strokes filling the lasso rectangle, the way a highlighter
+ * is actually used on a block of writing: passes down the whole height, not one
+ * line through the middle.
+ *
+ * One stroke was the first attempt and it read exactly as it was — a line
+ * through the task rather than a wash behind it. The marker's own width is in
+ * units the SDK does not relate to pixels, so the number of passes is derived
+ * from the height of the selection instead: enough of them that they overlap
+ * into a wash on a tall block of writing, and not so many on a single word that
+ * the insert takes noticeably long.
  *
  * Uses `insertGeometry`, which draws into the page the host currently has open.
  * The first attempt built an Element by hand and pushed it through
@@ -362,25 +454,53 @@ async function lassoRect(): Promise<Rect | string> {
  * Never throws, and reports rather than retries: this runs after the task is
  * already saved, and after the box is already drawn.
  */
-export async function shadeLassoStrokes(rect: Rect): Promise<string | null> {
+export async function shadeLassoStrokes(
+  rect: Rect,
+  shadeColor?: string,
+): Promise<string | null> {
   try {
-    const middle = Math.round((rect.top + rect.bottom) / 2);
-    const inserted = (await PluginCommAPI.insertGeometry({
-      type: GEO_STRAIGHT_LINE,
-      // Drawn edge to edge of the selection, so the wash covers the writing
-      // rather than stopping short of its first and last strokes.
-      points: [
-        {x: rect.left, y: middle},
-        {x: rect.right, y: middle},
-      ],
-      // Leaving the lasso alone: the box has already been made from it, and
-      // re-selecting the wash would replace that selection.
-      showLassoAfterInsert: false,
-      ...MARKER_PEN,
-    })) as LooseResponse<boolean> | null | undefined;
+    // The box the host draws around a lasso sits a little outside the strokes
+    // themselves, so shading the raw selection covers the writing and leaves a
+    // visible margin of unshaded paper inside the border. Growing the rectangle
+    // by the same margin fills the box.
+    const padded = {
+      left: rect.left - SHADE_PADDING,
+      right: rect.right + SHADE_PADDING,
+      top: rect.top - SHADE_PADDING,
+      bottom: rect.bottom + SHADE_PADDING,
+    };
+    const rows = shadingLines(padded);
+    if (rows.length === 0) {
+      return 'the selection had no height to shade';
+    }
 
-    if (!inserted?.success) {
-      return inserted?.error?.message ?? 'the device refused to draw it';
+    for (const y of rows) {
+      const inserted = (await PluginCommAPI.insertGeometry({
+        type: GEO_STRAIGHT_LINE,
+        // Drawn edge to edge of the selection, so the wash covers the writing
+        // rather than stopping short of its first and last strokes.
+        points: [
+          {x: padded.left, y},
+          {x: padded.right, y},
+        ],
+        // Leaving the lasso alone: the box has already been made from it, and
+        // re-selecting the wash would replace that selection.
+        showLassoAfterInsert: false,
+        ...MARKER_PEN,
+        // The user's choice wins over the module default; an unrecognised
+        // stored value falls back to light grey rather than to nothing.
+        penColor: shadeColor ? shadeColorValue(shadeColor) : MARKER_PEN.penColor,
+      })) as LooseResponse<boolean> | null | undefined;
+
+      if (!inserted?.success) {
+        return inserted?.error?.message ?? 'the device refused to draw it';
+      }
+      // `success` only says the call was accepted. insertGeometry answers with a
+      // boolean result, and a false there is a refusal that reports no error --
+      // exactly the shape of "nothing was drawn and nothing said why".
+      if (inserted.result !== true) {
+        return 'the device accepted the request but drew nothing';
+      }
     }
     return null;
   } catch (err) {
@@ -393,20 +513,26 @@ export interface MarkOptions {
   style: MarkStyle;
   shade: boolean;
   label: boolean;
+  /** Which marker colour the wash uses, from the user's settings. */
+  shadeColor?: string;
 }
 
 /**
  * Everything a captured task leaves on its page, in one errand.
  *
- * Order matters. The box is made from the live lasso, so it goes first and the
- * selection's bounds are read once, up front — the inserts that follow can
- * disturb the lasso, and re-reading it afterwards gave the label a rect that had
- * moved. Shading and the label then draw into the same rectangle.
+ * Order matters, and this is the order the SDK requires. The selection's bounds
+ * are read FIRST, while the lasso is still live: getLassoRect fails without a
+ * selection, and making the box consumes the one the user drew. The box is made
+ * from that live lasso second. Shading and the label then draw into the
+ * rectangle captured up front, rather than re-reading a selection that has since
+ * been turned into a link.
  *
- * The page is reloaded at the end. Inserts land in the host's in-memory page but
- * do not repaint on their own, which is exactly what "the box works and nothing
- * else does" looked like: the link is drawn by the live lasso path, the inserts
- * were not.
+ * The page is saved and then reloaded at the end, in that order. Inserts land in
+ * the host's in-memory page and do not repaint on their own, which is what "the
+ * box works and nothing else does" looked like: the link is drawn by the live
+ * lasso path, the inserts were not. Reloading without saving first is the same
+ * symptom for a different reason — the reload re-reads the file and the unsaved
+ * inserts go with it.
  *
  * Returns a sentence to append to the save confirmation, or '' when everything
  * asked for happened.
@@ -416,22 +542,29 @@ export async function markPage(source: SourceRef, options: MarkOptions): Promise
     return '';
   }
 
+  // Read the bounds BEFORE the box is made, not after. Supernote documents that
+  // getLassoRect "must create a lasso selection before calling this API;
+  // otherwise the call fails" — and setLassoStrokeLink consumes the selection it
+  // turns into a link. Reading afterwards therefore asks for the bounds of a
+  // selection that may no longer exist, which is how both inserts came to be
+  // handed a rectangle they could do nothing with.
+  const drawing = options.shade || options.label;
+  const rect = drawing ? await lassoRect() : null;
+
   const boxFailure = await markLassoStrokes(source, options.style);
   if (boxFailure) {
     return ` The page could not be marked — ${boxFailure}.`;
   }
-  if (!options.shade && !options.label) {
+  if (!drawing) {
     return ' Page marked.';
   }
-
-  const rect = await lassoRect();
-  if (typeof rect === 'string') {
-    return ` Page marked, but nothing could be drawn around it — ${rect}.`;
+  if (rect === null || typeof rect === 'string') {
+    return ` Page marked, but nothing could be drawn around it — ${rect ?? 'no bounds were read'}.`;
   }
 
   let note = ' Page marked.';
   if (options.shade) {
-    const failure = await shadeLassoStrokes(rect);
+    const failure = await shadeLassoStrokes(rect, options.shadeColor);
     if (failure) {
       note += ` The shading could not be drawn — ${failure}.`;
     }
@@ -441,6 +574,19 @@ export async function markPage(source: SourceRef, options: MarkOptions): Promise
     if (failure) {
       note += ` The label could not be written — ${failure}.`;
     }
+  }
+
+  // Flush before repainting, or the repaint undoes the work. Both inserts live
+  // in the host's in-memory page until something saves it, and `reloadFile`
+  // re-reads the file underneath — so reloading first discards them, silently
+  // and with a success from every call involved. The box is unaffected because
+  // the host persists the lasso link itself. `removePageMark` flushes for the
+  // same reason before it reads the page back.
+  try {
+    await PluginNoteAPI.saveCurrentNote();
+  } catch {
+    // Not the current note, or nothing to save. The reload below then finds a
+    // page that already matches the file.
   }
 
   // Repaint once, after both inserts, rather than after each.

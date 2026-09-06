@@ -276,5 +276,17 @@ export const LINK_IMAGE_NAME = 'Task Hub.png';
  * Says what to do rather than only what this is: someone meeting the box months
  * later needs to know the task is edited in Task Hub, and that deleting the link
  * is how you get rid of the box.
+ *
+ * The second part explains why tapping the box shows a logo rather than opening
+ * the task. It is not a choice: the Supernote SDK's link types are note page,
+ * note file, document, image and URL, and none of them can open a plugin. An
+ * image is the only destination that can say anything at all, so it is worth
+ * saying that plainly to whoever taps it — including this plugin's author, six
+ * months from now, wondering whether it was ever fixed.
+ *
+ * Newlines are honoured by the native drawing code, which wraps each line
+ * separately.
  */
-export const LINK_IMAGE_CAPTION = 'Please edit task in Task Hub, or remove link';
+export const LINK_IMAGE_CAPTION =
+  'Please edit task in Task Hub, or remove link\n\n' +
+  'A link cannot open a plugin — this is a Ratta SDK limitation, not a Task Hub problem.';

@@ -3,7 +3,16 @@
  */
 
 import {DEFAULT_SORT, SORT_KEYS, sortTasks, type VTodo} from '../src/ical';
-import {MARKER_PEN, MARK_STYLES, STYLE_CODES, isMarkStyle} from '../src/markstyle';
+import {
+  MARKER_PEN,
+  MARK_STYLES,
+  SHADE_COLORS,
+  STYLE_CODES,
+  isMarkStyle,
+  isShadeColor,
+  shadeColorValue,
+  shadingLines,
+} from '../src/markstyle';
 import {EMPTY_CONFIG} from '../src/settings';
 import {LINK_IMAGE_BASE64, LINK_IMAGE_CAPTION, LINK_IMAGE_NAME} from '../src/linkimage';
 import {readFileSync} from 'fs';
@@ -112,26 +121,110 @@ describe('the image a page mark links to', () => {
   });
 
   it('keeps the caption short enough to sit under the logo', () => {
-    // The native side wraps it, but a caption longer than a line or two would
-    // dwarf the mark it is captioning.
-    expect(LINK_IMAGE_CAPTION.length).toBeLessThan(70);
+    // The native side wraps each paragraph, so the constraint is on how much
+    // there is to wrap: a caption that runs to a paragraph or two is fine, one
+    // that runs to a page would dwarf the mark it is captioning.
+    expect(LINK_IMAGE_CAPTION.length).toBeLessThan(200);
+    const paragraphs = LINK_IMAGE_CAPTION.split('\n').filter(Boolean);
+    expect(paragraphs.length).toBeLessThanOrEqual(3);
+    for (const paragraph of paragraphs) {
+      expect(paragraph.length).toBeLessThan(100);
+    }
+  });
+
+  it('explains why tapping the box cannot open the task', () => {
+    // The link points at an image because the SDK's link types cannot reach a
+    // plugin. Whoever taps it deserves to know that is a platform limit rather
+    // than something Task Hub forgot to do.
+    expect(LINK_IMAGE_CAPTION).toContain('Ratta SDK');
+    expect(LINK_IMAGE_CAPTION).toContain('Task Hub');
   });
 });
 
 describe('the marker pen used for shading', () => {
-  it('carries the values read off the device, not guesses', () => {
-    expect(MARKER_PEN.penType).toBe(11);
-    expect(MARKER_PEN.penColor).toBe(202);
+  it('uses only values insertGeometry documents', () => {
+    // Supernote's Geometry reference lists four pen types — 10 technical, 11
+    // marker, 15 calligraphy, 16 pressure — and exactly four colours. An
+    // undocumented colour (202, one away from light grey, read off a device)
+    // was almost certainly why nothing was drawn at all, so pin the whole
+    // documented set rather than the single number.
+    expect([10, 11, 15, 16]).toContain(MARKER_PEN.penType);
+    expect([0, 157, 201, 254]).toContain(MARKER_PEN.penColor);
   });
 
-  it('is narrower than a hand-drawn marker stroke', () => {
+  it('shades in a grey that handwriting stays readable through', () => {
+    // Black or white would either bury the writing or be invisible.
+    expect([157, 201]).toContain(MARKER_PEN.penColor);
+  });
+
+  it('is narrower than a hand-drawn marker stroke, and above the documented floor', () => {
     // 3800 is what the device reported for one drawn by hand. This is a wash
-    // under someone else's writing, so it should read as background.
+    // under someone else's writing, so it should read as background. The
+    // Geometry reference sets the minimum width at 100.
     expect(MARKER_PEN.penWidth).toBeLessThan(3800);
-    expect(MARKER_PEN.penWidth).toBeGreaterThan(0);
+    expect(MARKER_PEN.penWidth).toBeGreaterThanOrEqual(100);
   });
 
   it('is off by default, because it draws into the note', () => {
     expect(EMPTY_CONFIG.markShade).toBe(false);
+  });
+});
+
+describe('shading fills the selection', () => {
+  it('draws several passes, not one line through the middle', () => {
+    const rows = shadingLines({left: 0, top: 100, right: 400, bottom: 300});
+    expect(rows.length).toBeGreaterThan(2);
+    // Every pass lands inside the selection, none on its edges.
+    expect(Math.min(...rows)).toBeGreaterThan(100);
+    expect(Math.max(...rows)).toBeLessThan(300);
+  });
+
+  it('spreads the passes evenly', () => {
+    const rows = shadingLines({left: 0, top: 0, right: 100, bottom: 150});
+    const gaps = rows.slice(1).map((y, i) => y - rows[i]);
+    // Rounding can differ by a pixel; nothing should be bunched.
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1);
+  });
+
+  it('still shades a single word rather than drawing one line', () => {
+    const rows = shadingLines({left: 0, top: 0, right: 80, bottom: 18});
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('caps the passes so a tall selection is not slow to draw', () => {
+    const rows = shadingLines({left: 0, top: 0, right: 100, bottom: 4000});
+    expect(rows.length).toBeLessThanOrEqual(14);
+  });
+
+  it('returns nothing for a selection with no height', () => {
+    expect(shadingLines({left: 0, top: 50, right: 100, bottom: 50})).toEqual([]);
+  });
+});
+
+describe('the shading colour setting', () => {
+  it('offers only colours insertGeometry documents', () => {
+    for (const choice of SHADE_COLORS) {
+      expect([0, 157, 201, 254]).toContain(choice.value);
+    }
+  });
+
+  it('does not offer white, which would mark nothing on a white page', () => {
+    expect(SHADE_COLORS.some(c => c.value === 254)).toBe(false);
+  });
+
+  it('defaults to light grey, including for an unrecognised stored value', () => {
+    expect(EMPTY_CONFIG.markShadeColor).toBe('light');
+    expect(shadeColorValue('light')).toBe(201);
+    expect(shadeColorValue('chartreuse')).toBe(201);
+    expect(shadeColorValue('')).toBe(201);
+  });
+
+  it('recognises exactly the stored keys it offers', () => {
+    for (const choice of SHADE_COLORS) {
+      expect(isShadeColor(choice.key)).toBe(true);
+      expect(shadeColorValue(choice.key)).toBe(choice.value);
+    }
+    expect(isShadeColor('mauve')).toBe(false);
+    expect(isShadeColor(undefined)).toBe(false);
   });
 });
