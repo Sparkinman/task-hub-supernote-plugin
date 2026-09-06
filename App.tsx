@@ -74,9 +74,10 @@ import {acceptsEvents, acceptsTasks, type TaskCollection} from './src/discovery'
 import {
   DATE_FORMATS,
   TIME_FORMATS,
-  addHours,
+  addMinutes,
   formatDate,
   formatTime,
+  minutesBetween,
   type DateFormat,
   type TimeFormat,
 } from './src/format';
@@ -2056,30 +2057,40 @@ will not duplicate them.`}
                   return d;
                 }
                 const next = {...d, date, startTime: time};
-                // An hour after the start, but only into an empty end. A
-                // duration the user chose is theirs; this fills a blank rather
-                // than overwriting a decision, which is why it can run on an
-                // existing event as safely as on a new one.
-                if (!d.endTime && time) {
-                  next.endTime = addHours(time, 1);
-                }
-                // Clearing the start clears a derived end with it, so an
-                // all-day event does not keep an end time it cannot use.
-                if (!time && d.endTime === addHours(d.startTime || '', 1)) {
+                if (time) {
+                  // The end follows the start on every change, keeping whatever
+                  // duration the event already had — 90 minutes stays 90
+                  // minutes when the start is nudged — and defaulting to an
+                  // hour when there is nothing to keep.
+                  const held =
+                    d.startTime && d.endTime ? minutesBetween(d.startTime, d.endTime) : null;
+                  next.endTime = addMinutes(time, held && held > 0 ? held : 60);
+                } else {
+                  // No start means an all-day event, which cannot carry an end
+                  // time.
                   next.endTime = '';
                 }
                 return next;
               })
             }
           />
-          <Field
+          {/*
+            The same control as the start, not a bare text box: it was the one
+            place left that demanded a 24-hour time whatever the clock setting
+            said. The date is fixed to the event's own, so this only ever picks
+            a time.
+          */}
+          <Text style={styles.label}>Ends</Text>
+          <DateTimePicker
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}
-            compact
-            label="End time (HH:MM)"
-            value={eventForm.endTime}
-            placeholder="13:00"
-            onChange={v => setEventForm(d => (d ? {...d, endTime: v} : d))}
+            date={eventForm.date}
+            time={eventForm.endTime}
+            timeFormat={timeFormat}
+            hideCalendar
+            onChange={(_date, time) =>
+              setEventForm(d => (d ? {...d, endTime: time} : d))
+            }
           />
           <Text style={styles.label}>Repeats</Text>
           {eventForm.repeat === 'custom' && (
@@ -2389,11 +2400,20 @@ will not duplicate them.`}
                   {dayEvents.map(event => (
                     <View key={event.uid} style={styles.eventRow}>
                       <Pressable
-                        style={[styles.grow, styles.agendaItem]}
+                        style={[styles.grow, styles.agendaItemTight]}
                         onPress={() => openEventEditor(event)}>
-                        <Text style={styles.agendaTitle}>{event.summary}</Text>
-                        <Text style={styles.agendaMeta}>
-                          {event.allDay ? 'All day' : event.startTime} · {event.calendarLabel}
+                        {/*
+                          Smaller than the day view's rows on purpose: this list
+                          sits under a whole month grid, and the point of it is
+                          seeing what a day holds without scrolling past the
+                          calendar to find out.
+                        */}
+                        <Text style={styles.agendaTitleTight}>{event.summary}</Text>
+                        <Text style={styles.agendaMetaTight}>
+                          {event.allDay
+                            ? 'All day'
+                            : formatTime(event.startTime, timeFormat)}{' '}
+                          · {event.calendarLabel}
                         </Text>
                       </Pressable>
                       <Pressable
@@ -2568,7 +2588,9 @@ will not duplicate them.`}
 
     <Notice
       // Held back while a confirm is up: two stacked sheets on this panel leave
-      // the user unsure which one the buttons belong to.
+      // the user unsure which one the buttons belong to. It cannot appear on the
+      // idle screen — this whole tree only renders once a screen is chosen — so
+      // it is not what makes a reopening take two taps.
       visible={missing.length > 0 && ask === null}
       title="A list has gone"
       body={missingMessage(missing)}

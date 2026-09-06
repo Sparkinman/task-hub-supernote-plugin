@@ -1044,6 +1044,11 @@ export const styles = StyleSheet.create({
   agendaTime: {fontSize: 20, fontWeight: '700', color: '#000'},
   agendaTitle: {fontSize: 22, color: '#000', marginTop: 1},
   agendaMeta: {fontSize: 18, color: '#555', marginTop: 1},
+  // The same rows under the month grid, tighter: that list is there to be read
+  // without scrolling past a whole calendar to reach it.
+  agendaItemTight: {borderBottomWidth: 1, borderBottomColor: '#ddd', paddingVertical: 5},
+  agendaTitleTight: {fontSize: 18, color: '#000'},
+  agendaMetaTight: {fontSize: 15, color: '#555'},
   dayCell: {flex: 1, minHeight: 96, borderWidth: 1, borderColor: '#bbb', margin: 1, padding: 3},
   dayCellSelected: {borderWidth: 2, borderColor: '#000'},
   dayNum: {fontSize: 20, color: '#000'},

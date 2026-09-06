@@ -88,3 +88,39 @@ export function addHours(time: string, hours: number): string {
   const shifted = (((Number(match[1]) + hours) % 24) + 24) % 24;
   return `${String(shifted).padStart(2, '0')}:${match[2]}`;
 }
+
+/**
+ * Minutes between two HH:MM times, treating a smaller end as the next day.
+ *
+ * Used to keep an event's duration while its start moves: an event set to run
+ * 90 minutes should still run 90 minutes after the start is nudged, rather than
+ * silently becoming an hour because that is the default.
+ */
+export function minutesBetween(from: string, to: string): number | null {
+  const parse = (value: string) => {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+    if (!match) {
+      return null;
+    }
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : null;
+  };
+  const start = parse(from);
+  const end = parse(to);
+  if (start === null || end === null) {
+    return null;
+  }
+  return end >= start ? end - start : 24 * 60 - start + end;
+}
+
+/** Add whole minutes to an HH:MM time, wrapping at midnight. */
+export function addMinutes(time: string, minutes: number): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+  if (!match) {
+    return time;
+  }
+  const total = (Number(match[1]) * 60 + Number(match[2]) + minutes + 24 * 60) % (24 * 60);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+}

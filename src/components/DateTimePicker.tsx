@@ -23,6 +23,14 @@ interface Props {
    */
   scrollHandle?: number | null;
   onScrollTo?: (y: number) => void;
+  /**
+   * Hides the month grid and the quick-pick chips, leaving only the time.
+   *
+   * For an event's end, which is always on the event's own day: offering a
+   * second calendar there would invite somebody to set an end date the rest of
+   * the form has no way to store.
+   */
+  hideCalendar?: boolean;
   /** Canonical 'YYYY-MM-DD', or '' for unset. */
   date: string;
   /** Canonical 24-hour 'HH:MM', or '' for unset. */
@@ -103,7 +111,7 @@ function toHM(hours: number, minutes: number): string {
 }
 
 export function DateTimePicker(props: Props): React.JSX.Element {
-  const {date, time, timeFormat, onChange, scrollHandle, onScrollTo} = props;
+  const {date, time, timeFormat, onChange, scrollHandle, onScrollTo, hideCalendar} = props;
   const timeInputRef = useRef<TextInput>(null);
 
   const handleTimeFocus = () => {
@@ -163,78 +171,14 @@ export function DateTimePicker(props: Props): React.JSX.Element {
     onChange(date || today, toHM(hours + deltaHours, minutes + deltaMinutes));
   };
 
-  return (
-    <View style={styles.wrap}>
-      <View style={styles.quickRow}>
-        <Chip label="Today" onPress={() => quick(0)} />
-        <Chip label="Tomorrow" onPress={() => quick(1)} />
-        <Chip label="Next week" onPress={() => quick(7)} />
-        <Chip label="Clear" onPress={() => quick(null)} />
-      </View>
-
-      <View style={styles.monthRow}>
-        <Pressable
-          style={styles.nav}
-          onPress={() => setView(v => shiftMonth(v.year, v.month, -1))}>
-          <Text style={styles.navText}>‹</Text>
-        </Pressable>
-        <Text style={styles.monthLabel}>
-          {MONTHS[view.month]} {view.year}
-        </Text>
-        <Pressable
-          style={styles.nav}
-          onPress={() => setView(v => shiftMonth(v.year, v.month, 1))}>
-          <Text style={styles.navText}>›</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.week}>
-        {WEEKDAYS.map((d, i) => (
-          <Text key={i} style={styles.weekday}>
-            {d}
-          </Text>
-        ))}
-      </View>
-
-      {weeks.map((row, i) => (
-        <View key={i} style={styles.week}>
-          {row.map((cell, j) => {
-            if (!cell.iso) {
-              return <View key={j} style={styles.cell} />;
-            }
-            const selected = cell.iso === date;
-            const isToday = cell.iso === today;
-            return (
-              <Pressable
-                key={j}
-                style={[styles.cell, styles.cellOn, selected && styles.cellSelected]}
-                onPress={() => onChange(cell.iso!, time)}>
-                <Text
-                  style={[
-                    styles.cellText,
-                    selected && styles.cellTextSelected,
-                    isToday && !selected && styles.cellTextToday,
-                  ]}>
-                  {cell.day}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      ))}
-
-      {/*
-        Four arrows around one large readout rather than a row of labelled
-        buttons: hours and minutes each get an up/down pair, minutes step by 5.
-        Typing into the readout covers any odd minute the steppers cannot reach,
-        so a finer grain costs no extra chrome.
-
-        The arrows are deliberately inverted — up decrements, down increments —
-        so they read as scrolling a wheel of values past a window rather than
-        nudging the number itself.
-      */}
-      <View style={styles.timeBlock}>
-        <Text style={styles.timeLabel}>Time</Text>
+  /**
+   * The time row: steppers, the typed field, and the remove/add control.
+   *
+   * Built once and used by both shapes below, so the time-only picker cannot
+   * drift from the full one.
+   */
+  const timeControls = (
+    <>
 
         {showTime ? (
           <View style={styles.timeControls}>
@@ -311,6 +255,91 @@ export function DateTimePicker(props: Props): React.JSX.Element {
             <Text style={styles.addTimeText}>+ Add a time</Text>
           </Pressable>
         )}
+    </>
+  );
+
+  if (hideCalendar) {
+    // Time only: the same controls, without the month grid or the quick picks.
+    return (
+      <View style={styles.wrap}>
+        <View style={styles.timeBlock}>{timeControls}</View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.wrap}>
+      <View style={styles.quickRow}>
+        <Chip label="Today" onPress={() => quick(0)} />
+        <Chip label="Tomorrow" onPress={() => quick(1)} />
+        <Chip label="Next week" onPress={() => quick(7)} />
+        <Chip label="Clear" onPress={() => quick(null)} />
+      </View>
+
+      <View style={styles.monthRow}>
+        <Pressable
+          style={styles.nav}
+          onPress={() => setView(v => shiftMonth(v.year, v.month, -1))}>
+          <Text style={styles.navText}>‹</Text>
+        </Pressable>
+        <Text style={styles.monthLabel}>
+          {MONTHS[view.month]} {view.year}
+        </Text>
+        <Pressable
+          style={styles.nav}
+          onPress={() => setView(v => shiftMonth(v.year, v.month, 1))}>
+          <Text style={styles.navText}>›</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.week}>
+        {WEEKDAYS.map((d, i) => (
+          <Text key={i} style={styles.weekday}>
+            {d}
+          </Text>
+        ))}
+      </View>
+
+      {weeks.map((row, i) => (
+        <View key={i} style={styles.week}>
+          {row.map((cell, j) => {
+            if (!cell.iso) {
+              return <View key={j} style={styles.cell} />;
+            }
+            const selected = cell.iso === date;
+            const isToday = cell.iso === today;
+            return (
+              <Pressable
+                key={j}
+                style={[styles.cell, styles.cellOn, selected && styles.cellSelected]}
+                onPress={() => onChange(cell.iso!, time)}>
+                <Text
+                  style={[
+                    styles.cellText,
+                    selected && styles.cellTextSelected,
+                    isToday && !selected && styles.cellTextToday,
+                  ]}>
+                  {cell.day}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+
+      {/*
+        Four arrows around one large readout rather than a row of labelled
+        buttons: hours and minutes each get an up/down pair, minutes step by 5.
+        Typing into the readout covers any odd minute the steppers cannot reach,
+        so a finer grain costs no extra chrome.
+
+        The arrows are deliberately inverted — up decrements, down increments —
+        so they read as scrolling a wheel of values past a window rather than
+        nudging the number itself.
+      */}
+      <View style={styles.timeBlock}>
+        <Text style={styles.timeLabel}>Time</Text>
+        {timeControls}
       </View>
     </View>
   );
