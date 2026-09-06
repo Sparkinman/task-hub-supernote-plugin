@@ -18,18 +18,41 @@
 
 /* eslint-disable no-void -- void marks deliberately un-awaited promises in handlers */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {Keyboard, Pressable, ScrollView, Text, View, findNodeHandle} from 'react-native';
+import {
+  Dimensions,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  findNodeHandle,
+  type KeyboardEvent,
+} from 'react-native';
+
+/**
+ * The panel's height right now, read rather than assumed.
+ *
+ * Task Hub runs on every Supernote generation — A5X, A6X, A5X2, A6X2 and Manta —
+ * and those differ in both pixel size and aspect. Anything that needs a share of
+ * the screen asks for it here instead of carrying a number that happened to look
+ * right on one device.
+ */
+function windowHeight(): number {
+  return Dimensions.get('window').height || 0;
+}
 import {PluginManager} from 'sn-plugin-lib';
 
 import {eventsOnDay, monthMarks, shiftDays, tasksOnDay} from './src/agenda';
-import {discoverCollections, newUid, putTask} from './src/caldav';
+import {addSteps, discoverCollections, newUid, putTask, saidAboutSteps} from './src/caldav';
 import {APP_NAME} from './src/components/Brand';
 import {
   Button,
   CheckRow,
   Choice,
   Confirm,
+  CalendarIcon,
   Field,
+  FolderIcon,
   Header,
   LoadingLine,
   Notice,
@@ -43,6 +66,8 @@ import {
 import {DateTimePicker} from './src/components/DateTimePicker';
 import {DayView} from './src/components/DayView';
 import {MonthView} from './src/components/MonthView';
+import {QuarterView} from './src/components/QuarterView';
+import {YearView} from './src/components/YearView';
 import {WeekView, shiftWeek} from './src/components/WeekView';
 import {acceptsEvents, acceptsTasks, type TaskCollection} from './src/discovery';
 import {
@@ -50,6 +75,7 @@ import {
   TIME_FORMATS,
   addHours,
   formatDate,
+  formatTime,
   type DateFormat,
   type TimeFormat,
 } from './src/format';
@@ -61,9 +87,12 @@ import {
   toDateInput,
   type SortKey,
 } from './src/ical';
+import {arrange, visible} from './src/subtasks';
+import {PRIORITY_BANDS, bandOf, valueOf, type PriorityBand} from './src/priority';
+import {REPEAT_OPTIONS, repeatKey, repeatLabel, ruleFor, type RepeatKey} from './src/recurrence';
 import {readLassoAsText, readSourceRef, type SourceRef} from './src/lasso';
 import {TASK_LABEL, markPage, removePageMark} from './src/pagemark';
-import {MARK_STYLES, type MarkStyle} from './src/markstyle';
+import {MARK_STYLES, SHADE_COLORS, type MarkStyle} from './src/markstyle';
 import {DEMO} from './src/mode';
 import {
   DEMO_BANNER,
@@ -99,7 +128,6 @@ import {
   listEvents,
   listTasks,
   missingMessage,
-  type ListResult,
   type MissingCollection,
   type RemoteEvent,
   type RemoteTask,
@@ -113,11 +141,22 @@ import {
 } from './src/storage';
 import {LAYOUT_PRESETS, dailyNotePath, daysWithNotes} from './src/dailynote';
 import {
+  PERIOD_LAYOUT_PRESETS,
+  hasPeriodNote,
+  periodLabel,
+  periodNotePath,
+  periodStart,
+  type Period,
+} from './src/periodnote';
+import {
   createDailyNote,
   createMeetingNote,
   findExistingNotes,
+  findPeriodNotes,
+  createPeriodNote,
+  openPeriodNote,
   findMeetingNotes,
-  listSystemTemplates,
+  listAllTemplates,
   openDailyNote,
   openMeetingNote,
   openFileAt,
@@ -135,13 +174,36 @@ const TOOLBAR_BUTTON_ID = 100;
 
 type Screen = 'idle' | 'save' | 'hub' | 'settings';
 type Tab = 'tasks' | 'calendar';
-type CalView = 'month' | 'week' | 'day';
+type CalView = 'year' | 'quarter' | 'month' | 'week' | 'day';
 
 interface TaskDraftState {
   summary: string;
   description: string;
   dueDate: string;
   dueTime: string;
+  /**
+   * The band the user picked, not the RFC 5545 number. The number is worked out
+   * on save, so a task edited without touching importance keeps whatever value
+   * another client wrote inside the same band.
+   */
+  priority: PriorityBand;
+  /**
+   * The repeat the user picked. `custom` means the stored rule is one this
+   * plugin's menu cannot name, and saving must leave it exactly as it is.
+   */
+  repeat: RepeatKey;
+  /**
+   * Steps to ADD, one per line. Never pre-filled with the steps a task already
+   * has — the same contract as the web page's box, which is what makes it safe
+   * to save the same form twice. See `addSteps`.
+   */
+  steps: string;
+  /**
+   * A date for the steps being added, when it should differ from the task's own.
+   * Empty means "the same day as the task", which is what most steps want.
+   */
+  stepsDate: string;
+  stepsTime: string;
 }
 
 interface EventDraftState {
@@ -151,19 +213,25 @@ interface EventDraftState {
   date: string;
   startTime: string;
   endTime: string;
-  /**
-   * Once the user types an end time themselves, stop deriving it from the
-   * start — otherwise every nudge of the start hour would silently discard
-   * a deliberate duration.
-   */
-  endTouched: boolean;
+  /** Same three-state repeat as a task. `custom` is shown but never rewritten. */
+  repeat: RepeatKey;
 }
 
-const EMPTY_TASK: TaskDraftState = {summary: '', description: '', dueDate: '', dueTime: ''};
+const EMPTY_TASK: TaskDraftState = {
+  summary: '',
+  description: '',
+  dueDate: '',
+  dueTime: '',
+  priority: 'none',
+  repeat: '',
+  steps: '',
+  stepsDate: '',
+  stepsTime: '',
+};
 
-/** Stand-ins for a fetch that was never made, so refresh has one result shape. */
-const NO_TASKS: ListResult<RemoteTask> = {items: [], missing: []};
-const NO_EVENTS: ListResult<RemoteEvent> = {items: [], missing: []};
+// A fetch that was not made now resolves to null rather than to an empty
+// result, so a scoped reload can tell "nothing changed here" from "this list is
+// genuinely empty" and leave the existing state alone.
 const emptyEvent = (day: string): EventDraftState => ({
   summary: '',
   description: '',
@@ -171,12 +239,17 @@ const emptyEvent = (day: string): EventDraftState => ({
   date: day,
   startTime: '',
   endTime: '',
-  endTouched: false,
+  repeat: '',
 });
 
 /** A confirmed write: runs, then reports this message on success. */
 interface Ask {
   title: string;
+  /**
+   * What this write changed, so the reload afterwards fetches only that. A
+   * task edit does not change which days have notes.
+   */
+  reload?: 'all' | 'tasks' | 'events' | 'notes';
   body?: string;
   label: string;
   run: () => Promise<string>;
@@ -201,6 +274,16 @@ export default function App(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('tasks');
   const [calView, setCalViewRaw] = useState<CalView>('month');
   const [viewHistory, setViewHistory] = useState<CalView[]>([]);
+  /**
+   * Mirrors of the two above, so the switch handlers can read the current value
+   * without nesting one state update inside another and without taking a
+   * dependency that would make them a new function on every view change — the
+   * calendar grids are memoised on those handlers holding still.
+   */
+  const calViewRef = useRef<CalView>('month');
+  const viewHistoryRef = useRef<CalView[]>([]);
+  calViewRef.current = calView;
+  viewHistoryRef.current = viewHistory;
   const [status, setStatus] = useState<Status>(null);
   const [config, setLocalConfig] = useState<RadicaleConfig>(DEMO ? DEMO_CONFIG : getConfig);
   const [collections, setLocalCollections] = useState<TaskCollection[]>(
@@ -214,13 +297,45 @@ export default function App(): React.JSX.Element {
   const [events, setEvents] = useState<RemoteEvent[]>([]);
   const [missing, setMissing] = useState<MissingCollection[]>([]);
   const [showDone, setShowDone] = useState(false);
+  /**
+   * Which tasks have had their steps opened. Folded is the resting state, so
+   * this holds what was opened rather than what was closed — a task that gains
+   * a step should not appear expanded because nobody had folded it yet.
+   */
+  const [openSteps, setOpenSteps] = useState<Set<string>>(new Set());
+  const toggleSteps = useCallback((uid: string) => {
+    setOpenSteps(previous => {
+      const next = new Set(previous);
+      if (next.has(uid)) {
+        next.delete(uid);
+      } else {
+        next.add(uid);
+      }
+      return next;
+    });
+  }, []);
   const [showHelp, setShowHelp] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [loading, setLoading] = useState(false);
   const [storePath, setStorePath] = useState<string | null>(null);
   const [noteFiles, setNoteFiles] = useState<string[]>([]);
+  /**
+   * Note paths under each period's own root. Separate from `noteFiles` because
+   * each period has its own configured folder, and a weekly note living beside
+   * the daily ones is a configuration, not an assumption.
+   */
+  const [periodFiles, setPeriodFiles] = useState<
+    Record<'week' | 'month' | 'quarter' | 'year', string[]>
+  >({
+    week: [],
+    month: [],
+    quarter: [],
+    year: [],
+  });
   const [meetingFiles, setMeetingFiles] = useState<string[]>([]);
-  const [pickingFolder, setPickingFolder] = useState<'daily' | 'meeting' | null>(null);
+  const [pickingFolder, setPickingFolder] = useState<
+    'daily' | 'week' | 'month' | 'quarter' | 'year' | 'meeting' | null
+  >(null);
   const [pickingDate, setPickingDate] = useState<'day' | 'week' | null>(null);
   const [templates, setTemplates] = useState<NoteTemplate[]>([]);
   const [restored, setRestored] = useState(false);
@@ -229,6 +344,12 @@ export default function App(): React.JSX.Element {
   const [query, setQuery] = useState('');
 
   const [taskForm, setTaskForm] = useState<TaskDraftState | null>(null);
+  /**
+   * Whether the date picker for the steps being added is showing, and on which
+   * form. Kept out of the draft state because it is about what is on screen,
+   * not about the task being written.
+   */
+  const [stepsDateOpen, setStepsDateOpen] = useState<'task' | 'capture' | null>(null);
   const [editingTask, setEditingTask] = useState<RemoteTask | null>(null);
   const [taskTargets, setTaskTargets] = useState<string[]>([]);
 
@@ -246,17 +367,50 @@ export default function App(): React.JSX.Element {
    */
   const scrollRef = useRef<ScrollView>(null);
   const [scrollHandle, setScrollHandle] = useState<number | null>(null);
-  const [keyboardUp, setKeyboardUp] = useState(false);
+  /**
+   * How tall the on-screen keyboard actually is, as the host reports it.
+   *
+   * Measured rather than assumed. This used to be a constant 420pt of bottom
+   * padding, which is a guess that can only be right on one panel: an A5X and a
+   * Manta differ in both resolution and physical size, and the keyboard is a
+   * different height on each. Too small and the field being typed into cannot be
+   * scrolled clear of the keyboard because there is nothing below it to scroll
+   * into; too large and every form ends in a screen of blank space.
+   */
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardUp = keyboardHeight > 0;
 
   useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardUp(true));
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardUp(false));
+    const onShow = (event: KeyboardEvent) => {
+      // Fall back to a share of the window when the host reports nothing, so a
+      // firmware that omits the height still leaves room to scroll.
+      const reported = event?.endCoordinates?.height ?? 0;
+      setKeyboardHeight(reported > 0 ? reported : Math.round(windowHeight() * 0.4));
+    };
+    const show = Keyboard.addListener('keyboardDidShow', onShow);
+    // The Supernote keyboard changes height when its layout changes (symbols,
+    // handwriting). Following the frame keeps the padding honest.
+    const change = Keyboard.addListener('keyboardDidChangeFrame', onShow);
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
     return () => {
       show.remove();
+      change.remove();
       hide.remove();
     };
   }, []);
 
+  /**
+   * Bring the field being typed into view, above the keyboard.
+   *
+   * The field is scrolled close to the top of the panel rather than merely far
+   * enough: on a device whose keyboard covers half the screen, "just above the
+   * keyboard" leaves the field in the one band where the next field, the
+   * confirmation and any error message are all hidden. Near the top, the field
+   * and what follows it are both readable, on every panel size.
+   *
+   * This only works if there is somewhere to scroll to, which is what the
+   * measured keyboard padding below the content provides.
+   */
   const scrollFieldIntoView = useCallback((y: number) => {
     // A short delay lets the keyboard finish animating in before we scroll,
     // otherwise the scroll is undone by the layout change behind it.
@@ -286,7 +440,15 @@ export default function App(): React.JSX.Element {
     return true;
   }, []);
 
-  const refresh = useCallback(async () => {
+  /**
+   * What a reload needs to fetch.
+   *
+   * A full refresh is eight operations: two CalDAV listings and six walks of
+   * the note folders. Running all of them after saving one task is most of the
+   * wait the user feels when they press Save — nothing about a new task changes
+   * which days have notes. Each write says what it actually invalidated.
+   */
+  const refresh = useCallback(async (scope: 'all' | 'tasks' | 'events' | 'notes' = 'all') => {
     if (DEMO) {
       // Sample data, generated fresh so it is always dated around today. No
       // network call is made, and none can be: the demo build does not declare
@@ -303,21 +465,42 @@ export default function App(): React.JSX.Element {
     }
 
     const cfg = getConfig();
+    const wantTasks = scope === 'all' || scope === 'tasks';
+    const wantEvents = scope === 'all' || scope === 'events';
+    const wantNotes = scope === 'all' || scope === 'notes';
     setLoading(true);
     try {
-      const [t, e, n, m] = await Promise.all([
-        hasCollections(cfg) ? listTasks(cfg) : Promise.resolve(NO_TASKS),
-        hasCalendars(cfg) ? listEvents(cfg) : Promise.resolve(NO_EVENTS),
-        findExistingNotes(cfg.dailyNote),
-        findMeetingNotes(cfg.meetingNote),
+      const [t, e, n, m, wn, mn, qn, yn] = await Promise.all([
+        wantTasks && hasCollections(cfg) ? listTasks(cfg) : Promise.resolve(null),
+        wantEvents && hasCalendars(cfg) ? listEvents(cfg) : Promise.resolve(null),
+        wantNotes ? findExistingNotes(cfg.dailyNote) : Promise.resolve(null),
+        wantNotes ? findMeetingNotes(cfg.meetingNote) : Promise.resolve(null),
+        wantNotes ? findPeriodNotes(cfg.weekNote) : Promise.resolve(null),
+        wantNotes ? findPeriodNotes(cfg.monthNote) : Promise.resolve(null),
+        wantNotes ? findPeriodNotes(cfg.quarterNote) : Promise.resolve(null),
+        wantNotes ? findPeriodNotes(cfg.yearNote) : Promise.resolve(null),
       ]);
-      setTasks(t.items);
-      setEvents(e.items);
-      setNoteFiles(n);
-      setMeetingFiles(m);
+      if (t) {
+        setTasks(t.items);
+      }
+      if (e) {
+        setEvents(e.items);
+      }
+      if (n) {
+        setNoteFiles(n);
+      }
+      if (m) {
+        setMeetingFiles(m);
+      }
+      if (wn && mn && qn && yn) {
+        setPeriodFiles({week: wn, month: mn, quarter: qn, year: yn});
+      }
       // Surfaced rather than thrown: a list that has gone must not hide the
-      // lists that are still working.
-      setMissing([...t.missing, ...e.missing]);
+      // lists that are still working. Only replaced for the parts just fetched,
+      // so a scoped reload does not clear a warning about the other half.
+      if (t || e) {
+        setMissing([...(t?.missing ?? []), ...(e?.missing ?? [])]);
+      }
     } catch (err) {
       setStatus({kind: 'error', message: describe(err)});
     } finally {
@@ -348,6 +531,40 @@ export default function App(): React.JSX.Element {
     void PluginManager.closePluginView();
   }, []);
 
+  /**
+   * Whether a form on screen holds work that has not been written.
+   *
+   * A title typed but not saved is the case that matters: the plugin closes
+   * straight back to the note, and there is no draft kept anywhere, so leaving
+   * silently loses it.
+   */
+  const formUnsaved =
+    (!!taskForm && taskForm.summary.trim().length > 0) ||
+    (screen === 'save' && draft.summary.trim().length > 0) ||
+    (!!eventForm && eventForm.summary.trim().length > 0);
+
+  /**
+   * Leave the plugin, asking first when a form has unsaved work in it.
+   *
+   * Every Done & Exit goes through here rather than straight to `close`.
+   */
+  const closeGuarded = useCallback(() => {
+    if (!formUnsaved) {
+      close();
+      return;
+    }
+    setAsk({
+      title: 'Leave without saving?',
+      body: 'What you have typed has not been saved, and leaving now discards it.',
+      label: 'Yes, discard',
+      run: async () => {
+        close();
+        return 'Discarded.';
+      },
+    });
+  }, [close, formUnsaved]);
+
+
   /** Dismiss once the confirmation has been read, cancelling any earlier one. */
   const scheduleClose = useCallback(() => {
     if (closeTimer.current !== null) {
@@ -358,6 +575,16 @@ export default function App(): React.JSX.Element {
       close();
     }, 1200);
   }, [close]);
+
+  /**
+   * True while a confirmed write is in flight.
+   *
+   * Every Save and every Done & Exit is held back until it clears, so a write
+   * cannot be started twice by an impatient second tap and the plugin cannot be
+   * closed with one half done. On a panel that takes a moment to redraw, a
+   * button that looks unresponsive invites exactly that second tap.
+   */
+  const [writing, setWriting] = useState(false);
 
   /** Confirm → push → success → reload. The single write path. */
   const runAsk = useCallback(async () => {
@@ -372,6 +599,7 @@ export default function App(): React.JSX.Element {
       return;
     }
     setStatus({kind: 'working', message: 'Saving…'});
+    setWriting(true);
     try {
       const message = await pending.run();
       setStatus({kind: 'done', message});
@@ -382,9 +610,15 @@ export default function App(): React.JSX.Element {
         scheduleClose();
         return;
       }
-      await refresh();
+      // Deliberately NOT awaited. The write has already succeeded and the
+      // confirmation is on screen; making the user watch a re-listing of every
+      // task before the form closes is most of what "saving is slow" was. The
+      // list reconciles a moment later, in the background.
+      void refresh(pending.reload ?? 'all');
     } catch (err) {
       setStatus({kind: 'error', message: describe(err)});
+    } finally {
+      setWriting(false);
     }
   }, [ask, refresh, scheduleClose, blockedInDemo]);
 
@@ -464,6 +698,13 @@ export default function App(): React.JSX.Element {
       if (stored) {
         setConfig(stored);
         setLocalConfig(stored);
+        // Reopen on the day the plugin was last left from, so coming back from
+        // a note lands where it was rather than on today.
+        if (stored.lastDay) {
+          setDay(stored.lastDay);
+          const d = new Date(`${stored.lastDay}T00:00:00`);
+          setView({year: d.getFullYear(), month: d.getMonth()});
+        }
         void refresh();
       }
       setStorePath(await settingsLocation());
@@ -488,7 +729,7 @@ export default function App(): React.JSX.Element {
         setScreen('settings');
         // Only this screen needs them, and the call is cheap.
         if (!DEMO) {
-          void listSystemTemplates().then(setTemplates);
+          void listAllTemplates().then(setTemplates);
         }
       },
     });
@@ -504,26 +745,152 @@ export default function App(): React.JSX.Element {
    * Tapping a day in Month jumps to Day, which is a one-way trip without this —
    * the tab strip cannot express "the view I was just on".
    */
+  /**
+   * Move the selection to today when switching view, so a coarser or finer view
+   * opens somewhere meaningful.
+   *
+   * Coming from the year view, the quarter used to open with its 1 January
+   * highlighted — the anchor the year view passed, not a day anybody chose.
+   * Today is what somebody switching view almost always wants to see, and it is
+   * one tap to move off it.
+   */
   const setCalView = useCallback((next: CalView) => {
-    setCalViewRaw(prev => {
-      if (prev !== next) {
-        setViewHistory(h => [...h, prev]);
-      }
-      return next;
-    });
+    // The history push happens HERE, not inside the setCalViewRaw updater.
+    // A state updater must be a pure function of its previous value: React is
+    // free to call it more than once, and calling another setState from inside
+    // it made switching view unreliable — the tap that should have shown Year
+    // sometimes did nothing, and a second tap was needed. Reading the current
+    // view through a ref keeps this a plain comparison with no nesting.
+    const prev = calViewRef.current;
+    if (prev !== next) {
+      setViewHistory(h => [...h, prev]);
+      setCalViewRaw(next);
+      const today = toDateInput(new Date());
+      setDay(today);
+      const now = new Date();
+      setView({year: now.getFullYear(), month: now.getMonth()});
+    }
   }, []);
 
   const goBackView = useCallback(() => {
-    setViewHistory(h => {
-      if (h.length === 0) {
-        return h;
-      }
-      setCalViewRaw(h[h.length - 1]);
-      return h.slice(0, -1);
-    });
+    const history = viewHistoryRef.current;
+    if (history.length === 0) {
+      return;
+    }
+    setCalViewRaw(history[history.length - 1]);
+    setViewHistory(h => h.slice(0, -1));
   }, []);
 
   /** Jump every calendar view back to today, whichever one is showing. */
+  /**
+   * Remember the day being shown, then dismiss the plugin.
+   *
+   * Called on every path that hands over to a note. A link inside a note cannot
+   * bring the plugin back — the SDK has no link type for it — so reopening on
+   * the day you left is the nearest thing to a back button, and this is the
+   * moment to record it: the user is leaving, and it is one write rather than
+   * one per tap on the calendar.
+   */
+  const leaveForNote = useCallback(() => {
+    const cfg = getConfig();
+    if (cfg.lastDay !== day) {
+      const next = {...cfg, lastDay: day};
+      setConfig(next);
+      // Never allowed to block or fail the handover: the note opening is what
+      // the user asked for, and losing the bookmark is not worth a message.
+      void saveSettings(next).catch(() => {});
+    }
+    close();
+  }, [close, day]);
+
+  /**
+   * Stable navigation handlers.
+   *
+   * The calendar grids are memoised, and a memo only pays off if its props hold
+   * still: an inline arrow is a new function on every render, so passing one
+   * would defeat the memo and rebuild five hundred cells for nothing. These are
+   * defined once and reused.
+   */
+  const openDayOn = useCallback((iso: string) => {
+    setDay(iso);
+    // Raw setter: this IS a deliberate choice of day, so it must not be moved
+    // to today the way a plain view switch is.
+    setCalViewRaw('day');
+    setViewHistory(h => [...h, calViewRef.current]);
+  }, []);
+  const openWeekOn = useCallback((iso: string) => {
+    setDay(iso);
+    // Raw setter: this IS a deliberate choice of day, so it must not be moved
+    // to today the way a plain view switch is.
+    setCalViewRaw('week');
+    setViewHistory(h => [...h, calViewRef.current]);
+  }, []);
+  const openQuarterOn = useCallback((iso: string) => {
+    setDay(iso);
+    // Raw setter: this IS a deliberate choice of day, so it must not be moved
+    // to today the way a plain view switch is.
+    setCalViewRaw('quarter');
+    setViewHistory(h => [...h, calViewRef.current]);
+  }, []);
+  const openMonthAt = useCallback((year: number, month: number) => {
+    setView({year, month});
+    setCalViewRaw('month');
+    setViewHistory(h => [...h, calViewRef.current]);
+  }, []);
+  const shiftToYear = useCallback(
+    (year: number) => {
+      const next = `${year}${day.slice(4)}`;
+      setDay(next);
+      setView(v => ({year, month: v.month}));
+    },
+    [day],
+  );
+  const shiftToQuarter = useCallback((iso: string) => {
+    setDay(iso);
+    const d = new Date(`${iso}T00:00:00`);
+    setView({year: d.getFullYear(), month: d.getMonth()});
+  }, []);
+
+  /**
+   * Whether the settings form differs from what is stored.
+   *
+   * Compared by value rather than tracked with a flag: the form is edited by
+   * dozens of controls across a long page, and a flag would have to be set
+   * correctly by every one of them. A whole-config comparison cannot be
+   * forgotten by a setting added later — which is exactly the mistake that would
+   * quietly discard somebody's work.
+   */
+  const settingsDirty = useMemo(
+    () => JSON.stringify(config) !== JSON.stringify(getConfig()),
+    [config],
+  );
+
+  /**
+   * Leave settings, asking first when there is unsaved work.
+   *
+   * Nothing on this page takes effect until Save, so closing with changes
+   * pending throws them away. That is worth one question.
+   */
+  const closeSettings = useCallback(() => {
+    if (!settingsDirty) {
+      close();
+      return;
+    }
+    setAsk({
+      title: 'Leave without saving?',
+      reload: 'notes',
+      body: 'Your changes to these settings have not been saved, and leaving now discards them.',
+      label: 'Yes, discard',
+      run: async () => {
+        // Put the form back to what is stored, so reopening settings does not
+        // show discarded edits as though they were still pending.
+        setLocalConfig(getConfig());
+        close();
+        return 'Changes discarded.';
+      },
+    });
+  }, [close, settingsDirty]);
+
   const goToday = useCallback(() => {
     const now = new Date();
     setDay(toDateInput(now));
@@ -550,21 +917,27 @@ export default function App(): React.JSX.Element {
         : '';
     setAsk({
       title: 'Create task?',
+      reload: 'tasks',
       body: `"${summary}" will be added to ${names}.${marking}`,
       label: 'Yes, create',
       closeAfter: true,
       run: async () => {
+        let made = 0;
+        let failed = 0;
         for (const url of targets) {
           // Separate UID per collection: the same UID in two collections is
           // legal but confuses clients that assume a UID names one object.
+          const uid = newUid();
           await putTask(
             getConfig(),
             {
-              uid: newUid(),
+              uid,
               summary,
               description: draft.description.trim() || undefined,
               dueDate: draft.dueDate || undefined,
               dueTime: draft.dueTime || undefined,
+              priority: valueOf(draft.priority),
+              rrule: ruleFor(draft.repeat) ?? undefined,
               // Carries the page the handwriting came from, so the task can
               // link back to it later. Kept off DESCRIPTION on purpose.
               sourcePath: source?.path,
@@ -572,6 +945,17 @@ export default function App(): React.JSX.Element {
             },
             url,
           );
+          // Steps go into the same list as the parent they belong to.
+          const added = await addSteps(
+            getConfig(),
+            uid,
+            draft.steps,
+            url,
+            draft.stepsDate || draft.dueDate || undefined,
+            draft.stepsDate ? draft.stepsTime || undefined : draft.dueTime || undefined,
+          );
+          made += added.made;
+          failed += added.failed;
         }
         // Mark the page LAST, and never let it fail the save: the task is
         // already on the server by now, and swallowing that confirmation over a
@@ -588,12 +972,16 @@ export default function App(): React.JSX.Element {
               style,
               shade: cfg.markShade,
               label: cfg.markLabel,
+              shadeColor: cfg.markShadeColor,
             });
           }
         }
         setDraft(EMPTY_TASK);
         setSource(undefined);
-        return `Saved successfully — "${summary}" added to ${names}.${note}`;
+        return `Saved successfully — "${summary}" added to ${names}.${saidAboutSteps(
+          made,
+          failed,
+        )}${note}`;
       },
     });
   }, [draft, targets, source, config.markStyle]);
@@ -614,6 +1002,7 @@ export default function App(): React.JSX.Element {
     }
     setAsk({
       title: editing ? 'Save changes?' : 'Create task?',
+      reload: 'tasks',
       body: editing
         ? `"${summary}" will be updated on Radicale.`
         : `"${summary}" will be added to ${taskTargets.map(collectionName).join(', ')}.`,
@@ -624,20 +1013,139 @@ export default function App(): React.JSX.Element {
           description: taskForm.description.trim() || undefined,
           dueDate: taskForm.dueDate || undefined,
           dueTime: taskForm.dueTime || undefined,
+          // An untouched band writes back the number that was already there, so
+          // editing a title does not quietly rewrite another client's
+          // PRIORITY:3 as this plugin's PRIORITY:1. Only an actual change to
+          // the chosen band picks a new number.
+          priority:
+            editing && taskForm.priority === bandOf(editing.priority)
+              ? editing.priority
+              : valueOf(taskForm.priority),
+          // null means "the stored rule is one this menu cannot name" — leave
+          // it alone. undefined is what the writers read as leave-alone.
+          rrule: ruleFor(taskForm.repeat) ?? undefined,
         };
+        let made = 0;
+        let failed = 0;
         if (editing) {
           await editTask(getConfig(), editing, payload);
+          const added = await addSteps(
+            getConfig(),
+            editing.uid,
+            taskForm.steps,
+            editing.collectionUrl,
+            // Steps inherit the task's own due date unless a date was chosen for
+            // them. A step of something due Friday is almost always due by
+            // Friday too, and a line can still name its own date to override
+            // either.
+            taskForm.stepsDate || taskForm.dueDate || undefined,
+            taskForm.stepsDate ? taskForm.stepsTime || undefined : taskForm.dueTime || undefined,
+          );
+          made = added.made;
+          failed = added.failed;
         } else {
-          for (const url of taskTargets) {
-            await putTask(getConfig(), {uid: newUid(), ...payload}, url);
+          // A separate UID per collection, so steps hang off the copy that
+          // lives in the same list as their parent rather than off one of them
+          // from all of them.
+          // Collections are written together rather than one after another:
+          // saving into two lists is two independent PUTs, and waiting for the
+          // first to finish before starting the second doubles the wait for no
+          // benefit. Steps still follow their own parent, so a step is never
+          // written before the task it belongs to exists.
+          const perTarget = await Promise.all(
+            taskTargets.map(async url => {
+              const uid = newUid();
+              await putTask(getConfig(), {uid, ...payload}, url);
+              return addSteps(
+                getConfig(),
+                uid,
+                taskForm.steps,
+                url,
+                taskForm.stepsDate || taskForm.dueDate || undefined,
+                taskForm.stepsDate
+                  ? taskForm.stepsTime || undefined
+                  : taskForm.dueTime || undefined,
+              );
+            }),
+          );
+          for (const added of perTarget) {
+            made += added.made;
+            failed += added.failed;
           }
         }
         setTaskForm(null);
         setEditingTask(null);
-        return `Saved successfully — "${summary}".`;
+        return `Saved successfully — "${summary}".${saidAboutSteps(made, failed)}`;
       },
     });
   }, [taskForm, editingTask, taskTargets]);
+
+  /**
+   * The configured note settings for a period. Day keeps its own config so a
+   * daily note's path is decided by exactly the settings that have always
+   * decided it.
+   */
+  const noteConfigFor = useCallback(
+    (period: Period, cfg: RadicaleConfig) =>
+      period === 'day'
+        ? cfg.dailyNote
+        : period === 'week'
+          ? cfg.weekNote
+          : period === 'month'
+            ? cfg.monthNote
+            : cfg.quarterNote,
+    [],
+  );
+
+  /**
+   * Open the note for a week, month or quarter, or offer to create it.
+   *
+   * The same shape as `askDailyNote`: opening is not a write, so it goes
+   * straight there, while creating asks first and names the path it will use.
+   */
+  const askPeriodNote = useCallback(
+    (period: Period, iso: string, exists: boolean) => {
+      if (blockedInDemo()) {
+        return;
+      }
+      const cfg = getConfig();
+      const noteConfig = noteConfigFor(period, cfg);
+      const path = periodNotePath(period, noteConfig, iso, cfg.dateFormat);
+      if (!path) {
+        setStatus({kind: 'error', message: 'Could not build a note path for that period.'});
+        return;
+      }
+      const said = periodLabel(period, iso, cfg.dateFormat);
+
+      if (exists) {
+        setStatus({kind: 'working', message: 'Opening note…'});
+        void (async () => {
+          try {
+            // Dismiss the plugin view BEFORE handing over, or the host keeps
+            // believing it is still showing.
+            leaveForNote();
+            await openPeriodNote(period, noteConfig, iso, cfg.dateFormat);
+          } catch (err) {
+            setStatus({kind: 'error', message: describe(err)});
+          }
+        })();
+        return;
+      }
+
+      setAsk({
+        title: `Create a note for the ${period}?`,
+        body: `A new note for ${said} will be created at ${path}.`,
+        label: 'Yes, create',
+        run: async () => {
+          await createPeriodNote(period, noteConfig, iso, cfg.dateFormat);
+          leaveForNote();
+          await openPeriodNote(period, noteConfig, iso, cfg.dateFormat);
+          return `Saved successfully — created ${path}.`;
+        },
+      });
+    },
+    [leaveForNote, blockedInDemo, noteConfigFor],
+  );
 
   const askDailyNote = useCallback(
     (iso: string, exists: boolean) => {
@@ -660,7 +1168,7 @@ export default function App(): React.JSX.Element {
           try {
             // Dismiss the plugin view BEFORE handing over, or the host keeps
             // believing it is still showing and the next press only closes it.
-            close();
+            leaveForNote();
             await openDailyNote(cfg.dailyNote, iso, cfg.dateFormat);
           } catch (err) {
             setStatus({kind: 'error', message: describe(err)});
@@ -677,13 +1185,13 @@ export default function App(): React.JSX.Element {
           await createDailyNote(cfg.dailyNote, iso, cfg.dateFormat);
           // Close first, then open — the host keeps believing the plugin view
           // is up if closePluginView runs after openFile.
-          close();
+          leaveForNote();
           await openDailyNote(cfg.dailyNote, iso, cfg.dateFormat);
           return `Saved successfully — created ${path}.`;
         },
       });
     },
-    [close, blockedInDemo],
+    [leaveForNote, blockedInDemo],
   );
 
   /**
@@ -704,14 +1212,16 @@ export default function App(): React.JSX.Element {
       setStatus({kind: 'working', message: 'Opening source page…'});
       void (async () => {
         try {
-          close();
+          // Same bookmark as the note paths: jumping to a task's source page is
+          // also leaving the plugin, and coming back should land where it was.
+          leaveForNote();
           await openFileAt(task.sourcePath!, task.sourcePage ?? 0);
         } catch (err) {
           setStatus({kind: 'error', message: describe(err)});
         }
       })();
     },
-    [close, blockedInDemo],
+    [leaveForNote, blockedInDemo],
   );
 
   const askEventNote = useCallback(
@@ -761,6 +1271,7 @@ export default function App(): React.JSX.Element {
     const marked = !!task.sourcePath;
     setAsk({
       title: 'Mark task complete?',
+      reload: 'tasks',
       body: marked
         ? `"${task.summary}" will be marked complete on Radicale, and the box removed from the page it came from.`
         : `"${task.summary}" will be marked complete on Radicale.`,
@@ -805,6 +1316,7 @@ export default function App(): React.JSX.Element {
     }
     setAsk({
       title: editing ? 'Save changes?' : 'Create event?',
+      reload: 'events',
       body: `"${summary}" on ${formatDate(eventForm.date, config.dateFormat)}.`,
       label: editing ? 'Yes, save' : 'Yes, create',
       run: async () => {
@@ -815,6 +1327,7 @@ export default function App(): React.JSX.Element {
           date: eventForm.date,
           startTime: eventForm.startTime || undefined,
           endTime: eventForm.endTime || undefined,
+          rrule: ruleFor(eventForm.repeat) ?? undefined,
         };
         if (editing) {
           await editEvent(getConfig(), editing, payload);
@@ -924,7 +1437,16 @@ export default function App(): React.JSX.Element {
 
   const open = useMemo(() => tasks.filter(t => !t.completed), [tasks]);
   const done = useMemo(() => tasks.filter(t => t.completed), [tasks]);
-  const listed = useMemo(() => sortTasks(searchTasks(open, query), sortKey), [open, query, sortKey]);
+  // Arranged into families rather than a flat sort: Task Hub writes
+  // RELATED-TO onto a task that is a step of another, and without this a piece
+  // of work arrives as several unrelated rows.
+  const listed = useMemo(
+    () => visible(arrange(searchTasks(open, query), sortKey), openSteps),
+    [open, query, sortKey, openSteps],
+  );
+  // Finished steps stay with the other finished things rather than under a
+  // parent that may still be open: this section exists to be opened and
+  // un-ticked, and a step hidden behind a fold could not be reached.
   const listedDone = useMemo(
     () => sortTasks(searchTasks(done, query), sortKey),
     [done, query, sortKey],
@@ -937,6 +1459,48 @@ export default function App(): React.JSX.Element {
     }
     return cells;
   }, [view]);
+
+  /**
+   * Whether the period covering the selected day already has a note. Computed
+   * from the paths already listed rather than asked of the device per render.
+   */
+  /**
+   * Which weeks in the month on screen already have a note, keyed by their
+   * Sunday. Computed once for the grid rather than per row, and from the paths
+   * already listed rather than by asking the device.
+   */
+  const weekNotesInView = useMemo(() => {
+    const found = new Set<string>();
+    for (const iso of monthDays) {
+      const start = periodStart('week', iso);
+      if (
+        start &&
+        !found.has(start) &&
+        hasPeriodNote(periodFiles.week, 'week', config.weekNote, start, config.dateFormat)
+      ) {
+        found.add(start);
+      }
+    }
+    return found;
+  }, [monthDays, periodFiles.week, config.weekNote, config.dateFormat]);
+
+  const hasWeekNote = useMemo(
+    () => hasPeriodNote(periodFiles.week, 'week', config.weekNote, day, config.dateFormat),
+    [periodFiles.week, config.weekNote, day, config.dateFormat],
+  );
+  const hasMonthNote = useMemo(
+    () => hasPeriodNote(periodFiles.month, 'month', config.monthNote, day, config.dateFormat),
+    [periodFiles.month, config.monthNote, day, config.dateFormat],
+  );
+  const hasYearNote = useMemo(
+    () => hasPeriodNote(periodFiles.year, 'year', config.yearNote, day, config.dateFormat),
+    [periodFiles.year, config.yearNote, day, config.dateFormat],
+  );
+  const hasQuarterNote = useMemo(
+    () =>
+      hasPeriodNote(periodFiles.quarter, 'quarter', config.quarterNote, day, config.dateFormat),
+    [periodFiles.quarter, config.quarterNote, day, config.dateFormat],
+  );
 
   const noteDays = useMemo(
     () => daysWithNotes(noteFiles, monthDays, config.dailyNote, config.dateFormat),
@@ -983,8 +1547,7 @@ export default function App(): React.JSX.Element {
       date: event.startDate,
       startTime: event.startTime ?? '',
       endTime: event.endTime ?? '',
-      // An event loaded from the server already has a chosen duration.
-      endTouched: true,
+      repeat: repeatKey(event.rrule),
     });
     setStatus(null);
   };
@@ -999,6 +1562,12 @@ export default function App(): React.JSX.Element {
             description: task.description ?? '',
             dueDate: task.dueDate ?? '',
             dueTime: task.dueTime ?? '',
+            priority: bandOf(task.priority),
+            repeat: repeatKey(task.rrule),
+            // Always blank: this box adds steps, it does not list them.
+            steps: '',
+            stepsDate: '',
+            stepsTime: '',
           }
         : {...EMPTY_TASK},
     );
@@ -1006,12 +1575,18 @@ export default function App(): React.JSX.Element {
   };
 
   return (
+    <View style={styles.appRoot}>
     <ScrollView
       ref={scrollRef}
       style={styles.root}
       keyboardShouldPersistTaps="handled"
       onLayout={() => setScrollHandle(findNodeHandle(scrollRef.current))}
-      contentContainerStyle={[styles.content, keyboardUp && styles.contentKeyboard]}>
+      contentContainerStyle={[
+        styles.content,
+        // Room to scroll the focused field clear of the keyboard, sized from
+        // what the host reported rather than from a constant.
+        keyboardUp && {paddingBottom: keyboardHeight + 24},
+      ]}>
       {DEMO && (
         <View style={styles.demoBanner}>
           <Text style={styles.demoBannerText}>{DEMO_BANNER}</Text>
@@ -1021,14 +1596,32 @@ export default function App(): React.JSX.Element {
       <FolderPicker
         visible={pickingFolder !== null}
         initialPath={
-          pickingFolder === 'meeting' ? config.meetingNote.root : config.dailyNote.root
+          pickingFolder === 'meeting'
+            ? config.meetingNote.root
+            : pickingFolder === 'week'
+              ? config.weekNote.root
+              : pickingFolder === 'month'
+                ? config.monthNote.root
+                : pickingFolder === 'quarter'
+                  ? config.quarterNote.root
+                  : pickingFolder === 'year'
+                    ? config.yearNote.root
+                    : config.dailyNote.root
         }
         onCancel={() => setPickingFolder(null)}
         onPick={picked => {
           setLocalConfig(
             pickingFolder === 'meeting'
               ? {...config, meetingNote: {...config.meetingNote, root: picked}}
-              : {...config, dailyNote: {...config.dailyNote, root: picked}},
+              : pickingFolder === 'week'
+                ? {...config, weekNote: {...config.weekNote, root: picked}}
+                : pickingFolder === 'month'
+                  ? {...config, monthNote: {...config.monthNote, root: picked}}
+                  : pickingFolder === 'quarter'
+                    ? {...config, quarterNote: {...config.quarterNote, root: picked}}
+                    : pickingFolder === 'year'
+                      ? {...config, yearNote: {...config.yearNote, root: picked}}
+                      : {...config, dailyNote: {...config.dailyNote, root: picked}},
           );
           setPickingFolder(null);
         }}
@@ -1054,30 +1647,9 @@ export default function App(): React.JSX.Element {
         }}
       />
 
-      <Notice
-        // Held back while a confirm is up: two stacked modals on this panel
-        // leave the user unsure which one the buttons belong to.
-        visible={missing.length > 0 && ask === null}
-        title="A list has gone"
-        body={missingMessage(missing)}
-        label="Got it"
-        // Cleared only for this refresh. It comes back on the next one, and
-        // keeps coming back, until the configuration is corrected.
-        onDismiss={() => setMissing([])}
-      />
-
-      <Confirm
-        visible={ask !== null}
-        title={ask?.title ?? ''}
-        body={ask?.body}
-        confirmLabel={ask?.label}
-        onConfirm={() => void runAsk()}
-        onCancel={() => setAsk(null)}
-      />
-
       {screen === 'save' && (
         <>
-          <Header title="New task" onClose={close} />
+          <Header title="New task" onClose={closeGuarded} closeDisabled={writing} />
           <Field
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}
@@ -1107,11 +1679,32 @@ export default function App(): React.JSX.Element {
 
           <Text style={styles.label}>Due</Text>
           <DateTimePicker
+            scrollHandle={scrollHandle}
+            onScrollTo={scrollFieldIntoView}
             date={draft.dueDate}
             time={draft.dueTime}
             timeFormat={timeFormat}
             onChange={(date, time) => setDraft(d => ({...d, dueDate: date, dueTime: time}))}
           />
+          <Text style={styles.label}>Priority</Text>
+          <Choice
+            options={PRIORITY_BANDS.map(p => ({key: p.key, label: p.label}))}
+            value={draft.priority}
+            onPick={k => setDraft(d => ({...d, priority: k as PriorityBand}))}
+          />
+          <Text style={styles.label}>Repeats</Text>
+          {draft.repeat === 'custom' && (
+            <Text style={styles.noteCompact}>
+              {repeatLabel('custom')} — a rule set in another app, which this menu cannot
+              describe. It is kept exactly as it is unless you choose one below.
+            </Text>
+          )}
+          <Choice
+            options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
+            value={draft.repeat}
+            onPick={k => setDraft(d => ({...d, repeat: k as RepeatKey}))}
+          />
+
           <Field
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}
@@ -1120,9 +1713,57 @@ export default function App(): React.JSX.Element {
             multiline
             onChange={v => setDraft(d => ({...d, description: v}))}
           />
+          <Field
+            scrollHandle={scrollHandle}
+            onScrollTo={scrollFieldIntoView}
+            label="Add sub tasks (one per line)"
+            value={draft.steps}
+            multiline
+            onChange={v => setDraft(d => ({...d, steps: v}))}
+          />
+          <View style={styles.stepsDateRow}>
+            <Pressable
+              style={styles.stepsDateButton}
+              onPress={() => setStepsDateOpen(stepsDateOpen === 'capture' ? null : 'capture')}>
+              <CalendarIcon />
+              <Text style={styles.stepsDateLabel}>
+                {draft.stepsDate
+                  ? `Steps due ${formatDate(draft.stepsDate, dateFormat)}${
+                      draft.stepsTime ? ` at ${formatTime(draft.stepsTime, timeFormat)}` : ''
+                    }`
+                  : 'Steps due: same day as the task'}
+              </Text>
+            </Pressable>
+            {!!draft.stepsDate && (
+              <Pressable onPress={() => setDraft(d => ({...d, stepsDate: '', stepsTime: ''}))} hitSlop={8}>
+                <Text style={styles.clearLink}>Clear</Text>
+              </Pressable>
+            )}
+          </View>
+          {stepsDateOpen === 'capture' && (
+            <DateTimePicker
+              scrollHandle={scrollHandle}
+              onScrollTo={scrollFieldIntoView}
+              date={draft.stepsDate}
+              time={draft.stepsTime}
+              timeFormat={timeFormat}
+              onChange={(date, time) => {
+                setDraft(d => ({...d, stepsDate: date, stepsTime: time}));
+              }}
+            />
+          )}
+          <Text style={styles.noteCompact}>
+            Each line becomes a step, due the same day as the task. End a line with
+            @2026-09-10 to give that step its own date.
+          </Text>
 
           <View style={styles.actions}>
-            <Button label="Save task" primary onPress={askSaveCaptured} />
+            <Button
+              label={writing ? 'Saving…' : 'Save task'}
+              primary
+              disabled={writing}
+              onPress={askSaveCaptured}
+            />
             <Button label="All Tasks" onPress={openHub} />
           </View>
 
@@ -1134,7 +1775,7 @@ export default function App(): React.JSX.Element {
 
       {screen === 'hub' && taskForm && (
         <>
-          <Header title={editingTask ? 'Edit task' : 'New task'} onClose={close} />
+          <Header title={editingTask ? 'Edit task' : 'New task'} onClose={closeGuarded} closeDisabled={writing} />
           <Field
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}
@@ -1162,12 +1803,32 @@ export default function App(): React.JSX.Element {
           )}
           <Text style={styles.label}>Due</Text>
           <DateTimePicker
+            scrollHandle={scrollHandle}
+            onScrollTo={scrollFieldIntoView}
             date={taskForm.dueDate}
             time={taskForm.dueTime}
             timeFormat={timeFormat}
             onChange={(date, time) =>
               setTaskForm(d => (d ? {...d, dueDate: date, dueTime: time} : d))
             }
+          />
+          <Text style={styles.label}>Priority</Text>
+          <Choice
+            options={PRIORITY_BANDS.map(p => ({key: p.key, label: p.label}))}
+            value={taskForm.priority}
+            onPick={k => setTaskForm(d => (d ? {...d, priority: k as PriorityBand} : d))}
+          />
+          <Text style={styles.label}>Repeats</Text>
+          {taskForm.repeat === 'custom' && (
+            <Text style={styles.noteCompact}>
+              {repeatLabel('custom')} — a rule set in another app, which this menu cannot
+              describe. It is kept exactly as it is unless you choose one below.
+            </Text>
+          )}
+          <Choice
+            options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
+            value={taskForm.repeat}
+            onPick={k => setTaskForm(d => (d ? {...d, repeat: k as RepeatKey} : d))}
           />
           <Field
             scrollHandle={scrollHandle}
@@ -1177,10 +1838,58 @@ export default function App(): React.JSX.Element {
             multiline
             onChange={v => setTaskForm(d => (d ? {...d, description: v} : d))}
           />
+          <Field
+            scrollHandle={scrollHandle}
+            onScrollTo={scrollFieldIntoView}
+            label="Add sub tasks (one per line)"
+            value={taskForm.steps}
+            multiline
+            placeholder={'Draft the notes\nBump the version'}
+            onChange={v => setTaskForm(d => (d ? {...d, steps: v} : d))}
+          />
+          <View style={styles.stepsDateRow}>
+            <Pressable
+              style={styles.stepsDateButton}
+              onPress={() => setStepsDateOpen(stepsDateOpen === 'task' ? null : 'task')}>
+              <CalendarIcon />
+              <Text style={styles.stepsDateLabel}>
+                {taskForm.stepsDate
+                  ? `Steps due ${formatDate(taskForm.stepsDate, dateFormat)}${
+                      taskForm.stepsTime ? ` at ${formatTime(taskForm.stepsTime, timeFormat)}` : ''
+                    }`
+                  : 'Steps due: same day as the task'}
+              </Text>
+            </Pressable>
+            {!!taskForm.stepsDate && (
+              <Pressable onPress={() => setTaskForm(d => (d ? {...d, stepsDate: '', stepsTime: ''} : d))} hitSlop={8}>
+                <Text style={styles.clearLink}>Clear</Text>
+              </Pressable>
+            )}
+          </View>
+          {stepsDateOpen === 'task' && (
+            <DateTimePicker
+              scrollHandle={scrollHandle}
+              onScrollTo={scrollFieldIntoView}
+              date={taskForm.stepsDate}
+              time={taskForm.stepsTime}
+              timeFormat={timeFormat}
+              onChange={(date, time) => {
+                setTaskForm(d => (d ? {...d, stepsDate: date, stepsTime: time} : d));
+              }}
+            />
+          )}
+          <Text style={styles.noteCompact}>
+            {`Each line becomes a step of this task, due the same day as the task itself. End a
+line with @2026-09-10 to give that step its own date instead.
+
+This box only adds — it never lists or removes the steps a task already has, so saving twice
+will not duplicate them.`}
+          </Text>
           <View style={styles.actions}>
             <Button
-              label={editingTask ? 'Save changes' : 'Create task'}
+              label={writing ? 'Saving…' : editingTask ? 'Save changes' : 'Create task'}
               primary
+              disabled={writing}
               onPress={askSaveTaskForm}
             />
             <Button
@@ -1197,7 +1906,7 @@ export default function App(): React.JSX.Element {
 
       {screen === 'hub' && eventForm && (
         <>
-          <Header title={editingEvent ? 'Edit event' : 'New event'} onClose={close} />
+          <Header title={editingEvent ? 'Edit event' : 'New event'} onClose={closeGuarded} closeDisabled={writing} />
           <Field
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}
@@ -1218,6 +1927,8 @@ export default function App(): React.JSX.Element {
           )}
           <Text style={styles.labelCompact}>Date and start time</Text>
           <DateTimePicker
+            scrollHandle={scrollHandle}
+            onScrollTo={scrollFieldIntoView}
             date={eventForm.date}
             time={eventForm.startTime}
             timeFormat={timeFormat}
@@ -1227,8 +1938,17 @@ export default function App(): React.JSX.Element {
                   return d;
                 }
                 const next = {...d, date, startTime: time};
-                if (!d.endTouched) {
-                  next.endTime = time ? addHours(time, 1) : '';
+                // An hour after the start, but only into an empty end. A
+                // duration the user chose is theirs; this fills a blank rather
+                // than overwriting a decision, which is why it can run on an
+                // existing event as safely as on a new one.
+                if (!d.endTime && time) {
+                  next.endTime = addHours(time, 1);
+                }
+                // Clearing the start clears a derived end with it, so an
+                // all-day event does not keep an end time it cannot use.
+                if (!time && d.endTime === addHours(d.startTime || '', 1)) {
+                  next.endTime = '';
                 }
                 return next;
               })
@@ -1241,7 +1961,19 @@ export default function App(): React.JSX.Element {
             label="End time (HH:MM)"
             value={eventForm.endTime}
             placeholder="13:00"
-            onChange={v => setEventForm(d => (d ? {...d, endTime: v, endTouched: true} : d))}
+            onChange={v => setEventForm(d => (d ? {...d, endTime: v} : d))}
+          />
+          <Text style={styles.label}>Repeats</Text>
+          {eventForm.repeat === 'custom' && (
+            <Text style={styles.noteCompact}>
+              {repeatLabel('custom')} — a rule set in another app, which this menu cannot
+              describe. It is kept exactly as it is unless you choose one below.
+            </Text>
+          )}
+          <Choice
+            options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
+            value={eventForm.repeat}
+            onPick={k => setEventForm(d => (d ? {...d, repeat: k as RepeatKey} : d))}
           />
           <Field
             scrollHandle={scrollHandle}
@@ -1262,8 +1994,9 @@ export default function App(): React.JSX.Element {
           />
           <View style={styles.actionsTight}>
             <Button
-              label={editingEvent ? 'Save changes' : 'Create event'}
+              label={writing ? 'Saving…' : editingEvent ? 'Save changes' : 'Create event'}
               primary
+              disabled={writing}
               onPress={askSaveEvent}
             />
             <Button
@@ -1280,7 +2013,7 @@ export default function App(): React.JSX.Element {
 
       {screen === 'hub' && !taskForm && !eventForm && (
         <>
-          <Header title={APP_NAME} onClose={close} />
+          <Header title={APP_NAME} onClose={close} closeDisabled={writing} />
           <Tabs
             tabs={[
               {key: 'tasks', label: 'Tasks'},
@@ -1297,7 +2030,14 @@ export default function App(): React.JSX.Element {
                 <Button label="Refresh" onPress={() => void refresh()} />
               </View>
 
-              <Field label="Search" value={query} placeholder="Filter tasks" onChange={setQuery} />
+              <Field
+                scrollHandle={scrollHandle}
+                onScrollTo={scrollFieldIntoView}
+                label="Search"
+                value={query}
+                placeholder="Filter tasks"
+                onChange={setQuery}
+              />
               <Text style={styles.label}>Sort</Text>
               <Choice options={SORT_KEYS} value={sortKey} onPick={k => setSortKey(k as SortKey)} />
 
@@ -1307,17 +2047,24 @@ export default function App(): React.JSX.Element {
               {listed.length === 0 && !loading && (
                 <Text style={styles.empty}>No open tasks match.</Text>
               )}
-              {listed.map(task => (
+              {listed.map(row => (
                 <TaskRow
-                  key={task.uid}
-                  task={task}
+                  key={row.todo.uid}
+                  task={row.todo}
+                  depth={row.depth}
+                  stepCount={row.stepCount}
+                  stepsDone={row.stepsDone}
+                  stepsOpen={openSteps.has(row.todo.uid)}
+                  onToggleSteps={
+                    row.stepCount > 0 ? () => toggleSteps(row.todo.uid) : undefined
+                  }
                   dateFormat={dateFormat}
                   timeFormat={timeFormat}
                   showNoDue
-                  listLabel={task.collectionLabel}
-                  onToggle={() => askComplete(task)}
-                  onEdit={() => openTaskEditor(task)}
-                  onOpenSource={() => openSource(task)}
+                  listLabel={row.todo.collectionLabel}
+                  onToggle={() => askComplete(row.todo)}
+                  onEdit={() => openTaskEditor(row.todo)}
+                  onOpenSource={() => openSource(row.todo)}
                 />
               ))}
 
@@ -1335,6 +2082,7 @@ export default function App(): React.JSX.Element {
                       timeFormat={timeFormat}
                       listLabel={task.collectionLabel}
                       onEdit={() => openTaskEditor(task)}
+                      onOpenSource={() => openSource(task)}
                     />
                   ))}
                 </Section>
@@ -1352,6 +2100,8 @@ export default function App(): React.JSX.Element {
               <View style={styles.viewSwitchRow}>
                 <Choice
                   options={[
+                    {key: 'year', label: 'Year'},
+                    {key: 'quarter', label: 'Quarter'},
                     {key: 'month', label: 'Month'},
                     {key: 'week', label: 'Week'},
                     {key: 'day', label: 'Day'},
@@ -1378,6 +2128,14 @@ export default function App(): React.JSX.Element {
                     setStatus(null);
                   }}
                 />
+                {/*
+                  The same task dialog the Tasks tab opens, reachable from every
+                  calendar view: a task thought of while looking at a week is a
+                  task that should be writable without changing tab first. It
+                  carries the list picker with it, so a task added here still
+                  chooses which Radicale collection it goes into.
+                */}
+                <Button label="+ New task" onPress={() => openTaskEditor(null)} />
                 <Button label="Today" onPress={goToday} />
                 <Button label="Refresh" onPress={() => void refresh()} />
                 {calView === 'day' && (
@@ -1394,8 +2152,46 @@ export default function App(): React.JSX.Element {
                 </Text>
               )}
 
+              {calView === 'year' && (
+                <YearView
+                  year={Number(day.slice(0, 4))}
+                  selected={day}
+                  marks={marks}
+                  hasNote={hasYearNote}
+                  onSelect={openDayOn}
+                  onYear={shiftToYear}
+                  onOpenMonth={openMonthAt}
+                  onOpenQuarter={openQuarterOn}
+                  onOpenWeek={openWeekOn}
+                  onToday={goToday}
+                  onYearNote={(iso, exists) => askPeriodNote('year', iso, exists)}
+                />
+              )}
+
+              {calView === 'quarter' && (
+                <QuarterView
+                  anchor={day}
+                  selected={day}
+                  marks={marks}
+                  hasNote={hasQuarterNote}
+                  onSelect={openDayOn}
+                  onQuarter={shiftToQuarter}
+                  onOpenMonth={openMonthAt}
+                  onQuarterNote={(iso, exists) => askPeriodNote('quarter', iso, exists)}
+                />
+              )}
+
               {calView === 'month' && (
                 <>
+                  <View style={styles.noteButtonRow}>
+                    <Pressable
+                      style={[styles.button, styles.buttonPrimary]}
+                      onPress={() => askPeriodNote('month', day, hasMonthNote)}>
+                      <Text style={styles.buttonTextPrimary}>
+                        {hasMonthNote ? 'Open month note' : 'Create month note'}
+                      </Text>
+                    </Pressable>
+                  </View>
                   <MonthView
                     year={view.year}
                     month={view.month}
@@ -1403,6 +2199,8 @@ export default function App(): React.JSX.Element {
                     marks={marks}
                     onSelect={setDay}
                     onMonth={(year, month) => setView({year, month})}
+                    weekNotes={weekNotesInView}
+                    onWeekNote={(iso, exists) => askPeriodNote('week', iso, exists)}
                   />
                   <Text style={styles.legend}>
                     <Text style={styles.markLegend}>C</Text> event ·{' '}
@@ -1415,6 +2213,21 @@ export default function App(): React.JSX.Element {
                       {formatDate(day, dateFormat)} — open day view ›
                     </Text>
                   </Pressable>
+                  {/*
+                    The selected day's note, below the grid with the rest of that
+                    day's detail rather than up beside the month's own note —
+                    they act on different things and sat together looking like a
+                    pair.
+                  */}
+                  <View style={styles.noteButtonRow}>
+                    <Pressable
+                      style={[styles.button, styles.buttonPrimary]}
+                      onPress={() => askDailyNote(day, dayHasNote)}>
+                      <Text style={styles.buttonTextPrimary}>
+                        {dayHasNote ? 'Open note for this day' : 'Create note for this day'}
+                      </Text>
+                    </Pressable>
+                  </View>
                   {dayEvents.length === 0 && dayTasks.length === 0 && (
                     <Text style={styles.empty}>Nothing scheduled.</Text>
                   )}
@@ -1446,9 +2259,22 @@ export default function App(): React.JSX.Element {
                       listLabel={task.collectionLabel}
                       onToggle={() => askComplete(task)}
                       onEdit={() => openTaskEditor(task)}
+                      onOpenSource={() => openSource(task)}
                     />
                   ))}
                 </>
+              )}
+
+              {calView === 'week' && (
+                <View style={styles.noteButtonRow}>
+                  <Pressable
+                    style={[styles.button, styles.buttonPrimary]}
+                    onPress={() => askPeriodNote('week', day, hasWeekNote)}>
+                    <Text style={styles.buttonTextPrimary}>
+                      {hasWeekNote ? 'Open week note' : 'Create week note'}
+                    </Text>
+                  </Pressable>
+                </View>
               )}
 
               {calView === 'week' && (
@@ -1459,6 +2285,7 @@ export default function App(): React.JSX.Element {
                   dateFormat={dateFormat}
                   timeFormat={timeFormat}
                   noteDays={weekNoteDays}
+                  onOpenSource={openSource}
                   onDailyNote={askDailyNote}
                   eventNotes={eventNotes}
                   onEventNote={askEventNote}
@@ -1477,6 +2304,9 @@ export default function App(): React.JSX.Element {
                   day={day}
                   events={events}
                   tasks={tasks}
+                  openSteps={openSteps}
+                  onToggleSteps={toggleSteps}
+                  onOpenSource={openSource}
                   dateFormat={dateFormat}
                   timeFormat={timeFormat}
                   hasNote={dayHasNote}
@@ -1503,18 +2333,149 @@ export default function App(): React.JSX.Element {
           onScrollTo={scrollFieldIntoView}
           onBrowse={() => !blockedInDemo() && setPickingFolder('daily')}
           onBrowseMeetings={() => !blockedInDemo() && setPickingFolder('meeting')}
+          onBrowsePeriod={period => !blockedInDemo() && setPickingFolder(period)}
           templates={templates}
           showHelp={showHelp}
           onToggleHelp={() => setShowHelp(v => !v)}
           onChange={setLocalConfig}
           onDiscover={() => void discover()}
           onSave={() => void persistSettings()}
+          dirty={settingsDirty}
           onWipe={askWipe}
           storePath={storePath}
-          onClose={close}
+          onClose={closeSettings}
         />
       )}
     </ScrollView>
+
+    {/*
+      Outside the ScrollView on purpose: these cover the window, so they must
+      be positioned against the root rather than against scrolling content —
+      inside it they would scroll away with the page underneath them.
+    */}
+    <Notice
+      // Held back while a confirm is up: two stacked sheets on this panel leave
+      // the user unsure which one the buttons belong to.
+      visible={missing.length > 0 && ask === null}
+      title="A list has gone"
+      body={missingMessage(missing)}
+      label="Got it"
+      // Cleared only for this refresh. It comes back on the next one, and keeps
+      // coming back, until the configuration is corrected.
+      onDismiss={() => setMissing([])}
+    />
+
+    <Confirm
+      visible={ask !== null}
+      title={ask?.title ?? ''}
+      body={ask?.body}
+      confirmLabel={ask?.label}
+      onConfirm={() => void runAsk()}
+      onCancel={() => setAsk(null)}
+    />
+    </View>
+  );
+}
+
+
+/**
+ * Settings for one period's note: where it lives, how the path is built, and
+ * which template a new one starts from.
+ *
+ * Written once and used for the week, the month and the quarter. The daily note
+ * keeps its own inline block: its tokens differ, its wording is established, and
+ * generalising it would mean editing the one part of this screen every existing
+ * user has already set up.
+ */
+function PeriodNoteSettings(props: {
+  title: string;
+  period: Period;
+  noteKey: 'weekNote' | 'monthNote' | 'quarterNote' | 'yearNote';
+  hint: string;
+  tokens: string;
+  config: RadicaleConfig;
+  templates: NoteTemplate[];
+  scrollHandle: number | null;
+  onScrollTo: (y: number) => void;
+  onBrowse: () => void;
+  onChange: (config: RadicaleConfig) => void;
+}): React.JSX.Element {
+  const {
+    title,
+    period,
+    noteKey,
+    hint,
+    tokens,
+    config,
+    templates,
+    scrollHandle,
+    onScrollTo,
+    onBrowse,
+    onChange,
+  } = props;
+  const note = config[noteKey];
+  const set = (next: Partial<typeof note>) => onChange({...config, [noteKey]: {...note, ...next}});
+  const presets = PERIOD_LAYOUT_PRESETS[period as 'week' | 'month' | 'quarter' | 'year'];
+  const today = toDateInput(new Date());
+
+  return (
+    <>
+      <Text style={styles.subheadingCompact}>{title}</Text>
+      <Text style={styles.noteCompact}>{hint}</Text>
+      <View style={styles.browseRow}>
+        <View style={styles.grow}>
+          <Field
+            scrollHandle={scrollHandle}
+            onScrollTo={onScrollTo}
+            compact
+            label="Folder under device storage"
+            value={note.root}
+            onChange={v => set({root: v})}
+          />
+        </View>
+        <Pressable style={styles.browseButton} onPress={onBrowse}>
+          <FolderIcon />
+          <Text style={styles.browseLabel}>Browse</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.noteCompact}>
+        The folder above is relative to the device's own storage, so "Note/Weekly" means the
+        Weekly folder inside Note. Browse picks an existing one.
+      </Text>
+      <Text style={styles.labelCompact}>Folder layout</Text>
+      <Text style={styles.noteCompact}>
+        How the path below that folder is built. Tokens in braces are replaced when the note is
+        made — the line under the box shows exactly what today would produce.
+      </Text>
+      <Choice
+        options={presets.map(preset => ({key: preset.layout, label: preset.label}))}
+        value={note.layout}
+        onPick={k => set({layout: k})}
+      />
+      <Field
+        scrollHandle={scrollHandle}
+        onScrollTo={onScrollTo}
+        compact
+        label={`Custom layout — ${tokens}`}
+        value={note.layout}
+        onChange={v => set({layout: v})}
+      />
+      <Text style={styles.noteCompact}>
+        {`This ${period} would be: ${
+          periodNotePath(period, note, today, config.dateFormat) || '(invalid layout)'
+        }`}
+      </Text>
+      <Text style={styles.labelCompact}>Template for a new note</Text>
+      <Text style={styles.noteCompact}>
+        {`The page style a newly created ${period} note starts with — ruled, dotted, blank, or one of your own from MyStyle. It is applied once, at the moment the note is created; changing it later does not restyle notes you already have. "Device default" uses whatever the device would use for a new note.`}
+      </Text>
+      <TemplatePicker
+        templates={templates}
+        label={`${title} template`}
+        value={note.template}
+        onPick={v => set({template: v})}
+      />
+    </>
   );
 }
 
@@ -1527,12 +2488,15 @@ function SettingsScreen(props: {
   storePath: string | null;
   onBrowse: () => void;
   onBrowseMeetings: () => void;
+  onBrowsePeriod: (period: 'week' | 'month' | 'quarter' | 'year') => void;
   templates: NoteTemplate[];
   showHelp: boolean;
   onToggleHelp: () => void;
   onChange: (config: RadicaleConfig) => void;
   onDiscover: () => void;
   onSave: () => void;
+  /** True when the form differs from what is stored, which both Saves report. */
+  dirty: boolean;
   onWipe: () => void;
   onClose: () => void;
 }): React.JSX.Element {
@@ -1545,12 +2509,14 @@ function SettingsScreen(props: {
     storePath,
     onBrowse,
     onBrowseMeetings,
+    onBrowsePeriod,
     templates,
     showHelp,
     onToggleHelp,
     onChange,
     onDiscover,
     onSave,
+    dirty,
     onWipe,
     onClose,
   } = props;
@@ -1561,6 +2527,25 @@ function SettingsScreen(props: {
   return (
     <>
       <Header title="Setup" onClose={onClose} masthead />
+
+      {/*
+        A Save at the top as well as the bottom. This page is long — server,
+        collections, four kinds of period note, meeting notes, page marks — and
+        a change made in the first screenful otherwise needs a scroll past
+        everything else to commit it.
+      */}
+      <View style={styles.actionsTight}>
+        <Button
+          label={dirty ? 'Save settings •' : 'Save settings'}
+          primary
+          onPress={onSave}
+        />
+      </View>
+      {dirty && (
+        <Text style={styles.noteCompact}>
+          You have unsaved changes. Nothing here takes effect until you save.
+        </Text>
+      )}
 
       <Section title="How to set this up" count={5} open={showHelp} onToggle={onToggleHelp}>
         <Text style={styles.helpStepCompact}>
@@ -1698,6 +2683,10 @@ function SettingsScreen(props: {
       />
 
       <Text style={styles.subheadingCompact}>Daily notes</Text>
+      <Text style={styles.noteCompact}>
+        One note per day, created and opened from the Day, Week and Month views. The button on
+        those views says "Create" or "Open" depending on whether the day already has one.
+      </Text>
       <View style={styles.browseRow}>
         <View style={styles.grow}>
           <Field
@@ -1711,7 +2700,7 @@ function SettingsScreen(props: {
           />
         </View>
         <Pressable style={styles.browseButton} onPress={onBrowse}>
-          <Text style={styles.browseIcon}>🗀</Text>
+          <FolderIcon />
           <Text style={styles.browseLabel}>Browse</Text>
         </Pressable>
       </View>
@@ -1735,11 +2724,72 @@ function SettingsScreen(props: {
           '(invalid layout)'
         }`}
       </Text>
+      <Text style={styles.labelCompact}>Template for a new note</Text>
+      <Text style={styles.noteCompact}>
+        The page style a newly created daily note starts with. Applied once, when the note is
+        made — changing it does not restyle notes you already have.
+      </Text>
       <TemplatePicker
         templates={templates}
         label="Daily note template"
         value={config.dailyNote.template}
         onPick={v => onChange({...config, dailyNote: {...config.dailyNote, template: v}})}
+      />
+
+      <PeriodNoteSettings
+        title="Weekly notes"
+        period="week"
+        noteKey="weekNote"
+        hint="One note per week, separate from the daily notes. Created from the week view; every day of that week opens the same note."
+        tokens="{YYYY} {WW} {MM} {MMMM} {START} {END}"
+        config={config}
+        templates={templates}
+        scrollHandle={scrollHandle}
+        onScrollTo={onScrollTo}
+        onBrowse={() => onBrowsePeriod('week')}
+        onChange={onChange}
+      />
+
+      <PeriodNoteSettings
+        title="Monthly notes"
+        period="month"
+        noteKey="monthNote"
+        hint="One note per month, created from the month view."
+        tokens="{YYYY} {MM} {MMM} {MMMM}"
+        config={config}
+        templates={templates}
+        scrollHandle={scrollHandle}
+        onScrollTo={onScrollTo}
+        onBrowse={() => onBrowsePeriod('month')}
+        onChange={onChange}
+      />
+
+      <PeriodNoteSettings
+        title="Yearly notes"
+        period="year"
+        noteKey="yearNote"
+        hint="One note per year, created from the year view."
+        tokens="{YYYY}"
+        config={config}
+        templates={templates}
+        scrollHandle={scrollHandle}
+        onScrollTo={onScrollTo}
+        onBrowse={() => onBrowsePeriod('year')}
+        onChange={onChange}
+      />
+
+      <PeriodNoteSettings
+        title="Quarterly notes"
+        period="quarter"
+        noteKey="quarterNote"
+        hint="One note per quarter, created from the quarter view."
+        tokens="{YYYY} {Q} {QQ} {MMM} {MMM_END}"
+        config={config}
+        templates={templates}
+        scrollHandle={scrollHandle}
+        onScrollTo={onScrollTo}
+        onBrowse={() => onBrowsePeriod('quarter')}
+        onChange={onChange}
       />
 
       <Text style={styles.subheadingCompact}>Meeting notes</Text>
@@ -1760,10 +2810,15 @@ function SettingsScreen(props: {
           />
         </View>
         <Pressable style={styles.browseButton} onPress={onBrowseMeetings}>
-          <Text style={styles.browseIcon}>🗀</Text>
+          <FolderIcon />
           <Text style={styles.browseLabel}>Browse</Text>
         </Pressable>
       </View>
+      <Text style={styles.labelCompact}>Template for a new note</Text>
+      <Text style={styles.noteCompact}>
+        The page style a newly created meeting note starts with. Applied once, when the note is
+        made — changing it does not restyle notes you already have.
+      </Text>
       <TemplatePicker
         templates={templates}
         label="Meeting note template"
@@ -1816,13 +2871,26 @@ function SettingsScreen(props: {
             onToggle={() => onChange({...config, markShade: !config.markShade})}
           />
           <Text style={styles.noteCompact}>
-            Experimental. Draws a marker stroke across the handwriting so a captured task
-            stands out without being tapped, and removes it again when the task is completed.
-            The shading is its own mark rather than part of the writing, so moving or copying
-            the handwriting leaves it behind, and it then has to be erased by hand. The pen
-            values were read from one device; on another model this may draw in the wrong
-            colour or weight — undo in your note if it does.
+            Draws marker passes across the handwriting so a captured task stands out without
+            being tapped, and removes them again when the task is completed. The shading is its
+            own mark rather than part of the writing, so moving or copying the handwriting
+            leaves it behind, and it then has to be erased by hand.
           </Text>
+          {config.markShade && (
+            <>
+              <Text style={styles.labelCompact}>Shading colour</Text>
+              <Choice
+                options={SHADE_COLORS.map(c => ({key: c.key, label: c.label}))}
+                value={config.markShadeColor}
+                onPick={k => onChange({...config, markShadeColor: k})}
+              />
+              <Text style={styles.noteCompact}>
+                Light grey is the easiest to read handwriting through. Black draws a real
+                strike-through rather than a highlight. These are the only colours the
+                device's own drawing API accepts.
+              </Text>
+            </>
+          )}
         </>
       )}
 
@@ -1833,7 +2901,11 @@ function SettingsScreen(props: {
       </Text>
 
       <View style={styles.actionsTight}>
-        <Button label="Save settings" primary onPress={onSave} />
+        <Button
+          label={dirty ? 'Save settings •' : 'Save settings'}
+          primary
+          onPress={onSave}
+        />
       </View>
 
       <Text style={styles.subheadingCompact}>Start over</Text>

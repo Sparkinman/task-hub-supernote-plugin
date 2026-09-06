@@ -642,8 +642,22 @@ new_zip_package() {
 
     if command -v zip >/dev/null 2>&1; then
         (cd "$source_dir" && zip -r "$destination_path" .) && write_color_output "Zip created: $destination_path" "Green" || { write_color_output "Failed to create zip" "Red"; return 1; }
+    elif command -v python3 >/dev/null 2>&1; then
+        # A .snplg is an ordinary deflate zip, and python3 is present on far more
+        # machines than the zip binary -- a minimal container or a fresh Linux
+        # install typically has one and not the other, which otherwise fails the
+        # build at the very last step after a four-minute native compile.
+        python3 - "$source_dir" "$destination_path" <<'PYZIP' && write_color_output "Zip created: $destination_path" "Green" || { write_color_output "Failed to create zip" "Red"; return 1; }
+import os, sys, zipfile
+source, destination = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
+    for root, _dirs, files in os.walk(source):
+        for name in sorted(files):
+            full = os.path.join(root, name)
+            archive.write(full, os.path.relpath(full, source))
+PYZIP
     else
-        write_color_output "zip command not found" "Red"; return 1
+        write_color_output "neither zip nor python3 found; cannot package" "Red"; return 1
     fi
     return 0
 }
@@ -715,9 +729,21 @@ main() {
         update_plugin_config_packages "$project_root" "$gen_dir" "$all_pkgs"
 
         if build_android_apk "$project_root" "$gen_cfg"; then
-            copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg" || true
+            if ! copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg"; then
+                write_color_output "Built APK could not be copied into build/generated - stopping" "Red"
+                exit 1
+            fi
         else
-            write_color_output "APK build failed" "Red"
+            # Fatal, deliberately. build/generated is never cleared, so carrying
+            # on from here zips whatever app.npk an earlier run left behind and
+            # still prints "Plugin package created" - a package whose JS bundle
+            # is new and whose native payload is stale. That installs and then
+            # misbehaves, with nothing in the output saying why.
+            #
+            # The usual cause is a shell without JAVA_HOME: source ~/.plugin-env
+            # first. Clear build/generated before retrying.
+            write_color_output "APK build failed - refusing to package, because build/generated may still hold a stale app.npk" "Red"
+            exit 1
         fi
     else
         write_color_output "Build conditions not met; skipping native build and reactPackages update" "Yellow"
