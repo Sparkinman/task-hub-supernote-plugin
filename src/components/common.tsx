@@ -695,7 +695,7 @@ export const SCREEN_HEIGHT = Dimensions.get('window').height || 1872;
 const NOMAD_HEIGHT = 998;
 const NOMAD_SCALE = 0.65;
 const MANTA_HEIGHT = 1365;
-const MANTA_SCALE = 0.85;
+const MANTA_SCALE = 0.95;
 
 export const UI_SCALE = (() => {
   const slope = (MANTA_SCALE - NOMAD_SCALE) / (MANTA_HEIGHT - NOMAD_HEIGHT);
@@ -707,14 +707,28 @@ export const UI_SCALE = (() => {
 
 /**
  * A font size, scaled for this panel.
- *
- * Applied to type only. Borders, hairlines and the pen targets that have to
- * stay tappable are left alone: shrinking a 2px rule gains nothing and
- * shrinking a fold arrow makes it harder to hit, which is the opposite of the
- * point.
  */
 export function fs(size: number): number {
   return Math.round(size * UI_SCALE);
+}
+
+/**
+ * A spacing value — padding, margin, gap, a row's minimum height — scaled for
+ * this panel.
+ *
+ * Scaling the type alone was not enough: it made the words smaller inside rows
+ * and cells that were still the size they are on a Manta, so a month grid and a
+ * day's rows took just as much room as before and the smaller device still
+ * scrolled. Space is most of what a calendar is made of.
+ *
+ * Never rounds a positive value to nothing: a 1px hairline that becomes 0
+ * disappears, and a gap that becomes 0 runs two things together.
+ */
+export function sp(size: number): number {
+  if (size === 0) {
+    return 0;
+  }
+  return Math.max(1, Math.round(size * UI_SCALE));
 }
 
 // Settings text is deliberately larger than a phone app's would be. The panel is
@@ -729,7 +743,7 @@ export const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: '#fff'},
   /** Holds the scrolling page and the overlays that cover it. */
   appRoot: {flex: 1, backgroundColor: '#fff'},
-  content: {padding: 14, paddingBottom: 40},
+  content: {padding: sp(14), paddingBottom: sp(40)},
   // Extra tail room so the last field can still scroll clear of the keyboard.
   // NOTE: the keyboard's bottom padding is no longer a constant. It is applied
   // inline in App.tsx from the height the host reports for the keyboard, because
@@ -742,50 +756,50 @@ export const styles = StyleSheet.create({
     justifyContent: 'space-between',
     borderBottomWidth: 2,
     borderBottomColor: '#000',
-    paddingBottom: 8,
-    marginBottom: 10,
+    paddingBottom: sp(8),
+    marginBottom: sp(10),
   },
-  headerLeft: {flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1},
-  mastheadTitle: {fontSize: fs(27), fontWeight: '700', color: '#000', alignSelf: 'flex-end', marginBottom: 4},
+  headerLeft: {flexDirection: 'row', alignItems: 'center', gap: sp(10), flex: 1},
+  mastheadTitle: {fontSize: fs(27), fontWeight: '700', color: '#000', alignSelf: 'flex-end', marginBottom: sp(4)},
   heading: {fontSize: fs(30), fontWeight: '700', color: '#000'},
-  close: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 12, paddingVertical: 5},
+  close: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(5)},
   headerAction: {
     backgroundColor: '#000',
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginRight: 10,
+    paddingHorizontal: sp(14),
+    paddingVertical: sp(8),
+    marginRight: sp(10),
   },
   headerActionText: {fontSize: fs(20), color: '#fff', fontWeight: '700'},
   closeText: {fontSize: fs(24), color: '#000', lineHeight: fs(30)},
-  field: {marginBottom: 12},
-  label: {fontSize: fs(21), color: '#000', marginBottom: 4},
+  field: {marginBottom: sp(12)},
+  label: {fontSize: fs(21), color: '#000', marginBottom: sp(4)},
   input: {
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
     fontSize: fs(22),
     color: '#000',
   },
-  inputTall: {minHeight: 96, textAlignVertical: 'top'},
-  fieldCompact: {marginBottom: 7},
-  labelCompact: {fontSize: fs(20), color: '#000', marginBottom: 3},
-  inputCompact: {paddingHorizontal: 8, paddingVertical: 5, fontSize: fs(18)},
-  inputTallCompact: {minHeight: 58, textAlignVertical: 'top'},
-  subheadingCompact: {fontSize: fs(23), fontWeight: '700', color: '#000', marginTop: 16, marginBottom: 4},
-  helpStepCompact: {fontSize: fs(18), color: '#222', lineHeight: fs(25), marginBottom: 8},
-  noteCompact: {fontSize: fs(17), color: '#444', lineHeight: fs(23), marginBottom: 8},
+  inputTall: {minHeight: sp(96), textAlignVertical: 'top'},
+  fieldCompact: {marginBottom: sp(7)},
+  labelCompact: {fontSize: fs(20), color: '#000', marginBottom: sp(3)},
+  inputCompact: {paddingHorizontal: sp(8), paddingVertical: sp(5), fontSize: fs(18)},
+  inputTallCompact: {minHeight: sp(58), textAlignVertical: 'top'},
+  subheadingCompact: {fontSize: fs(23), fontWeight: '700', color: '#000', marginTop: sp(16), marginBottom: sp(4)},
+  helpStepCompact: {fontSize: fs(18), color: '#222', lineHeight: fs(25), marginBottom: sp(8)},
+  noteCompact: {fontSize: fs(17), color: '#444', lineHeight: fs(23), marginBottom: sp(8)},
   /**
    * Demo-build banner. Inverted rather than tinted: a grey wash is close to
    * invisible on e-ink, and this label has to be unmissable.
    */
   demoBanner: {
     backgroundColor: '#000',
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    marginBottom: 6,
+    paddingVertical: sp(5),
+    paddingHorizontal: sp(8),
+    marginBottom: sp(6),
   },
   demoBannerText: {
     color: '#fff',
@@ -797,35 +811,35 @@ export const styles = StyleSheet.create({
   checkRowCompact: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: sp(8),
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    marginBottom: 5,
+    paddingHorizontal: sp(8),
+    paddingVertical: sp(6),
+    marginBottom: sp(5),
   },
   optionTextCompact: {fontSize: fs(20), color: '#000'},
-  actionsTight: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8},
+  actionsTight: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(8), marginTop: sp(8)},
   grow: {flex: 1},
-  choiceRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12},
-  chip: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 12, paddingVertical: 7},
+  choiceRow: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(8), marginBottom: sp(12)},
+  chip: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(7)},
   chipOn: {backgroundColor: '#000'},
   chipText: {fontSize: fs(21), color: '#000'},
   chipTextOn: {color: '#fff'},
-  option: {borderWidth: 1, borderColor: '#000', padding: 10, marginBottom: 8},
+  option: {borderWidth: 1, borderColor: '#000', padding: sp(10), marginBottom: sp(8)},
   optionOn: {borderWidth: 2},
   optionText: {fontSize: fs(22), color: '#000'},
   checkRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: sp(10),
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    marginBottom: 8,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(10),
+    marginBottom: sp(8),
   },
-  tinyButton: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 10, paddingVertical: 4},
+  tinyButton: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(10), paddingVertical: sp(4)},
   /**
    * Covers the app's window, in the app's window. Positioned absolutely against
    * the root View so it sits over the scrolling content without scrolling with
@@ -840,7 +854,7 @@ export const styles = StyleSheet.create({
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: sp(24),
   },
   /**
    * The scrim a sheet sits on, as its own overlay.
@@ -859,33 +873,33 @@ export const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: sp(24),
   },
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: sp(24),
   },
-  modalCard: {backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', padding: 18, width: '100%', maxWidth: 460},
-  modalTitle: {fontSize: fs(26), fontWeight: '700', color: '#000', marginBottom: 8},
-  modalBody: {fontSize: fs(21), color: '#333', lineHeight: fs(28), marginBottom: 6},
+  modalCard: {backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', padding: sp(18), width: '100%', maxWidth: 460},
+  modalTitle: {fontSize: fs(26), fontWeight: '700', color: '#000', marginBottom: sp(8)},
+  modalBody: {fontSize: fs(21), color: '#333', lineHeight: fs(28), marginBottom: sp(6)},
   // One control at each end of the sheet's foot: leave on the left, confirm on
   // the right.
   sheetActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: sp(12),
   },
-  modalActions: {flexDirection: 'row', gap: 10, marginTop: 14},
-  tabRow: {flexDirection: 'row', gap: 0, marginBottom: 8},
+  modalActions: {flexDirection: 'row', gap: sp(10), marginTop: sp(14)},
+  tabRow: {flexDirection: 'row', gap: sp(0), marginBottom: sp(8)},
   tab: {
     flex: 1,
     borderWidth: 1,
     borderColor: '#000',
-    paddingVertical: 11,
+    paddingVertical: sp(11),
     alignItems: 'center',
   },
   tabOn: {backgroundColor: '#000'},
@@ -898,7 +912,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 22,
+    marginTop: sp(22),
   },
   dayHeading: {
     flex: 1,
@@ -907,48 +921,48 @@ export const styles = StyleSheet.create({
     color: '#000',
     textAlign: 'center',
   },
-  nav: {paddingHorizontal: 16, paddingVertical: 6, borderWidth: 1, borderColor: '#000'},
+  nav: {paddingHorizontal: sp(16), paddingVertical: sp(6), borderWidth: 1, borderColor: '#000'},
   navText: {fontSize: fs(30), color: '#000', lineHeight: fs(33)},
   monthLabel: {fontSize: fs(24), fontWeight: '700', color: '#000'},
   tappableLabel: {textDecorationLine: 'underline'},
-  week: {flexDirection: 'row', marginTop: 4},
-  weekday: {flex: 1, textAlign: 'center', fontSize: fs(18), color: '#555', paddingVertical: 4},
+  week: {flexDirection: 'row', marginTop: sp(4)},
+  weekday: {flex: 1, textAlign: 'center', fontSize: fs(18), color: '#555', paddingVertical: sp(4)},
   noteButtonRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 8,
-    marginTop: 10,
-    marginBottom: 4,
+    gap: sp(8),
+    marginTop: sp(10),
+    marginBottom: sp(4),
   },
   // Three months on one panel. Everything here is sized down from the month
   // view rather than reflowed: the point of the quarter view is the shape of
   // twelve weeks at a glance, and a day cell only has to be tappable, not
   // readable in detail.
-  quarterMonth: {marginTop: 12},
+  quarterMonth: {marginTop: sp(12)},
   quarterMonthLabel: {
     fontSize: fs(20),
     fontWeight: '700',
     color: '#000',
-    marginBottom: 2,
+    marginBottom: sp(2),
     textDecorationLine: 'underline',
   },
   quarterWeek: {flexDirection: 'row'},
-  quarterWeekday: {flex: 1, textAlign: 'center', fontSize: fs(13), color: '#555', paddingVertical: 2},
+  quarterWeekday: {flex: 1, textAlign: 'center', fontSize: fs(13), color: '#555', paddingVertical: sp(2)},
   quarterCell: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 3,
+    paddingVertical: sp(3),
     // A floor rather than a fixed height: without it a row whose cells are all
     // empty collapses to nothing and the grid loses its shape, which is what
     // made the quarter view look wrong rather than merely small.
-    minHeight: 30,
+    minHeight: sp(30),
     borderWidth: 1,
     borderColor: '#ddd',
   },
   // An empty padding cell: holds its place in the row and nothing else.
-  quarterCellEmpty: {flex: 1, paddingVertical: 3, minHeight: 30},
+  quarterCellEmpty: {flex: 1, paddingVertical: sp(3), minHeight: sp(30)},
   // Selection is a solid fill with inverted text — on a monochrome panel a
   // pale wash and a slightly darker border were nearly the same thing, which is
   // why the selected day was hard to pick out.
@@ -959,16 +973,16 @@ export const styles = StyleSheet.create({
   quarterCellTextSelected: {color: '#000', fontWeight: '700'},
   // A bar rather than the month view's boxed letters: at this size a letter is
   // unreadable, so it says "something is here" and the month view says what.
-  quarterDot: {height: 3, width: 12, backgroundColor: '#000', marginTop: 1},
+  quarterDot: {height: 3, width: 12, backgroundColor: '#000', marginTop: sp(1)},
   // The year view: twelve grids, three to a row. Smaller again than the
   // quarter's, and with no marker beside the number — at this size the number
   // itself goes bold to say a day has something on it.
-  yearQuarterLabel: {fontSize: fs(18), fontWeight: '700', color: '#000', marginTop: 10},
-  yearRow: {flexDirection: 'row', gap: 6},
+  yearQuarterLabel: {fontSize: fs(18), fontWeight: '700', color: '#000', marginTop: sp(10)},
+  yearRow: {flexDirection: 'row', gap: sp(6)},
   yearMonth: {flex: 1},
-  yearMonthLabel: {fontSize: fs(15), fontWeight: '700', color: '#000', marginBottom: 1},
+  yearMonthLabel: {fontSize: fs(15), fontWeight: '700', color: '#000', marginBottom: sp(1)},
   yearWeek: {flexDirection: 'row'},
-  yearCell: {flex: 1, alignItems: 'center', paddingVertical: 1},
+  yearCell: {flex: 1, alignItems: 'center', paddingVertical: sp(1)},
   // Selection is a heavy outline, not a fill. A black fill relies on every text
   // style beneath it being overridden to white, and one that is not — the bold
   // "has something on it" style, for instance — leaves black on black and an
@@ -995,42 +1009,42 @@ export const styles = StyleSheet.create({
   paneTaskRow: {flexDirection: 'row', alignItems: 'flex-start'},
   paneFoldHit: {width: 34, alignItems: 'center'},
   paneFold: {fontSize: fs(34), color: '#000', lineHeight: fs(34)},
-  paneTaskStep: {paddingLeft: 18, backgroundColor: '#ededed'},
+  paneTaskStep: {paddingLeft: sp(18), backgroundColor: '#ededed'},
   // Events outside the agenda's chosen hours, under the grid.
-  outsideBlock: {marginTop: 10, borderTopWidth: 1, borderTopColor: '#999', paddingTop: 8},
-  outsideHead: {fontSize: fs(17), color: '#555', marginBottom: 4},
-  browseRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 8},
-  miniCell: {flex: 1, height: 52, alignItems: 'center', justifyContent: 'center', margin: 1},
+  outsideBlock: {marginTop: sp(10), borderTopWidth: 1, borderTopColor: '#999', paddingTop: sp(8)},
+  outsideHead: {fontSize: fs(17), color: '#555', marginBottom: sp(4)},
+  browseRow: {flexDirection: 'row', alignItems: 'flex-start', gap: sp(8)},
+  miniCell: {flex: 1, height: 52, alignItems: 'center', justifyContent: 'center', margin: sp(1)},
   miniCellOn: {borderWidth: 1, borderColor: '#999'},
   miniCellSel: {backgroundColor: '#000', borderColor: '#000'},
   miniCellText: {fontSize: fs(20), color: '#000'},
   miniCellTextSel: {color: '#fff', fontWeight: '700'},
-  weekNumHead: {width: 46, textAlign: 'center', fontSize: fs(14), color: '#555', paddingVertical: 4},
+  weekNumHead: {width: 46, textAlign: 'center', fontSize: fs(14), color: '#555', paddingVertical: sp(4)},
   weekNumCell: {
     width: 46,
     height: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    margin: 1,
+    margin: sp(1),
     borderWidth: 1,
     borderColor: '#000',
   },
   weekNumText: {fontSize: fs(16), fontWeight: '700', color: '#000'},
-  eventRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6},
-  noteChip: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 8, paddingVertical: 3},
+  eventRow: {flexDirection: 'row', alignItems: 'flex-start', gap: sp(6)},
+  noteChip: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(8), paddingVertical: sp(3)},
   noteChipText: {fontSize: fs(18), color: '#000', lineHeight: fs(22)},
   templateSummary: {
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 10,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
+    marginBottom: sp(10),
   },
   templateSummaryText: {fontSize: fs(18), color: '#000'},
-  templateSummaryHint: {fontSize: fs(13), color: '#666', marginTop: 2},
+  templateSummaryHint: {fontSize: fs(13), color: '#666', marginTop: sp(2)},
   templateScroll: {maxHeight: Math.round(SCREEN_HEIGHT * 0.42)},
-  templateGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12},
-  templateTile: {borderWidth: 1, borderColor: '#999', padding: 4, width: 116},
+  templateGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(10), marginBottom: sp(12)},
+  templateTile: {borderWidth: 1, borderColor: '#999', padding: sp(4), width: 116},
   templateTileOn: {borderWidth: 3, borderColor: '#000'},
   // 3:4 portrait, matching a note page so the ruling reads correctly.
   templateThumb: {width: 106, height: 141, backgroundColor: '#fff'},
@@ -1043,78 +1057,78 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   templateBlankText: {fontSize: fs(16), color: '#777'},
-  templateName: {fontSize: fs(14), color: '#000', marginTop: 3, textAlign: 'center'},
+  templateName: {fontSize: fs(14), color: '#000', marginTop: sp(3), textAlign: 'center'},
   browseButton: {
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(6),
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: sp(24),
   },
   browseIcon: {fontSize: fs(22), color: '#000', lineHeight: fs(24)},
   folderIcon: {justifyContent: 'flex-end'},
   // The template file browser: one directory at a time.
-  browserRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4},
-  browserUp: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 12, paddingVertical: 8},
+  browserRow: {flexDirection: 'row', alignItems: 'center', gap: sp(10), marginBottom: sp(4)},
+  browserUp: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(8)},
   browserUpText: {fontSize: fs(18), color: '#000'},
-  browserFolder: {borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: 10},
+  browserFolder: {borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: sp(10)},
   browserFolderText: {fontSize: fs(20), color: '#000'},
   folderTab: {borderColor: '#000', borderWidth: 2, borderBottomWidth: 0},
   calendarIcon: {alignItems: 'center'},
   // The steps' own date, offered beside the box that creates them.
-  stepsDateRow: {flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8},
+  stepsDateRow: {flexDirection: 'row', alignItems: 'center', gap: sp(12), marginBottom: sp(8)},
   stepsDateButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: sp(10),
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(8),
   },
   stepsDateLabel: {fontSize: fs(18), color: '#000'},
   clearLink: {fontSize: fs(17), color: '#000', textDecorationLine: 'underline'},
-  calendarRings: {flexDirection: 'row', gap: 6, height: 4},
+  calendarRings: {flexDirection: 'row', gap: sp(6), height: 4},
   calendarRing: {width: 3, height: 4, backgroundColor: '#000'},
   calendarBody: {borderWidth: 2, borderColor: '#000'},
   calendarBand: {backgroundColor: '#000'},
   folderBody: {borderColor: '#000', borderWidth: 2},
   browseLabel: {fontSize: fs(14), color: '#000'},
   pastText: {color: '#9a9a9a'},
-  nowRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  nowRow: {flexDirection: 'row', alignItems: 'center', gap: sp(6)},
   nowLabel: {fontSize: fs(14), fontWeight: '700', color: '#000'},
   nowLine: {flex: 1, height: 3, backgroundColor: '#000'},
   pickerCard: {
     backgroundColor: '#fff',
     borderWidth: 2,
     borderColor: '#000',
-    padding: 16,
+    padding: sp(16),
     width: '100%',
     maxWidth: 620,
     maxHeight: '85%',
   },
-  pickerPath: {fontSize: fs(17), color: '#333', marginBottom: 8},
-  pickerNav: {flexDirection: 'row', gap: 10, marginBottom: 10},
-  pickerList: {borderWidth: 1, borderColor: '#000', maxHeight: Math.round(SCREEN_HEIGHT * 0.38), padding: 6},
-  pickerRow: {paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#ddd'},
+  pickerPath: {fontSize: fs(17), color: '#333', marginBottom: sp(8)},
+  pickerNav: {flexDirection: 'row', gap: sp(10), marginBottom: sp(10)},
+  pickerList: {borderWidth: 1, borderColor: '#000', maxHeight: Math.round(SCREEN_HEIGHT * 0.38), padding: sp(6)},
+  pickerRow: {paddingVertical: sp(9), borderBottomWidth: 1, borderBottomColor: '#ddd'},
   pickerRowText: {fontSize: fs(20), color: '#000'},
-  agendaItem: {borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: 10},
+  agendaItem: {borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: sp(10)},
   agendaTime: {fontSize: fs(20), fontWeight: '700', color: '#000'},
-  agendaTitle: {fontSize: fs(22), color: '#000', marginTop: 1},
-  agendaMeta: {fontSize: fs(18), color: '#555', marginTop: 1},
+  agendaTitle: {fontSize: fs(22), color: '#000', marginTop: sp(1)},
+  agendaMeta: {fontSize: fs(18), color: '#555', marginTop: sp(1)},
   // The same rows under the month grid, tighter: that list is there to be read
   // without scrolling past a whole calendar to reach it.
-  agendaItemTight: {borderBottomWidth: 1, borderBottomColor: '#ddd', paddingVertical: 5},
+  agendaItemTight: {borderBottomWidth: 1, borderBottomColor: '#ddd', paddingVertical: sp(5)},
   agendaTitleTight: {fontSize: fs(18), color: '#000'},
   agendaMetaTight: {fontSize: fs(15), color: '#555'},
-  monthTasksHead: {paddingVertical: 8, marginTop: 4},
+  monthTasksHead: {paddingVertical: sp(8), marginTop: sp(4)},
   monthTasksHeadText: {fontSize: fs(19), fontWeight: '700', color: '#000'},
-  dayCell: {flex: 1, minHeight: 96, borderWidth: 1, borderColor: '#bbb', margin: 1, padding: 3},
+  dayCell: {flex: 1, minHeight: sp(96), borderWidth: 1, borderColor: '#bbb', margin: sp(1), padding: sp(3)},
   dayCellSelected: {borderWidth: 2, borderColor: '#000'},
   dayNum: {fontSize: fs(20), color: '#000'},
   dayNumToday: {fontWeight: '700', textDecorationLine: 'underline'},
-  markRow: {flexDirection: 'row', gap: 2, marginTop: 2},
+  markRow: {flexDirection: 'row', gap: sp(2), marginTop: sp(2)},
   // Filled black boxes, not outlines: on a monochrome panel a solid swatch is
   // the only marker that stays obvious at a glance across a full month grid.
   mark: {
@@ -1124,24 +1138,24 @@ export const styles = StyleSheet.create({
     backgroundColor: '#000',
     borderWidth: 2,
     borderColor: '#000',
-    paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingHorizontal: sp(6),
+    paddingVertical: sp(1),
     lineHeight: fs(20),
     overflow: 'hidden',
   },
-  viewSwitch: {marginTop: 10, marginBottom: 10},
+  viewSwitch: {marginTop: sp(10), marginBottom: sp(10)},
   viewSwitchRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginTop: 10,
-    marginBottom: 10,
+    marginTop: sp(10),
+    marginBottom: sp(10),
   },
   backButton: {
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 14,
-    paddingVertical: 4,
+    paddingHorizontal: sp(14),
+    paddingVertical: sp(4),
     alignItems: 'center',
   },
   backIcon: {fontSize: fs(24), color: '#000', lineHeight: fs(26)},
@@ -1150,77 +1164,77 @@ export const styles = StyleSheet.create({
     fontSize: fs(23),
     fontWeight: '700',
     color: '#000',
-    marginTop: 14,
-    marginBottom: 6,
+    marginTop: sp(14),
+    marginBottom: sp(6),
     textDecorationLine: 'underline',
   },
-  weekDayRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4},
-  weekDay: {borderWidth: 1, borderColor: '#999', padding: 10, marginBottom: 8},
+  weekDayRow: {flexDirection: 'row', alignItems: 'center', gap: sp(10), marginBottom: sp(4)},
+  weekDay: {borderWidth: 1, borderColor: '#999', padding: sp(10), marginBottom: sp(8)},
   weekDayToday: {borderWidth: 3, borderColor: '#000'},
-  weekDayHead: {fontSize: fs(21), fontWeight: '700', color: '#000', marginBottom: 4},
+  weekDayHead: {fontSize: fs(21), fontWeight: '700', color: '#000', marginBottom: sp(4)},
   weekDayHeadToday: {textDecorationLine: 'underline'},
-  weekEntry: {fontSize: fs(20), color: '#000', marginTop: 4, lineHeight: fs(28)},
-  weekEmpty: {fontSize: fs(18), color: '#888', marginTop: 2},
+  weekEntry: {fontSize: fs(20), color: '#000', marginTop: sp(4), lineHeight: fs(28)},
+  weekEmpty: {fontSize: fs(18), color: '#888', marginTop: sp(2)},
   // A minimum height for the whole two-column block, so a short agenda still
   // fills the page. Without it a day set to run 9 to 5 drew eight rows and
   // stopped, leaving the divider between the grid and the tasks as a stub a
   // third of the way down.
   // The minimum is a floor for the first render only; DayView measures where
   // the block actually starts and fills the rest of the window from there.
-  dayWrap: {flexDirection: 'row', gap: 12, minHeight: Math.round(SCREEN_HEIGHT * 0.5)},
+  dayWrap: {flexDirection: 'row', gap: sp(12), minHeight: Math.round(SCREEN_HEIGHT * 0.5)},
   dayGrid: {flex: 3},
   // Hour rows share out whatever height is left over, so the grid spans the
   // block however many hours are in it.
   hourSlot: {flexGrow: 1, justifyContent: 'flex-start'},
-  hourRow: {flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ccc', minHeight: 40},
-  hourLabel: {width: 86, fontSize: fs(17), color: '#555', paddingTop: 5},
-  hourBody: {flex: 1, paddingVertical: 3},
+  hourRow: {flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ccc', minHeight: sp(40)},
+  hourLabel: {width: 86, fontSize: fs(17), color: '#555', paddingTop: sp(5)},
+  hourBody: {flex: 1, paddingVertical: sp(3)},
   slotEvent: {fontSize: fs(20), color: '#000', fontWeight: '700', lineHeight: fs(26)},
   slotMeta: {fontSize: fs(16), color: '#555'},
-  dayTasks: {flex: 2, borderLeftWidth: 2, borderLeftColor: '#000', paddingLeft: 12},
-  paneTitle: {fontSize: fs(21), fontWeight: '700', color: '#000', marginBottom: 6},
-  paneDate: {fontSize: fs(17), color: '#555', marginTop: 8},
-  paneTask: {paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#ddd'},
+  dayTasks: {flex: 2, borderLeftWidth: 2, borderLeftColor: '#000', paddingLeft: sp(12)},
+  paneTitle: {fontSize: fs(21), fontWeight: '700', color: '#000', marginBottom: sp(6)},
+  paneDate: {fontSize: fs(17), color: '#555', marginTop: sp(8)},
+  paneTask: {paddingVertical: sp(6), borderBottomWidth: 1, borderBottomColor: '#ddd'},
   paneTaskText: {fontSize: fs(20), color: '#000', lineHeight: fs(26)},
-  paneRunning: {fontSize: fs(18), fontWeight: '700', color: '#555', marginTop: 10, marginBottom: 2},
-  paneSeparator: {borderTopWidth: 3, borderTopColor: '#000', marginVertical: 14},
+  paneRunning: {fontSize: fs(18), fontWeight: '700', color: '#555', marginTop: sp(10), marginBottom: sp(2)},
+  paneSeparator: {borderTopWidth: 3, borderTopColor: '#000', marginVertical: sp(14)},
   markLegend: {
     fontSize: fs(16),
     fontWeight: '700',
     color: '#fff',
     backgroundColor: '#000',
-    paddingHorizontal: 6,
+    paddingHorizontal: sp(6),
     lineHeight: fs(20),
     overflow: 'hidden',
   },
   tinyButtonText: {fontSize: fs(20), color: '#000'},
-  settingsFold: {borderTopWidth: 2, borderTopColor: '#000', marginTop: 18, paddingTop: 8},
-  settingsFoldHead: {paddingVertical: 6},
+  settingsFold: {borderTopWidth: 2, borderTopColor: '#000', marginTop: sp(18), paddingTop: sp(8)},
+  settingsFoldHead: {paddingVertical: sp(6)},
   settingsFoldTitle: {fontSize: fs(26), fontWeight: '700', color: '#000'},
-  settingsFoldHint: {fontSize: fs(17), color: '#444', lineHeight: fs(23), marginBottom: 6},
-  settingsFoldBody: {marginTop: 4},
+  settingsFoldHint: {fontSize: fs(17), color: '#444', lineHeight: fs(23), marginBottom: sp(6)},
+  settingsFoldBody: {marginTop: sp(4)},
   // An address to read and type elsewhere, not a tappable link: the plugin has
   // no browser to hand off to, so it is set to be selectable and left legible.
   linkText: {
     fontSize: fs(18),
     color: '#000',
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: sp(8),
     textDecorationLine: 'underline',
   },
-  section: {marginTop: 16},
-  sectionHead: {borderTopWidth: 1, borderTopColor: '#000', paddingVertical: 10},
+  section: {marginTop: sp(16)},
+  sectionHead: {borderTopWidth: 1, borderTopColor: '#000', paddingVertical: sp(10)},
   sectionTitle: {fontSize: fs(22), fontWeight: '700', color: '#000'},
-  subheading: {fontSize: fs(22), fontWeight: '700', color: '#000', marginTop: 18, marginBottom: 6},
-  helpStep: {fontSize: fs(20), color: '#333', lineHeight: fs(28), marginBottom: 10},
+  subheading: {fontSize: fs(22), fontWeight: '700', color: '#000', marginTop: sp(18), marginBottom: sp(6)},
+  helpStep: {fontSize: fs(20), color: '#333', lineHeight: fs(28), marginBottom: sp(10)},
   helpNum: {fontWeight: '700', color: '#000'},
   task: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
+    gap: sp(10),
     borderBottomWidth: 1,
     borderBottomColor: '#ccc',
-    paddingVertical: 11,
+    paddingVertical: sp(11),
   },
   // A step sits in from its parent, with a rail down the gap. On a 1-bit panel
   // indentation alone is too weak a signal, and the rail also survives a title
@@ -1232,7 +1246,7 @@ export const styles = StyleSheet.create({
   // Indented much further than the first attempt: on a panel this size a step
   // sitting 26pt in still read as a slightly odd top-level task rather than as
   // something belonging to the row above.
-  taskStep: {paddingLeft: 56, backgroundColor: '#ededed'},
+  taskStep: {paddingLeft: sp(56), backgroundColor: '#ededed'},
   stepRail: {
     position: 'absolute',
     left: 22,
@@ -1249,7 +1263,7 @@ export const styles = StyleSheet.create({
   // control that reveals a whole piece of work, so it is now the largest thing
   // in the row by some margin — deliberately, because at 30pt it was still
   // being missed.
-  foldHit: {width: 96, paddingTop: 1, alignItems: 'center', justifyContent: 'flex-start'},
+  foldHit: {width: 96, paddingTop: sp(1), alignItems: 'center', justifyContent: 'flex-start'},
   fold: {fontSize: fs(108), color: '#000', lineHeight: fs(96)},
   stepCount: {
     // Was 12, which made it the smallest thing in a row where every other badge
@@ -1258,24 +1272,24 @@ export const styles = StyleSheet.create({
     color: '#000',
     borderWidth: 1,
     borderColor: '#666',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    marginTop: 2,
+    paddingHorizontal: sp(5),
+    paddingVertical: sp(1),
+    marginTop: sp(2),
   },
-  boxHit: {paddingRight: 2},
+  boxHit: {paddingRight: sp(2)},
   box: {fontSize: fs(30), color: '#000', lineHeight: fs(33)},
   taskTitle: {fontSize: fs(24), color: '#000'},
   struck: {textDecorationLine: 'line-through', color: '#555'},
-  metaRow: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8},
-  due: {fontSize: fs(20), color: '#333', marginTop: 2},
-  noDue: {fontSize: fs(20), color: '#888', marginTop: 2, fontStyle: 'italic'},
-  legend: {fontSize: fs(18), color: '#555', marginTop: 8},
+  metaRow: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp(8)},
+  due: {fontSize: fs(20), color: '#333', marginTop: sp(2)},
+  noDue: {fontSize: fs(20), color: '#888', marginTop: sp(2), fontStyle: 'italic'},
+  legend: {fontSize: fs(18), color: '#555', marginTop: sp(8)},
   overdue: {fontWeight: '700', color: '#000'},
   sourceChip: {
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: sp(8),
+    paddingVertical: sp(2),
     alignItems: 'center',
   },
   sourceChipText: {fontSize: fs(20), color: '#000', lineHeight: fs(22)},
@@ -1285,9 +1299,9 @@ export const styles = StyleSheet.create({
     color: '#000',
     borderWidth: 1,
     borderColor: '#777',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    marginTop: 2,
+    paddingHorizontal: sp(5),
+    paddingVertical: sp(1),
+    marginTop: sp(2),
   },
   originTagNamed: {backgroundColor: '#000', color: '#fff', borderColor: '#000'},
   priorityTag: {
@@ -1295,9 +1309,9 @@ export const styles = StyleSheet.create({
     color: '#000',
     borderWidth: 1,
     borderColor: '#777',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    marginTop: 2,
+    paddingHorizontal: sp(5),
+    paddingVertical: sp(1),
+    marginTop: sp(2),
   },
   priorityTagHigh: {backgroundColor: '#000', color: '#fff', borderColor: '#000'},
   listTag: {
@@ -1305,29 +1319,29 @@ export const styles = StyleSheet.create({
     color: '#000',
     borderWidth: 1,
     borderColor: '#777',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    marginTop: 2,
+    paddingHorizontal: sp(5),
+    paddingVertical: sp(1),
+    marginTop: sp(2),
   },
-  description: {fontSize: fs(20), color: '#555', marginTop: 2},
-  empty: {fontSize: fs(22), color: '#555', marginVertical: 16},
-  note: {fontSize: fs(18), color: '#555', marginBottom: 10},
-  statusRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 8},
+  description: {fontSize: fs(20), color: '#555', marginTop: sp(2)},
+  empty: {fontSize: fs(22), color: '#555', marginVertical: sp(16)},
+  note: {fontSize: fs(18), color: '#555', marginBottom: sp(10)},
+  statusRow: {flexDirection: 'row', alignItems: 'center', gap: sp(8), marginVertical: sp(8)},
   busyMark: {fontSize: fs(24), color: '#000'},
   loadingPanel: {
     borderWidth: 3,
     borderColor: '#000',
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    marginVertical: 18,
+    paddingVertical: sp(24),
+    paddingHorizontal: sp(20),
+    marginVertical: sp(18),
     alignItems: 'center',
   },
   loadingPanelText: {fontSize: fs(30), fontWeight: '700', color: '#000'},
-  loadingPanelHint: {fontSize: fs(18), color: '#444', marginTop: 8, textAlign: 'center'},
-  status: {fontSize: fs(22), color: '#000', marginVertical: 8},
+  loadingPanelHint: {fontSize: fs(18), color: '#444', marginTop: sp(8), textAlign: 'center'},
+  status: {fontSize: fs(22), color: '#000', marginVertical: sp(8)},
   error: {fontWeight: '700'},
-  actions: {flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8},
-  button: {borderWidth: 1, borderColor: '#000', paddingHorizontal: 18, paddingVertical: 10},
+  actions: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(10), marginTop: sp(8)},
+  button: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(18), paddingVertical: sp(10)},
   buttonPrimary: {backgroundColor: '#000'},
   buttonText: {fontSize: fs(22), color: '#000'},
   buttonTextPrimary: {color: '#fff'},

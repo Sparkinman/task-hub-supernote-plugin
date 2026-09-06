@@ -8,6 +8,7 @@
  */
 
 import React from 'react';
+import {fs, sp} from './common';
 import {Image, StyleSheet, Text, View} from 'react-native';
 
 import {DEMO} from '../mode';
@@ -61,7 +62,7 @@ export function Brand(props: {subtitle?: string}): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', alignItems: 'center', gap: 10},
-  name: {fontSize: 28, fontWeight: '700', color: '#000'},
-  subtitle: {fontSize: 20, color: '#555', marginTop: 1},
+  row: {flexDirection: 'row', alignItems: 'center', gap: sp(10)},
+  name: {fontSize: fs(28), fontWeight: '700', color: '#000'},
+  subtitle: {fontSize: fs(20), color: '#555', marginTop: sp(1)},
 });
