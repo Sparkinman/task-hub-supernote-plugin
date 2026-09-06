@@ -72,11 +72,11 @@ describe('settings credential fields', () => {
       tree = TestRenderer.create(<Form functional />);
     });
 
-    typeInto(tree, 0, 'paul');
+    typeInto(tree, 0, 'testuser');
     typeInto(tree, 1, 'hunter2');
 
     // Both survive: neither handler depended on a captured snapshot.
-    expect(valuesOf(tree)).toEqual(['paul', 'hunter2']);
+    expect(valuesOf(tree)).toEqual(['testuser', 'hunter2']);
   });
 
   it('loses the earlier field when a handler captures state instead', () => {
@@ -85,7 +85,7 @@ describe('settings credential fields', () => {
       tree = TestRenderer.create(<Form functional={false} />);
     });
 
-    typeInto(tree, 0, 'paul');
+    typeInto(tree, 0, 'testuser');
     typeInto(tree, 1, 'hunter2');
 
     // This is the reported bug, pinned so nobody reintroduces the pattern:

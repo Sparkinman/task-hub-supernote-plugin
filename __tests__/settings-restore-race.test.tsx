@@ -86,14 +86,14 @@ describe('settings restored from disk while the user is typing', () => {
     });
 
     typeInto(tree, 0, 'https://tasks.example.net');
-    typeInto(tree, 1, 'paul');
+    typeInto(tree, 1, 'testuser');
 
     // The settings file finally arrives, and it is empty.
     await act(async () => {
       release(EMPTY);
     });
 
-    expect(values(tree)).toEqual(['https://tasks.example.net', 'paul']);
+    expect(values(tree)).toEqual(['https://tasks.example.net', 'testuser']);
   });
 
   it('still seeds the form when nothing has been typed yet', async () => {
@@ -118,7 +118,7 @@ describe('settings restored from disk while the user is typing', () => {
     });
 
     typeInto(tree, 0, 'https://tasks.example.net');
-    typeInto(tree, 1, 'paul');
+    typeInto(tree, 1, 'testuser');
 
     await act(async () => {
       release(EMPTY);

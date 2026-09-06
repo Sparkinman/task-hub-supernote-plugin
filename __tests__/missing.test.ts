@@ -13,9 +13,9 @@ jest.mock('../src/permissions', () => ({
 }));
 
 import {listEvents, listTasks, missingMessage, type MissingCollection} from '../src/tasks';
-import {EMPTY_CONFIG, type RadicaleConfig} from '../src/settings';
+import {EMPTY_CONFIG, type ServerConfig} from '../src/settings';
 
-const config = (over: Partial<RadicaleConfig>): RadicaleConfig => ({
+const config = (over: Partial<ServerConfig>): ServerConfig => ({
   ...EMPTY_CONFIG,
   serverUrl: 'https://dav.example',
   username: 'user',

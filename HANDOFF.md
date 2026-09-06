@@ -289,7 +289,7 @@ None of it could be verified off-device, and all of it changed last:
 Nothing in this session touched device behaviour — it was all repository,
 documentation and licensing work. Both repos are clean and pushed.
 
-- **Relicensed the plugin to GPLv3**, matching the server, at Paul's
+- **Relicensed the plugin to GPLv3**, matching the server, at the maintainer's
   instruction. Added `LICENSE` (byte-identical to the server's), rewrote the
   README licence section, set `"license": "GPL-3.0-or-later"` in
   `package.json`. The earlier "not open source, all rights reserved" position
@@ -399,3 +399,30 @@ Borders are deliberately not scaled, and positive spacing never rounds to zero.
    Overdue/Today row on the Tasks tab.
 5. Day view's two-column split is unverified for cramping on a real panel.
 6. Publish-review item 7 (end-to-end device testing) is still the author's to do.
+
+---
+
+### CalDAV discovery is standards-based, not path-guessing
+
+`discoverCollections` used to PROPFIND `<server>/<username>/` directly. That is Radicale's
+layout and nobody else's, so **Discover** silently found nothing on Nextcloud
+(`/remote.php/dav/calendars/USER/`), Baikal (`/dav.php/calendars/USER/`) or Fastmail
+(`/dav/calendars/user/EMAIL/`).
+
+It now walks RFC 6764: PROPFIND `current-user-principal` against `/.well-known/caldav`, then
+the configured URL, then the bare origin; PROPFIND `calendar-home-set` on whichever principal
+answers; then the Depth:1 enumeration against that home. If none of it answers, it falls back
+to the old `<server>/<username>/` guess, so Radicale keeps working even where well-known is
+not served.
+
+Two things worth not re-litigating:
+
+- **An explicitly set `owner` short-circuits the whole walk.** That field exists because the
+  wanted collections are *not* the login's own — a credential scoped by a rights file — and
+  the well-known walk can only ever report where the login's own calendars live. Asking the
+  server would return the wrong home.
+- **A 401 throws `AuthError` rather than falling through to the next candidate.** Otherwise
+  bad credentials look identical to a server that does not serve well-known, and the user
+  gets "no task lists found" when the real problem is their password.
+
+Covered by `__tests__/discovery-wellknown.test.ts`.

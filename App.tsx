@@ -111,7 +111,7 @@ import {
   setConfig,
   toggleCalendar,
   toggleCollection,
-  type RadicaleConfig,
+  type ServerConfig,
 } from './src/settings';
 import {
   completeTask,
@@ -292,7 +292,7 @@ export default function App(): React.JSX.Element {
   calViewRef.current = calView;
   viewHistoryRef.current = viewHistory;
   const [status, setStatus] = useState<Status>(null);
-  const [config, setLocalConfig] = useState<RadicaleConfig>(getConfig);
+  const [config, setLocalConfig] = useState<ServerConfig>(getConfig);
   const [collections, setLocalCollections] = useState<TaskCollection[]>(
     getCollections,
   );
@@ -1109,7 +1109,7 @@ export default function App(): React.JSX.Element {
       title: editing ? 'Save changes?' : 'Create task?',
       reload: 'tasks',
       body: editing
-        ? `"${summary}" will be updated on Radicale.`
+        ? `"${summary}" will be updated on the server.`
         : `"${summary}" will be added to ${taskTargets.map(collectionName).join(', ')}.`,
       label: editing ? 'Yes, save' : 'Yes, create',
       run: async () => {
@@ -1191,7 +1191,7 @@ export default function App(): React.JSX.Element {
    * decided it.
    */
   const noteConfigFor = useCallback(
-    (period: Period, cfg: RadicaleConfig) =>
+    (period: Period, cfg: ServerConfig) =>
       period === 'day'
         ? cfg.dailyNote
         : period === 'week'
@@ -1365,8 +1365,8 @@ export default function App(): React.JSX.Element {
       title: 'Mark task complete?',
       reload: 'tasks',
       body: marked
-        ? `"${task.summary}" will be marked complete on Radicale, and the box removed from the page it came from.`
-        : `"${task.summary}" will be marked complete on Radicale.`,
+        ? `"${task.summary}" will be marked complete on the server, and the box removed from the page it came from.`
+        : `"${task.summary}" will be marked complete on the server.`,
       label: 'Yes, complete',
       run: async () => {
         await completeTask(getConfig(), task);
@@ -1439,7 +1439,7 @@ export default function App(): React.JSX.Element {
    * Marks the form as edited before forwarding, so a settings load still in
    * flight does not overwrite what is being typed.
    */
-  const changeConfig = useCallback<React.Dispatch<React.SetStateAction<RadicaleConfig>>>(
+  const changeConfig = useCallback<React.Dispatch<React.SetStateAction<ServerConfig>>>(
     update => {
       settingsEditedRef.current = true;
       setLocalConfig(update);
@@ -1548,7 +1548,7 @@ export default function App(): React.JSX.Element {
         'Clears the server address, username, password, chosen task lists and ' +
         'calendars, date and time formats, note folders, and the links between ' +
         'calendar events and their meeting notes. Your notes and everything on ' +
-        'Radicale are left alone. This cannot be undone.',
+        'the server are left alone. This cannot be undone.',
       label: 'Yes, wipe',
       run: async () => {
         await wipeSettings();
@@ -2280,7 +2280,7 @@ will not duplicate them.`}
                   calendar view: a task thought of while looking at a week is a
                   task that should be writable without changing tab first. It
                   carries the list picker with it, so a task added here still
-                  chooses which Radicale collection it goes into.
+                  chooses which collection it goes into.
                 */}
                 <Button label="+ New task" onPress={() => openTaskEditor(null)} />
                 <Button label="Today" onPress={goToday} />
@@ -2647,12 +2647,12 @@ function PeriodNoteSettings(props: {
   noteKey: 'weekNote' | 'monthNote' | 'quarterNote' | 'yearNote';
   hint: string;
   tokens: string;
-  config: RadicaleConfig;
+  config: ServerConfig;
   templates: NoteTemplate[];
   scrollHandle: number | null;
   onScrollTo: (y: number) => void;
   onBrowse: () => void;
-  onChange: React.Dispatch<React.SetStateAction<RadicaleConfig>>;
+  onChange: React.Dispatch<React.SetStateAction<ServerConfig>>;
 }): React.JSX.Element {
   const {
     title,
@@ -2751,7 +2751,7 @@ function PeriodNoteSettings(props: {
 }
 
 function SettingsScreen(props: {
-  config: RadicaleConfig;
+  config: ServerConfig;
   collections: TaskCollection[];
   status: Status;
   scrollHandle: number | null;
@@ -2763,7 +2763,7 @@ function SettingsScreen(props: {
   templates: NoteTemplate[];
   showHelp: boolean;
   onToggleHelp: () => void;
-  onChange: React.Dispatch<React.SetStateAction<RadicaleConfig>>;
+  onChange: React.Dispatch<React.SetStateAction<ServerConfig>>;
   onDiscover: () => void;
   onSave: () => void;
   /** True when the form differs from what is stored, which the Save reports. */
@@ -2835,21 +2835,21 @@ function SettingsScreen(props: {
       <Section title="How to set this up" count={5} open={showHelp} onToggle={onToggleHelp}>
         <Text style={styles.helpStepCompact}>
           <Text style={styles.helpNum}>1. Server URL. </Text>
-          Just the origin of your Radicale server — host and port, nothing after it. For a default
-          install that is port 5232, e.g. https://radicale.example.com:5232. Do not paste a
+          Just the origin of your CalDAV server — host and port, nothing after it, e.g.
+          https://dav.example.com. Radicale installs usually use port 5232. Do not paste a
           collection address here; {APP_NAME} finds those for you in step 3.
         </Text>
         <Text style={styles.helpStepCompact}>
           <Text style={styles.helpNum}>2. Username and password. </Text>
-          The Radicale login whose collections you want. If your server supports app passwords,
+          The login whose collections you want. If your server supports app passwords,
           make one scoped to these collections rather than using your account password —
           credentials are held in memory only and are not stored in an encrypted keystore.
         </Text>
         <Text style={styles.helpStepCompact}>
           <Text style={styles.helpNum}>3. Find collections. </Text>
-          Queries the server for everything it advertises. Radicale only lists collections directly
-          under /username/, so anything nested deeper will not appear — paste its full address into
-          the manual field instead.
+          Asks the server where your calendars live and lists what it finds. This works with any
+          standards-compliant CalDAV server. If yours keeps collections somewhere unusual, or one
+          is nested deeper than the rest, paste its full address into the manual field instead.
         </Text>
         <Text style={styles.helpStepCompact}>
           <Text style={styles.helpNum}>4. Tick task lists and calendars. </Text>
@@ -2895,8 +2895,8 @@ year views and every note they create, page marks on captured handwriting, and t
 What needs a server: tasks, calendar events, and capturing handwriting as a task.`}
       </Text>
       <Text style={styles.noteCompact}>
-        Any other CalDAV server works too — Radicale, or anything that speaks the same
-        protocol. The fields below are the same either way.
+        Any CalDAV server works — Radicale, Nextcloud, Baikal, Fastmail, or anything else
+        that speaks the protocol. The fields below are the same either way.
       </Text>
 
       <Text style={styles.subheadingCompact}>Server</Text>
@@ -2906,7 +2906,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         compact
         label="Server URL"
         value={config.serverUrl}
-        placeholder="https://host:5232"
+        placeholder="https://dav.example.com"
         onChange={v => onChange(c => ({...c, serverUrl: v}))}
       />
       <Field
@@ -2988,7 +2988,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         compact
         label="Or paste a task collection URL"
         value={config.defaultCollectionUrl}
-        placeholder="https://host:5232/username/tasks/"
+        placeholder="https://dav.example.com/calendars/user/tasks/"
         onChange={v =>
           onChange({
             ...config,
@@ -3143,7 +3143,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
       <Text style={styles.subheadingCompact}>Meeting notes</Text>
       <Text style={styles.noteCompact}>
         Notes linked to calendar events. Stored on this device only — nothing is written back
-        to Radicale. Every occurrence of a repeating event shares one note.
+        to the server. Every occurrence of a repeating event shares one note.
       </Text>
       <View style={styles.browseRow}>
         <View style={styles.grow}>
@@ -3286,7 +3286,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
           open, the same as the one at the top. */}
       <Text style={styles.noteCompact}>
         {storePath
-          ? `Saved to ${storePath} — survives plugin updates and reinstalls. Plain text on shared storage, so prefer a Radicale credential scoped to these collections.`
+          ? `Saved to ${storePath} — survives plugin updates and reinstalls. Plain text on shared storage, so prefer an app password or a credential scoped to these collections.`
           : 'This build has no on-device storage, so settings last only for this session.'}
       </Text>
 
