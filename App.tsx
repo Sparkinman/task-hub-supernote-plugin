@@ -1650,60 +1650,6 @@ export default function App(): React.JSX.Element {
         </View>
       )}
 
-      <FolderPicker
-        visible={pickingFolder !== null}
-        initialPath={
-          pickingFolder === 'meeting'
-            ? config.meetingNote.root
-            : pickingFolder === 'week'
-              ? config.weekNote.root
-              : pickingFolder === 'month'
-                ? config.monthNote.root
-                : pickingFolder === 'quarter'
-                  ? config.quarterNote.root
-                  : pickingFolder === 'year'
-                    ? config.yearNote.root
-                    : config.dailyNote.root
-        }
-        onCancel={() => setPickingFolder(null)}
-        onPick={picked => {
-          setLocalConfig(
-            pickingFolder === 'meeting'
-              ? {...config, meetingNote: {...config.meetingNote, root: picked}}
-              : pickingFolder === 'week'
-                ? {...config, weekNote: {...config.weekNote, root: picked}}
-                : pickingFolder === 'month'
-                  ? {...config, monthNote: {...config.monthNote, root: picked}}
-                  : pickingFolder === 'quarter'
-                    ? {...config, quarterNote: {...config.quarterNote, root: picked}}
-                    : pickingFolder === 'year'
-                      ? {...config, yearNote: {...config.yearNote, root: picked}}
-                      : {...config, dailyNote: {...config.dailyNote, root: picked}},
-          );
-          setPickingFolder(null);
-        }}
-      />
-
-      <MiniCalendar
-        visible={pickingDate !== null}
-        anchor={day}
-        mode={pickingDate === 'week' ? 'week' : 'day'}
-        onCancel={() => setPickingDate(null)}
-        onPickDay={iso => {
-          setDay(iso);
-          const d = new Date(`${iso}T00:00:00`);
-          setView({year: d.getFullYear(), month: d.getMonth()});
-          setPickingDate(null);
-        }}
-        onPickWeek={iso => {
-          // Stays in the week view — the sheet moves it, it does not switch view.
-          setDay(iso);
-          const d = new Date(`${iso}T00:00:00`);
-          setView({year: d.getFullYear(), month: d.getMonth()});
-          setPickingDate(null);
-        }}
-      />
-
       {screen === 'save' && (
         <>
           <Header title="New task" onClose={closeGuarded} closeDisabled={writing} />
@@ -2099,7 +2045,13 @@ will not duplicate them.`}
               <Choice options={SORT_KEYS} value={sortKey} onPick={k => setSortKey(k as SortKey)} />
 
               <StatusLine status={status} />
-              <LoadingLine visible={loading} />
+              <LoadingLine
+                visible={loading}
+                // Prominent only while the screen is otherwise empty: once
+                // there is a list to look at, a big box in the middle of it is
+                // in the way.
+                prominent={tasks.length === 0 && events.length === 0}
+              />
 
               {listed.length === 0 && !loading && !hasCollections(config) && (
                 <Text style={styles.note}>
@@ -2210,7 +2162,13 @@ will not duplicate them.`}
               </View>
 
               <StatusLine status={status} />
-              <LoadingLine visible={loading} />
+              <LoadingLine
+                visible={loading}
+                // Prominent only while the screen is otherwise empty: once
+                // there is a list to look at, a big box in the middle of it is
+                // in the way.
+                prominent={tasks.length === 0 && events.length === 0}
+              />
 
               {!hasCalendars(config) && (
                 <Text style={styles.note}>
@@ -2274,6 +2232,7 @@ will not duplicate them.`}
                     onMonth={(year, month) => setView({year, month})}
                     weekNotes={config.weekNote.enabled ? weekNotesInView : undefined}
                     onWeekNote={(iso, exists) => askPeriodNote('week', iso, exists)}
+                    onPickMonth={() => setPickingDate('day')}
                   />
                   <Text style={styles.legend}>
                     <Text style={styles.markLegend}>C</Text> event ·{' '}
@@ -2430,6 +2389,60 @@ will not duplicate them.`}
       be positioned against the root rather than against scrolling content —
       inside it they would scroll away with the page underneath them.
     */}
+    <FolderPicker
+      visible={pickingFolder !== null}
+      initialPath={
+        pickingFolder === 'meeting'
+          ? config.meetingNote.root
+          : pickingFolder === 'week'
+            ? config.weekNote.root
+            : pickingFolder === 'month'
+              ? config.monthNote.root
+              : pickingFolder === 'quarter'
+                ? config.quarterNote.root
+                : pickingFolder === 'year'
+                  ? config.yearNote.root
+                  : config.dailyNote.root
+      }
+      onCancel={() => setPickingFolder(null)}
+      onPick={picked => {
+        setLocalConfig(
+          pickingFolder === 'meeting'
+            ? {...config, meetingNote: {...config.meetingNote, root: picked}}
+            : pickingFolder === 'week'
+              ? {...config, weekNote: {...config.weekNote, root: picked}}
+              : pickingFolder === 'month'
+                ? {...config, monthNote: {...config.monthNote, root: picked}}
+                : pickingFolder === 'quarter'
+                  ? {...config, quarterNote: {...config.quarterNote, root: picked}}
+                  : pickingFolder === 'year'
+                    ? {...config, yearNote: {...config.yearNote, root: picked}}
+                    : {...config, dailyNote: {...config.dailyNote, root: picked}},
+        );
+        setPickingFolder(null);
+      }}
+    />
+
+    <MiniCalendar
+      visible={pickingDate !== null}
+      anchor={day}
+      mode={pickingDate === 'week' ? 'week' : 'day'}
+      onCancel={() => setPickingDate(null)}
+      onPickDay={iso => {
+        setDay(iso);
+        const d = new Date(`${iso}T00:00:00`);
+        setView({year: d.getFullYear(), month: d.getMonth()});
+        setPickingDate(null);
+      }}
+      onPickWeek={iso => {
+        // Stays in the week view — the sheet moves it, it does not switch view.
+        setDay(iso);
+        const d = new Date(`${iso}T00:00:00`);
+        setView({year: d.getFullYear(), month: d.getMonth()});
+        setPickingDate(null);
+      }}
+    />
+
     <Notice
       // Held back while a confirm is up: two stacked sheets on this panel leave
       // the user unsure which one the buttons belong to.
@@ -2687,7 +2700,21 @@ function SettingsScreen(props: {
         title="Task and calendar server"
         hint={'Optional. Task Hub or any CalDAV server gives you tasks and calendar events. It is recommended for task management and calendars, but it is NOT required — every note feature below works without it.'}
         open={openFolds.has('server')}
-        onToggle={() => toggleFold('server')}>
+        onToggle={() => toggleFold('server')}
+        always={
+          // Outside the fold body on purpose: an address you must open a
+          // section to discover is no use to somebody deciding whether they
+          // need a server at all.
+          <>
+            <Text style={styles.noteCompact}>
+              {`Task Hub is the server this plugin is built alongside — self-hosted, one command
+to install, and it runs on a Raspberry Pi:`}
+            </Text>
+            <Text selectable style={styles.linkText}>
+              https://github.com/Sparkinman/task-hub
+            </Text>
+          </>
+        }>
       {/*
         Said plainly, and said here rather than only in the help: somebody who
         does not run a server should be able to stop reading at this point and
@@ -2698,13 +2725,6 @@ function SettingsScreen(props: {
 for the plugin's note features. Without one you still get the day, week, month, quarter and
 year views and every note they create, page marks on captured handwriting, and templates.
 What needs a server: tasks, calendar events, and capturing handwriting as a task.`}
-      </Text>
-      <Text style={styles.noteCompact}>
-        {`Task Hub is the server this plugin is built alongside — self-hosted, and it runs on a
-Raspberry Pi. It installs with one command from:`}
-      </Text>
-      <Text selectable style={styles.linkText}>
-        https://github.com/Sparkinman/task-hub
       </Text>
       <Text style={styles.noteCompact}>
         Any other CalDAV server works too — Radicale, or anything that speaks the same

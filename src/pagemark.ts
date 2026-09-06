@@ -122,11 +122,17 @@ const TYPE_TEXT = 500;
 /**
  * How far outside the lasso rectangle the wash reaches, in pixels.
  *
- * Matched to the gap the host leaves between the selected strokes and the box it
- * draws around them, so the shading fills the box rather than stopping at the
- * writing.
+ * Zero, after trying 12. The host draws its box a little outside the selected
+ * strokes, but it does not report how far, and the SDK offers no way to ask:
+ * the only rectangle available is the lasso's own. Guessing at the margin
+ * overshot and put the wash outside the box, which looks worse than stopping
+ * short of it. So the wash covers exactly what was selected, and the box keeps
+ * its clear border.
+ *
+ * Left as a named constant rather than removed: if the margin is ever
+ * measurable, this is the one place to set it.
  */
-const SHADE_PADDING = 12;
+const SHADE_PADDING = 0;
 
 interface PageElement {
   type?: number;
@@ -180,11 +186,10 @@ function isOurShading(element: PageElement, boxes: Required<Rect>[]): boolean {
  * a box we drew. A user who happens to have typed the same words elsewhere on
  * the page keeps them; only the label sitting under our own mark is removed.
  *
- * The caption is written just to the RIGHT of the box, level with its middle, so
- * the match allows for that: generous horizontally, and within the box's own
- * vertical span. Captions written by an older version sat below the box, so the
- * reach downwards is kept too — completing one of those tasks must still tidy
- * up after it.
+ * The caption is written just BELOW the box, aligned to its left edge. One
+ * version placed it to the right instead, so the match stays generous in both
+ * directions — completing a task marked by any version must still tidy up after
+ * it.
  */
 function isOurCaption(element: PageElement, boxes: Required<Rect>[]): boolean {
   const box = element.textBox;
@@ -323,12 +328,12 @@ export async function labelLassoStrokes(rect: Rect): Promise<string | null> {
     const width = Math.round(fontSize * TASK_LABEL.length * 0.62);
     const height = Math.round(fontSize * 1.4);
 
-    // Beside the box, not under it. Sitting on the line below read as a separate
-    // thing to press, which is also how it looked when the caption was still a
-    // link of its own. Level with the middle of the box it reads as a label ON
-    // the mark.
-    const left = rect.right + Math.round(fontSize / 2);
-    const top = Math.round((rect.top + rect.bottom) / 2 - height / 2);
+    // Below the box, aligned to its left edge. Beside it — level with the middle
+    // — was tried and read worse: the caption floated off the top-right of the
+    // writing rather than belonging to it. Underneath, it reads as a label on
+    // the thing above it, which is what it is.
+    const left = rect.left;
+    const top = rect.bottom + Math.round(fontSize / 3);
 
     const inserted = (await PluginNoteAPI.insertText({
       textContentFull: TASK_LABEL,

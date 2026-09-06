@@ -223,6 +223,14 @@ export function Fold(props: {
   title: string;
   /** One line, shown whether or not the block is open. */
   hint?: string;
+  /**
+   * Content shown whether or not the block is open, under the hint.
+   *
+   * For the one thing somebody needs while the section is still shut — the
+   * server section uses it for the Task Hub address, which is no use to
+   * anybody if they have to open the section to find out it exists.
+   */
+  always?: React.ReactNode;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
@@ -235,6 +243,7 @@ export function Fold(props: {
         </Text>
       </Pressable>
       {!!props.hint && <Text style={styles.settingsFoldHint}>{props.hint}</Text>}
+      {props.always}
       {props.open && <View style={styles.settingsFoldBody}>{props.children}</View>}
     </View>
   );
@@ -445,14 +454,37 @@ export function Busy(): React.JSX.Element {
  * runs straight after a save, and routing it through the same state would wipe
  * the "Saved successfully" message the user just earned.
  */
-export function LoadingLine(props: {visible: boolean}): React.JSX.Element | null {
+export function LoadingLine(props: {
+  visible: boolean;
+  /**
+   * Draws it large and boxed instead of as a line of status text.
+   *
+   * Used when the plugin has just opened with nothing on screen yet: the panel
+   * takes a moment to draw and the server a moment to answer, and a small grey
+   * line in that gap looks like a plugin that has failed to start rather than
+   * one that is working.
+   */
+  prominent?: boolean;
+  /** What is being waited for, when "Loading" is not specific enough. */
+  label?: string;
+}): React.JSX.Element | null {
   if (!props.visible) {
     return null;
+  }
+  if (props.prominent) {
+    return (
+      <View style={styles.loadingPanel}>
+        <Text style={styles.loadingPanelText}>{props.label ?? 'Loading…'}</Text>
+        <Text style={styles.loadingPanelHint}>
+          Fetching your tasks, calendars and notes from the device and server.
+        </Text>
+      </View>
+    );
   }
   return (
     <View style={styles.statusRow}>
       <Busy />
-      <Text style={styles.status}>Loading…</Text>
+      <Text style={styles.status}>{props.label ?? 'Loading…'}</Text>
     </View>
   );
 }
@@ -718,6 +750,14 @@ export const styles = StyleSheet.create({
   modalCard: {backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', padding: 18, width: '100%', maxWidth: 460},
   modalTitle: {fontSize: 26, fontWeight: '700', color: '#000', marginBottom: 8},
   modalBody: {fontSize: 21, color: '#333', lineHeight: 28, marginBottom: 6},
+  // One control at each end of the sheet's foot: leave on the left, confirm on
+  // the right.
+  sheetActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+  },
   modalActions: {flexDirection: 'row', gap: 10, marginTop: 14},
   tabRow: {flexDirection: 'row', gap: 0, marginBottom: 8},
   tab: {
@@ -1129,6 +1169,16 @@ export const styles = StyleSheet.create({
   note: {fontSize: 18, color: '#555', marginBottom: 10},
   statusRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 8},
   busyMark: {fontSize: 24, color: '#000'},
+  loadingPanel: {
+    borderWidth: 3,
+    borderColor: '#000',
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    marginVertical: 18,
+    alignItems: 'center',
+  },
+  loadingPanelText: {fontSize: 30, fontWeight: '700', color: '#000'},
+  loadingPanelHint: {fontSize: 18, color: '#444', marginTop: 8, textAlign: 'center'},
   status: {fontSize: 22, color: '#000', marginVertical: 8},
   error: {fontWeight: '700'},
   actions: {flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8},

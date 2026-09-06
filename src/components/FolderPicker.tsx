@@ -8,7 +8,7 @@
  */
 
 import React, {useCallback, useEffect, useState} from 'react';
-import {Modal, Pressable, ScrollView, Text, View} from 'react-native';
+import {Pressable, ScrollView, Text, View} from 'react-native';
 
 import {listDirs} from '../storage';
 import {Busy, Button, styles} from './common';
@@ -19,7 +19,7 @@ export function FolderPicker(props: {
   initialPath: string;
   onCancel: () => void;
   onPick: (relativePath: string) => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const {visible, initialPath, onCancel, onPick} = props;
   const [path, setPath] = useState(initialPath);
   const [dirs, setDirs] = useState<string[]>([]);
@@ -48,8 +48,16 @@ export function FolderPicker(props: {
 
   const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 
+
+  // Drawn in the app's own window rather than a Modal, for the same reason as
+  // the other sheets: a second Android window costs a full e-ink refresh to
+  // raise and another to dismiss.
+  if (!visible) {
+    return null;
+  }
+
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onCancel}>
+    <View style={styles.overlay}>
       <View style={styles.modalBackdrop}>
         <View style={styles.pickerCard}>
           <Text style={styles.modalTitle}>Choose a folder</Text>
@@ -81,6 +89,6 @@ export function FolderPicker(props: {
           </View>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }

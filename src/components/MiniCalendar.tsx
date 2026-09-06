@@ -8,7 +8,7 @@
  */
 
 import React, {useState} from 'react';
-import {Modal, Pressable, Text, View} from 'react-native';
+import {Pressable, Text, View} from 'react-native';
 
 import {MONTHS, WEEKDAYS, chunkWeeks, monthGrid, shiftMonth} from '../calendar';
 import {toDateInput} from '../ical';
@@ -64,7 +64,7 @@ export function MiniCalendar(props: {
   onCancel: () => void;
   onPickDay: (iso: string) => void;
   onPickWeek?: (iso: string) => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const {visible, anchor, mode, onCancel, onPickDay, onPickWeek} = props;
   const start = new Date(`${anchor}T00:00:00`);
   const [view, setView] = useState({year: start.getFullYear(), month: start.getMonth()});
@@ -79,8 +79,16 @@ export function MiniCalendar(props: {
   const today = toDateInput(new Date());
   const weeks = chunkWeeks(monthGrid(view.year, view.month));
 
+  // No Modal: this is drawn in the app's own window. A Modal is a second
+  // Android window, and on e-ink raising one is a visible full refresh — which
+  // is exactly the "starts small in the corner and then expands" this used to
+  // do, from the window animation rather than from anything in the component.
+  if (!visible) {
+    return null;
+  }
+
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onCancel}>
+    <View style={styles.overlay}>
       <View style={styles.modalBackdrop}>
         <View style={styles.pickerCard}>
           <View style={styles.calendarNav}>
@@ -159,6 +167,6 @@ export function MiniCalendar(props: {
           </View>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }

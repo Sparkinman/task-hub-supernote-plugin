@@ -14,7 +14,7 @@
  */
 
 import React, {useEffect, useState} from 'react';
-import {Image, Modal, Pressable, ScrollView, Text, View} from 'react-native';
+import {Image, Pressable, ScrollView, Text, View} from 'react-native';
 
 import type {NoteTemplate} from '../notes';
 import {externalRoot} from '../storage';
@@ -156,8 +156,8 @@ export function TemplatePicker(props: {
         <Text style={styles.templateSummaryHint}>Tap to change</Text>
       </Pressable>
 
-      <Modal visible={open} transparent animationType="none" onRequestClose={() => setOpen(false)}>
-        <View style={styles.modalBackdrop}>
+      {open && (
+        <View style={styles.overlay}>
           <View style={styles.pickerCard}>
             <Text style={styles.modalTitle}>{label}</Text>
             <Tabs
@@ -197,12 +197,20 @@ export function TemplatePicker(props: {
                 grid
               )}
             </ScrollView>
-            <View style={styles.modalActions}>
+            {/*
+              Two ways out, one at each end, because the sheet fills the screen
+              and the file browser can be several folders deep: Exit on the left
+              leaves it, Done on the right confirms and leaves. Both close it —
+              the choice is already made by tapping a template — but a sheet
+              with only one corner to escape from reads as a trap.
+            */}
+            <View style={styles.sheetActions}>
+              <Button label="Exit" onPress={() => setOpen(false)} />
               <Button label="Done" primary onPress={() => setOpen(false)} />
             </View>
           </View>
         </View>
-      </Modal>
+      )}
     </>
   );
 }

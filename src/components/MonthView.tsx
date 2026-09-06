@@ -30,8 +30,20 @@ function MonthViewImpl(props: {
   weekNotes?: Set<string>;
   /** Opens or creates the weekly note for the week whose number was tapped. */
   onWeekNote: (iso: string, exists: boolean) => void;
+  /** Opens the date sheet, for jumping to a month further away than one step. */
+  onPickMonth: () => void;
 }): React.JSX.Element {
-  const {year, month, selected, marks, onSelect, onMonth, weekNotes, onWeekNote} = props;
+  const {
+    year,
+    month,
+    selected,
+    marks,
+    onSelect,
+    onMonth,
+    weekNotes,
+    onWeekNote,
+    onPickMonth,
+  } = props;
   const today = toDateInput(new Date());
   const weeks = chunkWeeks(monthGrid(year, month));
 
@@ -46,9 +58,16 @@ function MonthViewImpl(props: {
           }}>
           <Text style={styles.navText}>‹</Text>
         </Pressable>
-        <Text style={styles.monthLabel}>
-          {MONTHS[month]} {year}
-        </Text>
+        {/*
+          The title is a control, like the week view's: tapping it opens the
+          same date sheet, which is the quickest way to a month that is not one
+          step away.
+        */}
+        <Pressable onPress={onPickMonth} hitSlop={8}>
+          <Text style={[styles.monthLabel, styles.tappableLabel]}>
+            {MONTHS[month]} {year} ▾
+          </Text>
+        </Pressable>
         <Pressable
           style={styles.nav}
           onPress={() => {

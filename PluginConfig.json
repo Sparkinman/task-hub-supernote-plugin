@@ -5,8 +5,8 @@
     "desc": "Tasks and calendar for a CalDAV server you supply (tested with Radicale). Lasso handwriting in NOTE to capture it as a task, or create and edit tasks and events on device. Your task and event content, and the login you enter, are sent only to the server address you configure - no other destination. Settings are stored in Document/TaskHub/settings.json, and daily and meeting notes are created in folders you choose. Network access is used for your server; file read/write for those notes and settings.",
     "name": "Task Hub",
     "author": "Sparkinman",
-    "versionCode": "52",
-    "versionName": "0.42.0",
+    "versionCode": "53",
+    "versionName": "0.43.0",
     "jsMainPath": "index",
     "uses-permissions": [
         "plugin.permission.INTERNET",
