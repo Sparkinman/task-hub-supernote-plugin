@@ -873,14 +873,24 @@ export const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    // Opaque white, not a translucent black scrim.
+    //
+    // A 35% black layer over the whole panel is one of the most expensive
+    // things this app can draw: e-ink has no alpha channel, so the whole area
+    // is dithered to approximate the grey, and every pixel of it changes on the
+    // way in and on the way out. Solid white is a single fill, and the sheet's
+    // own black border is what separates it from the page — which reads better
+    // on a monochrome panel than a wash does anyway.
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
     padding: sp(24),
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    // Opaque for the same reason as overlayScrim: no alpha on e-ink, so a
+    // translucent layer becomes a dithered full-screen fill.
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
     padding: sp(24),

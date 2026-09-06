@@ -473,7 +473,8 @@ export default function App(): React.JSX.Element {
    * wait the user feels when they press Save — nothing about a new task changes
    * which days have notes. Each write says what it actually invalidated.
    */
-  const refresh = useCallback(async (scope: 'all' | 'tasks' | 'events' | 'notes' = 'all') => {
+  const refresh = useCallback(
+    async (scope: 'all' | 'opening' | 'tasks' | 'events' | 'notes' = 'all') => {
     if (DEMO) {
       // Sample data, generated fresh so it is always dated around today. No
       // network call is made, and none can be: the demo build does not declare
@@ -490,8 +491,9 @@ export default function App(): React.JSX.Element {
     }
 
     const cfg = getConfig();
-    const wantTasks = scope === 'all' || scope === 'tasks';
-    const wantEvents = scope === 'all' || scope === 'events';
+    // 'opening' is everything the first screen needs and nothing it does not.
+    const wantTasks = scope === 'all' || scope === 'opening' || scope === 'tasks';
+    const wantEvents = scope === 'all' || scope === 'opening' || scope === 'events';
     const wantNotes = scope === 'all' || scope === 'notes';
     setLoading(true);
     try {
@@ -531,7 +533,24 @@ export default function App(): React.JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, []);
+    },
+    [],
+  );
+
+  /**
+   * Walk the note folders the first time the calendar is looked at.
+   *
+   * Deferred rather than skipped: the calendar needs them to say Open or Create
+   * on every note button, but the Tasks tab never touches them, and doing four
+   * directory walks before the first screen appears is a wait for nothing.
+   */
+  const notesLoaded = useRef(false);
+  useEffect(() => {
+    if (tab === 'calendar' && !notesLoaded.current && !DEMO) {
+      notesLoaded.current = true;
+      void refresh('notes');
+    }
+  }, [tab, refresh]);
 
   /**
    * Pending auto-close, so it can be cancelled.
@@ -805,7 +824,11 @@ export default function App(): React.JSX.Element {
           const d = new Date(`${stored.lastDay}T00:00:00`);
           setView({year: d.getFullYear(), month: d.getMonth()});
         }
-        void refresh();
+        // Tasks and events only. The note folders are walked when the calendar
+        // is first opened — four directory walks are a large part of what the
+        // plugin does before it can show anything, and the Tasks tab does not
+        // use a single one of them.
+        void refresh('opening');
       }
       setStorePath(await settingsLocation());
       setDevice(await deviceName());
@@ -1737,6 +1760,14 @@ export default function App(): React.JSX.Element {
       ref={scrollRef}
       style={styles.root}
       keyboardShouldPersistTaps="handled"
+      // Detaches views scrolled out of sight. The settings page and a long task
+      // list are both far taller than the panel, and every offscreen row still
+      // costs layout on each pass without this.
+      removeClippedSubviews
+      // A slower scroll event is plenty: nothing here follows the scroll
+      // position, and on e-ink the panel cannot repaint faster than this
+      // anyway.
+      scrollEventThrottle={64}
       onLayout={() => setScrollHandle(findNodeHandle(scrollRef.current))}
       contentContainerStyle={[
         styles.content,
