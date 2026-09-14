@@ -1133,6 +1133,15 @@ export default function App(): React.JSX.Element {
    * Today is what somebody switching view almost always wants to see, and it is
    * one tap to move off it.
    */
+  /**
+   * NOT for opening a particular day — use `openDayOn` / `openWeekOn` for that.
+   *
+   * This moves the selection to today, which is right for the view switcher and
+   * wrong for everything else. Calling `setDay(iso)` and then this looks like it
+   * should work and does not: the switch runs second and puts the day back to
+   * today, so a month grid's "tap twice to open" opened today rather than the
+   * day tapped. That shipped in 0.63.0.
+   */
   const setCalView = useCallback((next: CalView) => {
     // The history push happens HERE, not inside the setCalViewRaw updater.
     // A state updater must be a pure function of its previous value: React is
@@ -2835,10 +2844,11 @@ will not duplicate them.`}
                     weekNotes={config.weekNote.enabled ? weekNotesInView : undefined}
                     onWeekNote={(iso, exists) => askPeriodNote('week', iso, exists)}
                     onPickMonth={() => setPickingDate('day')}
-                    onOpenDay={iso => {
-                      setDay(iso);
-                      setCalView('day');
-                    }}
+                    // openDayOn, not setCalView: a plain view switch deliberately
+                    // moves the selection to today, so setting the day and then
+                    // switching had the switch undo the set and the second tap
+                    // opened today instead of the day tapped.
+                    onOpenDay={openDayOn}
                   />
                   {/*
                     Folded, and shut by default after the first few openings.
@@ -2995,7 +3005,10 @@ will not duplicate them.`}
                   // highlight and the columns' day headings with it.
                   onSelectDay={iso => {
                     if (iso === day) {
-                      setCalView('day');
+                      // openDayOn for the same reason as the month grid's: a
+                      // plain view switch moves the selection to today, which
+                      // would open today rather than the day being opened.
+                      openDayOn(iso);
                     } else {
                       setDay(iso);
                     }

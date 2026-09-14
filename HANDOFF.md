@@ -2,10 +2,10 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 **447 tests across 25 suites**; `tsc` and eslint clean, all verified 2026-09-14.
-Current build **0.64.0** (versionCode 79).
+Current build **0.64.1** (versionCode 80).
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
-**licensed GPLv3**, with v0.64.0 released and `TaskHub.snplg` attached to it.
+**licensed GPLv3**, with v0.64.1 released and `TaskHub.snplg` attached to it.
 
 One plugin: **Task Hub** (`vfmnvjq0i1hxf8gu`).
 
@@ -400,6 +400,17 @@ their own. The exception was the caption's font clamp, now expressed as a fracti
   `screen` changes — leaving via the host's own dismissal instead of Done & Exit
   left it at `'hub'`, so the next opening never refetched. `openHub` refreshes
   directly on the button press.
+- **`setCalView` moves the selection to today, and that is easy to walk into.**
+  Switching view deliberately jumps to today, because landing on wherever the
+  last view happened to be pointing is disorienting. So `setDay(iso)` followed
+  by `setCalView('day')` does *not* open that day: the switch runs second and
+  puts the day back. Shipped in 0.63.0 as "tap a day twice to open it, and get
+  today's day view instead", with the panel under the grid showing the right day
+  the whole time — it reads the selection directly, so the two disagreed and the
+  symptom looked like a rendering fault rather than a navigation one. **Use
+  `openDayOn` / `openWeekOn`**, which exist for this and use the raw setter; the
+  Year and Quarter grids were already using them. Fixed in 0.64.1, and
+  `setCalView` now carries a comment saying so.
 
 ## Tested on device and settled
 
