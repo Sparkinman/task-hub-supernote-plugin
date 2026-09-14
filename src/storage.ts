@@ -25,6 +25,9 @@ import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from '.
 interface SettingsStore {
   read(): Promise<string | null>;
   write(contents: string): Promise<string>;
+  /** Optional: absent from a build whose native module predates the cache. */
+  readNamed?(name: string): Promise<string | null>;
+  writeNamed?(name: string, contents: string): Promise<string>;
   location(): Promise<string>;
   externalRoot(): Promise<string>;
   makeDirs(relativePath: string): Promise<boolean>;
@@ -90,6 +93,8 @@ export function sanitise(raw: unknown): Partial<ServerConfig> {
         ? value.dateFormat
         : undefined,
     timeFormat: value.timeFormat === '12' || value.timeFormat === '24' ? value.timeFormat : undefined,
+    startTab:
+      value.startTab === 'tasks' || value.startTab === 'calendar' ? value.startTab : undefined,
     markStyle: isMarkStyle(value.markStyle) ? value.markStyle : undefined,
     markShade: typeof value.markShade === 'boolean' ? value.markShade : undefined,
     markShadeColor: isShadeColor(value.markShadeColor)
@@ -138,6 +143,10 @@ function sanitisePeriodNote(raw: unknown, fallback: PeriodNoteConfig): PeriodNot
     layout:
       typeof value.layout === 'string' && value.layout.trim() ? value.layout : fallback.layout,
     template: typeof value.template === 'string' ? value.template : '',
+    // False for a settings file written before this existed: a note that has
+    // never had a date written into it should not start getting one because
+    // the plugin updated.
+    dateHeading: typeof value.dateHeading === 'boolean' ? value.dateHeading : false,
   };
 }
 
@@ -154,6 +163,10 @@ function sanitiseDailyNote(raw: unknown): DailyNoteConfig {
         ? value.layout
         : DEFAULT_DAILY_NOTE.layout,
     template: typeof value.template === 'string' ? value.template : '',
+    // False for a settings file written before this existed: a note that has
+    // never had a date written into it should not start getting one because
+    // the plugin updated.
+    dateHeading: typeof value.dateHeading === 'boolean' ? value.dateHeading : false,
   };
 }
 
@@ -364,5 +377,38 @@ export async function settingsLocation(): Promise<string | null> {
     return await store.location();
   } catch {
     return null;
+  }
+}
+
+/**
+ * Read one of the plugin's own files in Document/TaskHub, by bare name.
+ *
+ * Resolves to null on any failure, including a native module too old to have
+ * the method. Only the cache uses this, and a cache that cannot be read is a
+ * slow opening rather than a broken one.
+ */
+export async function readNamed(name: string): Promise<string | null> {
+  if (!store?.readNamed) {
+    return null;
+  }
+  try {
+    await ensureFileAccess();
+    return await store.readNamed(name);
+  } catch {
+    return null;
+  }
+}
+
+/** Write one of the plugin's own files. Resolves false if it did not happen. */
+export async function writeNamed(name: string, contents: string): Promise<boolean> {
+  if (!store?.writeNamed) {
+    return false;
+  }
+  try {
+    await ensureFileAccess();
+    await store.writeNamed(name, contents);
+    return true;
+  } catch {
+    return false;
   }
 }

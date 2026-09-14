@@ -13,7 +13,7 @@ import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 
 import {MONTHS, WEEKDAYS, chunkWeeks, monthGrid, shiftMonth} from '../calendar';
 import {formatTime, type TimeFormat} from '../format';
-import {fs, sp} from './common';
+import {R, fs, sp} from './common';
 import {toDateInput} from '../ical';
 
 interface Props {
@@ -210,7 +210,10 @@ export function DateTimePicker(props: Props): React.JSX.Element {
                 }
               }}
               onBlur={() => setTyped(null)}
-              placeholder={timeFormat === '12' ? '2:00 pm' : '14:00'}
+              // Noon, matching STEPPER_START. A placeholder reading "2:00 pm"
+              // over a stepper that starts at noon looks like the default, and
+              // a default nobody chose is one everybody has to check.
+              placeholder={timeFormat === '12' ? '12:00 pm' : '12:00'}
               placeholderTextColor="#999"
               keyboardType="numbers-and-punctuation"
             />
@@ -363,31 +366,41 @@ function Arrow(props: {label: string; onPress: () => void}): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  wrap: {borderWidth: 1, borderColor: '#000', padding: sp(10), marginBottom: sp(12)},
+  wrap: {borderRadius: R.lg, borderWidth: 1, borderColor: '#ccc', padding: sp(12), marginBottom: sp(12)},
   quickRow: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(8), marginBottom: sp(10)},
-  chip: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(7)},
+  chip: {borderRadius: R.pill, borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(14), paddingVertical: sp(7)},
   chipText: {fontSize: fs(21), color: '#000'},
   monthRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
-  nav: {paddingHorizontal: sp(16), paddingVertical: sp(6), borderWidth: 1, borderColor: '#000'},
+  nav: {borderRadius: R.md, paddingHorizontal: sp(16), paddingVertical: sp(6), borderWidth: 1, borderColor: '#000'},
   navText: {fontSize: fs(30), color: '#000', lineHeight: fs(33)},
   monthLabel: {fontSize: fs(24), fontWeight: '700', color: '#000'},
   week: {flexDirection: 'row', marginTop: sp(4)},
   weekday: {flex: 1, textAlign: 'center', fontSize: fs(18), color: '#555', paddingVertical: sp(4)},
   // Tall cells: a finger on e-ink needs a bigger target than a mouse does.
   cell: {flex: 1, height: 40, alignItems: 'center', justifyContent: 'center', margin: sp(1)},
-  cellOn: {borderWidth: 1, borderColor: '#999'},
-  cellSelected: {backgroundColor: '#000', borderColor: '#000'},
+  cellOn: {borderRadius: R.sm, borderWidth: 1, borderColor: '#ddd'},
+  cellSelected: {borderRadius: R.sm, backgroundColor: '#000', borderColor: '#000'},
   cellText: {fontSize: fs(22), color: '#000'},
   cellTextSelected: {color: '#fff', fontWeight: '700'},
   cellTextToday: {fontWeight: '700', textDecorationLine: 'underline'},
-  timeBlock: {marginTop: sp(14), borderTopWidth: 1, borderTopColor: '#999', paddingTop: sp(10)},
+  timeBlock: {marginTop: sp(14), borderTopWidth: 1, borderTopColor: '#ddd', paddingTop: sp(10)},
   timeLabel: {fontSize: fs(21), color: '#000', marginBottom: sp(6)},
   timeControls: {flexDirection: 'row', alignItems: 'center', gap: sp(10)},
   spinner: {alignItems: 'center'},
   spinnerCaption: {fontSize: fs(15), color: '#777', marginVertical: sp(1)},
-  arrow: {paddingHorizontal: sp(10), paddingVertical: sp(2)},
+  // Round, and big enough to hit without aiming: these are the controls most
+  // used in the picker and they were the smallest things in it.
+  arrow: {
+    borderRadius: R.pill,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(3),
+    marginVertical: sp(1),
+  },
   arrowText: {fontSize: fs(22), color: '#000', lineHeight: fs(26)},
   timeInput: {
+    borderRadius: R.md,
     borderWidth: 2,
     borderColor: '#000',
     paddingHorizontal: sp(12),
@@ -402,6 +415,7 @@ const styles = StyleSheet.create({
   timePreview: {fontSize: fs(21), color: '#000', fontWeight: '700'},
   clearLink: {fontSize: fs(18), color: '#555', textDecorationLine: 'underline', marginTop: sp(3)},
   addTime: {
+    borderRadius: R.md,
     borderWidth: 1,
     borderColor: '#000',
     borderStyle: 'dashed',

@@ -124,13 +124,15 @@ describe('listTasks with a collection that has gone', () => {
 describe('listEvents with a calendar that has gone', () => {
   const live = 'https://dav.example/user/cal';
   const dead = 'https://dav.example/user/oldcal';
+  /** Any range will do here — the fixtures answer whatever is asked. */
+  const WINDOW = {start: '2026-01-01', end: '2027-01-01'};
 
   it('keeps the surviving calendar and flags the dead one as a calendar', async () => {
     serve({
       [live]: {status: 207, body: multistatus('/user/cal/e1.ics', EVENT)},
       [dead]: {status: 404},
     });
-    const result = await listEvents(config({calendarUrls: [live, dead]}));
+    const result = await listEvents(config({calendarUrls: [live, dead]}), WINDOW);
     expect(result.items).toHaveLength(1);
     expect(result.missing[0]).toMatchObject({label: 'oldcal', kind: 'calendar'});
   });
@@ -152,8 +154,12 @@ describe('missingMessage', () => {
   it('names the list, its kind, and the fix', () => {
     const text = missingMessage([gone()]);
     expect(text).toContain('"Work" (task list)');
-    expect(text).toContain('Discover');
-    expect(text).toContain('untick it');
+    // Names the button on the notice itself. It used to send the user to
+    // Settings to untick something that, being gone from the server, was never
+    // listed there — advice that could not be followed.
+    expect(text).toContain('Remove');
+    expect(text).toContain('stop watching it');
+    expect(text).not.toContain('Discover');
   });
 
   it('says the rest of the refresh worked, so it does not read as total failure', () => {
@@ -169,6 +175,6 @@ describe('missingMessage', () => {
     const text = missingMessage([gone(), gone({label: 'Home', kind: 'calendar'})]);
     expect(text).toContain('"Work" (task list)');
     expect(text).toContain('"Home" (calendar)');
-    expect(text).toContain('untick them');
+    expect(text).toContain('stop watching them');
   });
 });

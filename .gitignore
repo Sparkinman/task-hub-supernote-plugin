@@ -92,3 +92,6 @@ buildPlugin.sh.orig
 
 # Announcement copy — kept next to the project, not published with it
 drafts/
+
+# Local editor workspace: references a sibling checkout by relative path.
+*.code-workspace

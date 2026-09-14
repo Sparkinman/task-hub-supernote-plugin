@@ -183,6 +183,14 @@ export function Notice(props: {
   body?: string;
   label?: string;
   onDismiss: () => void;
+  /**
+   * An optional way to act on what the message says, beside dismissing it.
+   *
+   * For a message that names a problem the user can fix, offering the fix here
+   * is the difference between a notice and an instruction they have to go and
+   * carry out somewhere else.
+   */
+  action?: {label: string; onPress: () => void};
 }): React.JSX.Element | null {
   if (!props.visible) {
     return null;
@@ -193,7 +201,14 @@ export function Notice(props: {
         <Text style={styles.modalTitle}>{props.title}</Text>
         {!!props.body && <Text style={styles.modalBody}>{props.body}</Text>}
         <View style={styles.modalActions}>
-          <Button label={props.label ?? 'OK'} primary onPress={props.onDismiss} />
+          {!!props.action && (
+            <Button label={props.action.label} primary onPress={props.action.onPress} />
+          )}
+          <Button
+            label={props.label ?? 'OK'}
+            primary={!props.action}
+            onPress={props.onDismiss}
+          />
         </View>
       </View>
     </View>
@@ -742,6 +757,29 @@ export function sp(size: number): number {
 // High-contrast, flat styling — e-ink has no colour and slow refresh, so avoid
 // gradients, shadows and animation. Selection is shown by fill inversion, which
 // survives a monochrome panel; colour alone would not.
+/**
+ * Corner radii.
+ *
+ * Square corners everywhere were the main thing that made the plugin look like
+ * a tool from a decade ago: every control was a hard-edged box, so nothing read
+ * as tappable rather than merely drawn. Rounding costs a monochrome panel
+ * nothing — there is no gradient or shadow involved, only the border path — and
+ * it is the cheapest change that reads as modern.
+ *
+ * Scaled with `sp` so a Nomad's smaller panel gets proportionally smaller
+ * corners rather than a radius that swallows a short button.
+ */
+export const R = {
+  /** Inputs, cells, small chips. */
+  sm: sp(8),
+  /** Buttons and anything the user taps as a primary action. */
+  md: sp(12),
+  /** Sheets and cards. */
+  lg: sp(16),
+  /** Fully round: count badges, the selected-day pill. */
+  pill: 999,
+};
+
 export const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: '#fff'},
   /** Holds the scrolling page and the overlays that cover it. */
@@ -765,8 +803,8 @@ export const styles = StyleSheet.create({
   headerLeft: {flexDirection: 'row', alignItems: 'center', gap: sp(10), flex: 1},
   mastheadTitle: {fontSize: fs(27), fontWeight: '700', color: '#000', alignSelf: 'flex-end', marginBottom: sp(4)},
   heading: {fontSize: fs(30), fontWeight: '700', color: '#000'},
-  close: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(5)},
-  headerAction: {
+  close: {borderRadius: R.md, borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(5)},
+  headerAction: {borderRadius: R.md,
     backgroundColor: '#000',
     borderWidth: 1,
     borderColor: '#000',
@@ -778,7 +816,7 @@ export const styles = StyleSheet.create({
   closeText: {fontSize: fs(24), color: '#000', lineHeight: fs(30)},
   field: {marginBottom: sp(12)},
   label: {fontSize: fs(21), color: '#000', marginBottom: sp(4)},
-  input: {
+  input: {borderRadius: R.sm,
     borderWidth: 1,
     borderColor: '#000',
     paddingHorizontal: sp(10),
@@ -794,7 +832,7 @@ export const styles = StyleSheet.create({
   subheadingCompact: {fontSize: fs(23), fontWeight: '700', color: '#000', marginTop: sp(16), marginBottom: sp(4)},
   helpStepCompact: {fontSize: fs(18), color: '#222', lineHeight: fs(25), marginBottom: sp(8)},
   noteCompact: {fontSize: fs(17), color: '#444', lineHeight: fs(23), marginBottom: sp(8)},
-  checkRowCompact: {
+  checkRowCompact: {borderRadius: R.sm,
     flexDirection: 'row',
     alignItems: 'center',
     gap: sp(8),
@@ -808,11 +846,11 @@ export const styles = StyleSheet.create({
   actionsTight: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(8), marginTop: sp(8)},
   grow: {flex: 1},
   choiceRow: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(8), marginBottom: sp(12)},
-  chip: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(7)},
+  chip: {borderRadius: R.md, borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(7)},
   chipOn: {backgroundColor: '#000'},
   chipText: {fontSize: fs(21), color: '#000'},
   chipTextOn: {color: '#fff'},
-  option: {borderWidth: 1, borderColor: '#000', padding: sp(10), marginBottom: sp(8)},
+  option: {borderRadius: R.sm, borderWidth: 1, borderColor: '#000', padding: sp(10), marginBottom: sp(8)},
   optionOn: {borderWidth: 2},
   optionText: {fontSize: fs(22), color: '#000'},
   checkRow: {
@@ -825,7 +863,7 @@ export const styles = StyleSheet.create({
     paddingVertical: sp(10),
     marginBottom: sp(8),
   },
-  tinyButton: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(10), paddingVertical: sp(4)},
+  tinyButton: {borderRadius: R.sm, borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(10), paddingVertical: sp(4)},
   /**
    * Covers the app's window, in the app's window. Positioned absolutely against
    * the root View so it sits over the scrolling content without scrolling with
@@ -878,7 +916,7 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: sp(24),
   },
-  modalCard: {backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', padding: sp(18), width: '100%', maxWidth: 460},
+  modalCard: {borderRadius: R.lg, backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', padding: sp(18), width: '100%', maxWidth: 460},
   modalTitle: {fontSize: fs(26), fontWeight: '700', color: '#000', marginBottom: sp(8)},
   modalBody: {fontSize: fs(21), color: '#333', lineHeight: fs(28), marginBottom: sp(6)},
   // One control at each end of the sheet's foot: leave on the left, confirm on
@@ -890,9 +928,10 @@ export const styles = StyleSheet.create({
     marginTop: sp(12),
   },
   modalActions: {flexDirection: 'row', gap: sp(10), marginTop: sp(14)},
-  tabRow: {flexDirection: 'row', gap: sp(0), marginBottom: sp(8)},
+  tabRow: {flexDirection: 'row', gap: sp(6), marginBottom: sp(8)},
   tab: {
     flex: 1,
+    borderRadius: R.md,
     borderWidth: 1,
     borderColor: '#000',
     paddingVertical: sp(11),
@@ -917,7 +956,7 @@ export const styles = StyleSheet.create({
     color: '#000',
     textAlign: 'center',
   },
-  nav: {paddingHorizontal: sp(16), paddingVertical: sp(6), borderWidth: 1, borderColor: '#000'},
+  nav: {borderRadius: R.md, paddingHorizontal: sp(16), paddingVertical: sp(6), borderWidth: 1, borderColor: '#000'},
   navText: {fontSize: fs(30), color: '#000', lineHeight: fs(33)},
   monthLabel: {fontSize: fs(24), fontWeight: '700', color: '#000'},
   tappableLabel: {textDecorationLine: 'underline'},
@@ -969,7 +1008,11 @@ export const styles = StyleSheet.create({
   quarterCellTextSelected: {color: '#000', fontWeight: '700'},
   // A bar rather than the month view's boxed letters: at this size a letter is
   // unreadable, so it says "something is here" and the month view says what.
-  quarterDot: {height: 3, width: 12, backgroundColor: '#000', marginTop: sp(1)},
+  // A round dot, not a bar, so the quarter grid speaks the same language as the
+  // discs on the month and week grids. It stays a plain mark rather than a
+  // lettered one: at roughly ninety cells to a screen there is no room for a
+  // letter, which is why the month view exists.
+  quarterDot: {height: sp(7), width: sp(7), borderRadius: R.pill, backgroundColor: '#000', marginTop: sp(1)},
   // The year view: twelve grids, three to a row. Smaller again than the
   // quarter's, and with no marker beside the number — at this size the number
   // itself goes bold to say a day has something on it.
@@ -1011,7 +1054,7 @@ export const styles = StyleSheet.create({
   outsideHead: {fontSize: fs(17), color: '#555', marginBottom: sp(4)},
   browseRow: {flexDirection: 'row', alignItems: 'flex-start', gap: sp(8)},
   miniCell: {flex: 1, height: 52, alignItems: 'center', justifyContent: 'center', margin: sp(1)},
-  miniCellOn: {borderWidth: 1, borderColor: '#999'},
+  miniCellOn: {borderRadius: R.sm, borderWidth: 1, borderColor: '#999'},
   miniCellSel: {backgroundColor: '#000', borderColor: '#000'},
   miniCellText: {fontSize: fs(20), color: '#000'},
   miniCellTextSel: {color: '#fff', fontWeight: '700'},
@@ -1027,9 +1070,10 @@ export const styles = StyleSheet.create({
   },
   weekNumText: {fontSize: fs(16), fontWeight: '700', color: '#000'},
   eventRow: {flexDirection: 'row', alignItems: 'flex-start', gap: sp(6)},
-  noteChip: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(8), paddingVertical: sp(3)},
+  noteChip: {borderRadius: R.sm, borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(8), paddingVertical: sp(3)},
   noteChipText: {fontSize: fs(18), color: '#000', lineHeight: fs(22)},
   templateSummary: {
+    borderRadius: R.sm,
     borderWidth: 1,
     borderColor: '#000',
     paddingHorizontal: sp(10),
@@ -1040,7 +1084,7 @@ export const styles = StyleSheet.create({
   templateSummaryHint: {fontSize: fs(13), color: '#666', marginTop: sp(2)},
   templateScroll: {maxHeight: Math.round(SCREEN_HEIGHT * 0.42)},
   templateGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(10), marginBottom: sp(12)},
-  templateTile: {borderWidth: 1, borderColor: '#999', padding: sp(4), width: 116},
+  templateTile: {borderRadius: R.sm, borderWidth: 1, borderColor: '#999', padding: sp(4), width: 116},
   templateTileOn: {borderWidth: 3, borderColor: '#000'},
   // 3:4 portrait, matching a note page so the ruling reads correctly.
   templateThumb: {width: 106, height: 141, backgroundColor: '#fff'},
@@ -1055,6 +1099,7 @@ export const styles = StyleSheet.create({
   templateBlankText: {fontSize: fs(16), color: '#777'},
   templateName: {fontSize: fs(14), color: '#000', marginTop: sp(3), textAlign: 'center'},
   browseButton: {
+    borderRadius: R.sm,
     borderWidth: 1,
     borderColor: '#000',
     paddingHorizontal: sp(12),
@@ -1066,7 +1111,7 @@ export const styles = StyleSheet.create({
   folderIcon: {justifyContent: 'flex-end'},
   // The template file browser: one directory at a time.
   browserRow: {flexDirection: 'row', alignItems: 'center', gap: sp(10), marginBottom: sp(4)},
-  browserUp: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(8)},
+  browserUp: {borderRadius: R.md, borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(12), paddingVertical: sp(8)},
   browserUpText: {fontSize: fs(18), color: '#000'},
   browserFolder: {borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: sp(10)},
   browserFolderText: {fontSize: fs(20), color: '#000'},
@@ -1095,7 +1140,7 @@ export const styles = StyleSheet.create({
   nowRow: {flexDirection: 'row', alignItems: 'center', gap: sp(6)},
   nowLabel: {fontSize: fs(14), fontWeight: '700', color: '#000'},
   nowLine: {flex: 1, height: 3, backgroundColor: '#000'},
-  pickerCard: {
+  pickerCard: {borderRadius: R.lg,
     backgroundColor: '#fff',
     borderWidth: 2,
     borderColor: '#000',
@@ -1106,7 +1151,7 @@ export const styles = StyleSheet.create({
   },
   pickerPath: {fontSize: fs(17), color: '#333', marginBottom: sp(8)},
   pickerNav: {flexDirection: 'row', gap: sp(10), marginBottom: sp(10)},
-  pickerList: {borderWidth: 1, borderColor: '#000', maxHeight: Math.round(SCREEN_HEIGHT * 0.38), padding: sp(6)},
+  pickerList: {borderRadius: R.sm, borderWidth: 1, borderColor: '#000', maxHeight: Math.round(SCREEN_HEIGHT * 0.38), padding: sp(6)},
   pickerRow: {paddingVertical: sp(9), borderBottomWidth: 1, borderBottomColor: '#ddd'},
   pickerRowText: {fontSize: fs(20), color: '#000'},
   agendaItem: {borderBottomWidth: 1, borderBottomColor: '#ccc', paddingVertical: sp(10)},
@@ -1120,13 +1165,161 @@ export const styles = StyleSheet.create({
   agendaMetaTight: {fontSize: fs(15), color: '#555'},
   monthTasksHead: {paddingVertical: sp(8), marginTop: sp(4)},
   monthTasksHeadText: {fontSize: fs(19), fontWeight: '700', color: '#000'},
-  dayCell: {flex: 1, minHeight: sp(96), borderWidth: 1, borderColor: '#bbb', margin: sp(1), padding: sp(3)},
-  dayCellSelected: {borderWidth: 2, borderColor: '#000'},
-  dayNum: {fontSize: fs(20), color: '#000'},
-  dayNumToday: {fontWeight: '700', textDecorationLine: 'underline'},
+  /**
+   * What the selected day holds, below the month grid, in two columns.
+   *
+   * Side by side rather than stacked: a month grid is already most of the panel,
+   * and a single column pushed the appointments below the fold, so the answer to
+   * "what is on that day" needed a scroll after every tap. Tasks are short lines
+   * and appointments are wide ones, hence the uneven split.
+   */
+  dayPanel: {flexDirection: 'row', borderTopWidth: 2, borderTopColor: '#000', marginTop: sp(10)},
+  dayPanelSchedule: {flex: 3, paddingRight: sp(10), paddingTop: sp(8)},
+  dayPanelTasks: {
+    flex: 2,
+    borderLeftWidth: 1,
+    borderLeftColor: '#ccc',
+    paddingLeft: sp(12),
+    paddingTop: sp(8),
+  },
+  dayPanelTitle: {fontSize: fs(20), fontWeight: '700', color: '#000', marginBottom: sp(6)},
+  /** A hairline between rows, not a box around each — see the month grid note. */
+  dayPanelRow: {borderTopWidth: 1, borderTopColor: '#e2e2e2', paddingVertical: sp(7)},
+  dayPanelTime: {fontSize: fs(17), color: '#000', fontWeight: '700'},
+  dayPanelTitleText: {fontSize: fs(18), color: '#000', fontWeight: '700'},
+  /** The calendar or list an item came from: present, but never the headline. */
+  dayPanelWhere: {fontSize: fs(15), color: '#777'},
+  dayPanelEmpty: {fontSize: fs(16), color: '#999', paddingVertical: sp(6)},
+  dayPanelTaskRow: {flexDirection: 'row', gap: sp(6), alignItems: 'flex-start'},
+  dayPanelCheck: {fontSize: fs(18), color: '#000', lineHeight: fs(23)},
+
+  /**
+   * The week's seven days as one horizontal strip, like a single row of the
+   * month grid.
+   *
+   * The week used to be seven stacked blocks, which read as a list and not as a
+   * week: you could not see the shape of it, and Saturday was a scroll away
+   * from Monday. The strip is the calendar; the two columns under it are what
+   * is in it.
+   */
+  weekStrip: {flexDirection: 'row', marginTop: sp(6)},
+  weekStripCell: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    paddingVertical: sp(5),
+    alignItems: 'center',
+    minHeight: sp(74),
+  },
+  weekStripToday: {borderWidth: 2, borderColor: '#000'},
+  weekStripDow: {fontSize: fs(14), color: '#777'},
+  weekStripNum: {fontSize: fs(21), fontWeight: '700', color: '#000'},
+  /**
+   * Days already gone, greyed but still selectable.
+   *
+   * Grey, not hidden and not disabled: last Tuesday is exactly where somebody
+   * goes to write up what happened, and a week view that would not let them
+   * would be useless for the half of the week it is right about.
+   */
+  weekStripPast: {backgroundColor: '#fafafa'},
+  weekStripNumPast: {color: '#999'},
+
+  weekPanel: {flexDirection: 'row', borderTopWidth: 2, borderTopColor: '#000', marginTop: sp(12)},
+  weekPanelSchedule: {flex: 3, paddingRight: sp(10), paddingTop: sp(8)},
+  weekPanelTasks: {
+    flex: 2,
+    borderLeftWidth: 1,
+    borderLeftColor: '#ccc',
+    paddingLeft: sp(12),
+    paddingTop: sp(8),
+  },
+  /** Which day the rows beneath belong to, so a week's worth reads in order. */
+  weekDayHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: sp(6),
+    borderTopWidth: 2,
+    borderTopColor: '#000',
+    marginTop: sp(10),
+    paddingTop: sp(5),
+  },
+  weekDayHeadingText: {fontSize: fs(18), fontWeight: '700', color: '#000'},
+  /**
+   * Everything belonging to a day other than the one selected.
+   *
+   * The whole week is listed under these two columns, which is a lot to read at
+   * once; dropping the other six days back to a light grey makes the day you
+   * have actually picked the thing you see. They stay legible — this is
+   * emphasis, not hiding, and the other days are still there to be scanned.
+   */
+  weekRowMuted: {color: '#a6a6a6', fontWeight: '400'},
+  /**
+   * The month grid.
+   *
+   * Hairline grey rules that meet, rather than a rounded box per day with a gap
+   * around it: a calendar is a table, and forty-two separate boxes read as
+   * forty-two things instead of one month. Rounding belongs on controls, which
+   * is where R is used — a rounded grid cell only makes the rules fail to meet.
+   *
+   * The heavy black is spent on exactly two things, because on a monochrome
+   * panel it is the only emphasis there is: the day that is selected, and the
+   * day that is today.
+   */
+  dayCell: {
+    flex: 1,
+    minHeight: sp(96),
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: sp(3),
+    alignItems: 'center',
+  },
+  /** Today: the whole cell outlined, as in a paper diary. */
+  dayCellToday: {borderWidth: 2, borderColor: '#000'},
+  dayNum: {fontSize: fs(21), fontWeight: '700', color: '#000'},
+  /** Days spilling in from the neighbouring months, present but receded. */
+  dayNumOutside: {color: '#aaa', fontWeight: '400'},
+  /**
+   * The selected day: a filled pill behind the number.
+   *
+   * Inverting the number rather than the cell. Filling a whole cell black on
+   * e-ink is a large area to repaint on every tap, and it buries whatever the
+   * day actually holds under the fill.
+   */
+  dayNumPill: {
+    backgroundColor: '#000',
+    borderRadius: R.pill,
+    paddingHorizontal: sp(12),
+    paddingVertical: sp(1),
+    overflow: 'hidden',
+  },
+  dayNumPillText: {color: '#fff'},
+  /**
+   * A day's markers: one filled disc per kind of thing on it.
+   *
+   * Discs carrying C, T and N rather than the boxed letters that came before.
+   * The letter is what says which kind — a count said how many and lost which,
+   * which is the wrong trade on a grid you read at a glance — and the round
+   * filled shape is what makes it look drawn rather than typed.
+   */
+  markDotRow: {flexDirection: 'row', gap: sp(3), marginTop: sp(5)},
+  markDot: {
+    width: sp(26),
+    height: sp(26),
+    borderRadius: R.pill,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markDotText: {fontSize: fs(15), fontWeight: '700', color: '#fff', lineHeight: fs(18)},
+  /**
+   * The older lettered markers, still used by the week view and the date sheet.
+   *
+   * The month grid has counts and a progress bar instead — it has the room. A
+   * week row and a 6x7 mini calendar do not, and a single filled letter is the
+   * most that fits in either.
+   */
   markRow: {flexDirection: 'row', gap: sp(2), marginTop: sp(2)},
-  // Filled black boxes, not outlines: on a monochrome panel a solid swatch is
-  // the only marker that stays obvious at a glance across a full month grid.
   mark: {
     fontSize: fs(16),
     fontWeight: '700',
@@ -1139,6 +1332,7 @@ export const styles = StyleSheet.create({
     lineHeight: fs(20),
     overflow: 'hidden',
   },
+  dayNumToday: {fontWeight: '700', textDecorationLine: 'underline'},
   viewSwitch: {marginTop: sp(10), marginBottom: sp(10)},
   viewSwitchRow: {
     flexDirection: 'row',
@@ -1147,15 +1341,30 @@ export const styles = StyleSheet.create({
     marginTop: sp(10),
     marginBottom: sp(10),
   },
+  /**
+   * Back, on one line.
+   *
+   * It used to stack a return glyph above the word in a tall square box, which
+   * made the most-used control on the calendar screens look like an
+   * afterthought wedged beside the view switcher. A pill with the arrow and the
+   * word side by side matches every other control, and centring it against the
+   * switcher stops it hanging off the top of the row.
+   */
   backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: sp(6),
+    borderRadius: R.pill,
     borderWidth: 1,
     borderColor: '#000',
-    paddingHorizontal: sp(14),
-    paddingVertical: sp(4),
-    alignItems: 'center',
+    paddingHorizontal: sp(16),
+    paddingVertical: sp(8),
   },
-  backIcon: {fontSize: fs(24), color: '#000', lineHeight: fs(26)},
-  backLabel: {fontSize: fs(15), color: '#000'},
+  // The same chevron the month and week nav use, rather than a return arrow:
+  // this goes back through the views, it does not undo anything.
+  backIcon: {fontSize: fs(22), color: '#000', lineHeight: fs(24)},
+  backLabel: {fontSize: fs(19), fontWeight: '700', color: '#000'},
   subheadingLink: {
     fontSize: fs(23),
     fontWeight: '700',
@@ -1165,7 +1374,7 @@ export const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   weekDayRow: {flexDirection: 'row', alignItems: 'center', gap: sp(10), marginBottom: sp(4)},
-  weekDay: {borderWidth: 1, borderColor: '#999', padding: sp(10), marginBottom: sp(8)},
+  weekDay: {borderRadius: R.sm, borderWidth: 1, borderColor: '#999', padding: sp(10), marginBottom: sp(8)},
   weekDayToday: {borderWidth: 3, borderColor: '#000'},
   weekDayHead: {fontSize: fs(21), fontWeight: '700', color: '#000', marginBottom: sp(4)},
   weekDayHeadToday: {textDecorationLine: 'underline'},
@@ -1199,7 +1408,8 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     backgroundColor: '#000',
-    paddingHorizontal: sp(6),
+    borderRadius: R.pill,
+    paddingHorizontal: sp(7),
     lineHeight: fs(20),
     overflow: 'hidden',
   },
@@ -1279,7 +1489,8 @@ export const styles = StyleSheet.create({
   metaRow: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp(8)},
   due: {fontSize: fs(20), color: '#333', marginTop: sp(2)},
   noDue: {fontSize: fs(20), color: '#888', marginTop: sp(2), fontStyle: 'italic'},
-  legend: {fontSize: fs(18), color: '#555', marginTop: sp(8)},
+  legend: {fontSize: fs(18), color: '#555', marginTop: sp(4)},
+  legendToggle: {fontSize: fs(16), color: '#777', marginTop: sp(8)},
   overdue: {fontWeight: '700', color: '#000'},
   sourceChip: {
     borderWidth: 1,
@@ -1324,7 +1535,7 @@ export const styles = StyleSheet.create({
   note: {fontSize: fs(18), color: '#555', marginBottom: sp(10)},
   statusRow: {flexDirection: 'row', alignItems: 'center', gap: sp(8), marginVertical: sp(8)},
   busyMark: {fontSize: fs(24), color: '#000'},
-  loadingPanel: {
+  loadingPanel: {borderRadius: R.lg,
     borderWidth: 3,
     borderColor: '#000',
     paddingVertical: sp(24),
@@ -1337,7 +1548,46 @@ export const styles = StyleSheet.create({
   status: {fontSize: fs(22), color: '#000', marginVertical: sp(8)},
   error: {fontWeight: '700'},
   actions: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(10), marginTop: sp(8)},
-  button: {borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(18), paddingVertical: sp(10)},
+  /**
+   * A heading over one due-date section of the task list.
+   *
+   * Named apart from `sectionHead`, which is the collapsible Section's own
+   * pressable row. A rule above rather than a filled band: the list below is
+   * already dense with ticks and dates, and a black bar every few rows would
+   * fight them.
+   */
+  dueHead: {
+    fontSize: fs(20),
+    fontWeight: '700',
+    color: '#000',
+    borderTopWidth: 2,
+    borderTopColor: '#000',
+    marginTop: sp(14),
+    paddingTop: sp(6),
+    marginBottom: sp(2),
+  },
+  /** Overdue, and only overdue: the one section worth spending emphasis on. */
+  dueHeadUrgent: {textDecorationLine: 'underline'},
+  /**
+   * The settings screen's foot, pinned below the scrolling form.
+   *
+   * A sibling of the ScrollView rather than an absolute overlay: it then takes
+   * its own strip of the panel, so nothing underneath needs padding to clear it
+   * and it never covers the last row of the form. The window is adjustResize,
+   * so it rides above the keyboard instead of hiding behind it.
+   */
+  settingsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: sp(10),
+    paddingHorizontal: sp(14),
+    paddingVertical: sp(10),
+    borderTopWidth: 2,
+    borderTopColor: '#000',
+    backgroundColor: '#fff',
+  },
+  button: {borderRadius: R.md, borderWidth: 1, borderColor: '#000', paddingHorizontal: sp(18), paddingVertical: sp(10)},
   buttonPrimary: {backgroundColor: '#000'},
   buttonText: {fontSize: fs(22), color: '#000'},
   buttonTextPrimary: {color: '#fff'},

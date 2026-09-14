@@ -1,17 +1,18 @@
 /**
  * Tappable month grid with per-day markers.
  *
- * A day can carry both a calendar event and a due task, so the markers are two
- * small boxed letters (C and T) that sit side by side inside the cell rather
- * than a single dot that would have to pick one. Letters, not colour — the
- * panel is monochrome.
+ * Each day carries up to three filled discs — C for a calendar event, T for an
+ * open task, N for a daily note. Letters, not colour, because the panel is
+ * monochrome; a disc per kind rather than a count, because which kind of thing
+ * a day holds is what you are reading the grid for, and a number says how many
+ * at the cost of saying which.
  */
 
 import React from 'react';
 import {Pressable, Text, View} from 'react-native';
 
 import type {DayMarks} from '../agenda';
-import {MONTHS, WEEKDAYS, chunkWeeks, monthGrid, shiftMonth} from '../calendar';
+import {MONTHS, WEEKDAYS, chunkWeeks, monthGrid, monthGridFilled, shiftMonth} from '../calendar';
 import {weekNumber} from '../periodnote';
 import {toDateInput} from '../ical';
 import {styles} from './common';
@@ -32,6 +33,14 @@ function MonthViewImpl(props: {
   onWeekNote: (iso: string, exists: boolean) => void;
   /** Opens the date sheet, for jumping to a month further away than one step. */
   onPickMonth: () => void;
+  /**
+   * Open the day view for a day already selected.
+   *
+   * A second tap on the day you are already on, rather than a link under the
+   * grid saying the same thing: the link cost a line of the panel on every
+   * render to offer something the grid itself is the natural place to ask for.
+   */
+  onOpenDay: (iso: string) => void;
 }): React.JSX.Element {
   const {
     year,
@@ -43,9 +52,14 @@ function MonthViewImpl(props: {
     weekNotes,
     onWeekNote,
     onPickMonth,
+    onOpenDay,
   } = props;
   const today = toDateInput(new Date());
-  const weeks = chunkWeeks(monthGrid(year, month));
+  // Two grids of the same month: the filled one is what gets drawn, the plain
+  // one is what the week-number gutter keys off. The gutter's arithmetic is
+  // unchanged on purpose — it decides which note a tap opens.
+  const weeks = chunkWeeks(monthGridFilled(year, month));
+  const plainWeeks = chunkWeeks(monthGrid(year, month));
 
   return (
     <View>
@@ -89,7 +103,7 @@ function MonthViewImpl(props: {
       </View>
 
       {weeks.map((row, i) => {
-        const firstReal = row.find(c => c.iso);
+        const firstReal = plainWeeks[i]?.find(c => c.iso);
         const weekStart = firstReal?.iso ?? '';
         const hasWeekNote = !!weekStart && !!weekNotes?.has(weekStartOf(weekStart));
         return (
@@ -109,24 +123,34 @@ function MonthViewImpl(props: {
             </Text>
           </Pressable>
           {row.map((cell, j) => {
-            if (!cell.iso) {
-              return <View key={j} style={styles.dayCell} />;
-            }
-            const mark = marks[cell.iso];
+            const mark = cell.outside ? undefined : marks[cell.iso];
             const isSelected = cell.iso === selected;
             return (
               <Pressable
                 key={j}
-                style={[styles.dayCell, isSelected && styles.dayCellSelected]}
-                onPress={() => onSelect(cell.iso!)}>
-                <Text
-                  style={[styles.dayNum, cell.iso === today && styles.dayNumToday]}>
-                  {cell.day}
-                </Text>
-                <View style={styles.markRow}>
-                  {mark?.hasEvent && <Text style={styles.mark}>C</Text>}
-                  {mark?.hasTask && <Text style={styles.mark}>T</Text>}
-                  {mark?.hasNote && <Text style={styles.mark}>N</Text>}
+                style={[styles.dayCell, cell.iso === today && styles.dayCellToday]}
+                // Selecting, then opening. The second tap on a day already
+                // selected is the one that opens it.
+                onPress={() => (isSelected ? onOpenDay(cell.iso) : onSelect(cell.iso))}>
+                <View style={isSelected && styles.dayNumPill}>
+                  <Text
+                    style={[
+                      styles.dayNum,
+                      cell.outside && styles.dayNumOutside,
+                      isSelected && styles.dayNumPillText,
+                    ]}>
+                    {cell.day}
+                  </Text>
+                </View>
+                {/*
+                  Nothing is marked on the days either side of the month. They
+                  are there so the grid squares off, not to be read — marking
+                  them would pull the eye out of the month being looked at.
+                */}
+                <View style={styles.markDotRow}>
+                  {mark?.hasEvent && <Dot letter="C" />}
+                  {mark?.hasTask && <Dot letter="T" />}
+                  {mark?.hasNote && <Dot letter="N" />}
                 </View>
               </Pressable>
             );
@@ -134,6 +158,14 @@ function MonthViewImpl(props: {
         </View>
         );
       })}
+    </View>
+  );
+}
+
+function Dot(props: {letter: string}): React.JSX.Element {
+  return (
+    <View style={styles.markDot}>
+      <Text style={styles.markDotText}>{props.letter}</Text>
     </View>
   );
 }

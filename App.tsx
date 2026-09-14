@@ -85,7 +85,9 @@ import {
 } from './src/format';
 import {
   DEFAULT_SORT,
+  DUE_BUCKETS,
   SORT_KEYS,
+  dueBucket,
   searchTasks,
   sortTasks,
   toDateInput,
@@ -110,8 +112,11 @@ import {
   setCollections,
   setConfig,
   toggleCalendar,
+  forgetCollections,
+  sameCollection,
   toggleCollection,
   type ServerConfig,
+  type StartTab,
 } from './src/settings';
 import {
   completeTask,
@@ -127,11 +132,25 @@ import {
 } from './src/tasks';
 import {
   loadSettings,
+  readNamed,
   saveSettings,
   settingsLocation,
   storageAvailable,
   wipeSettings,
+  writeNamed,
 } from './src/storage';
+import {CACHE_FILE, decodeCache, encodeCache} from './src/cache';
+import {expandEvents} from './src/expand';
+import {writeDateHeading} from './src/dateheading';
+import {
+  covers,
+  defaultWindow,
+  gap,
+  mergeFetched,
+  viewRange,
+  widen,
+  type DateRange,
+} from './src/eventwindow';
 import {LAYOUT_PRESETS, dailyNotePath, daysWithNotes} from './src/dailynote';
 import {
   PERIOD_LAYOUT_PRESETS,
@@ -140,6 +159,8 @@ import {
   periodNotePath,
   periodStart,
   type Period,
+  SHARED_TREE_LAYOUTS,
+  SHARED_TREE_ROOT,
 } from './src/periodnote';
 import {
   createDailyNote,
@@ -151,6 +172,7 @@ import {
   openPeriodNote,
   findMeetingNotes,
   listAllTemplates,
+  absoluteNotePath,
   openDailyNote,
   openMeetingNote,
   openFileAt,
@@ -158,7 +180,8 @@ import {
   type NoteTemplate,
 } from './src/notes';
 import {eventsWithNotes} from './src/meetingnote';
-import {TemplatePicker} from './src/components/TemplatePicker';
+import {groupRows} from './src/subtasks';
+import {TemplatePicker, TemplateSheet} from './src/components/TemplatePicker';
 import {FolderPicker} from './src/components/FolderPicker';
 import {MiniCalendar} from './src/components/MiniCalendar';
 import {weekOf} from './src/components/WeekView';
@@ -168,6 +191,35 @@ const TOOLBAR_BUTTON_ID = 100;
 
 type Screen = 'idle' | 'save' | 'hub' | 'settings';
 type Tab = 'tasks' | 'calendar';
+
+/**
+ * Which of the six notes a chooser is acting on.
+ *
+ * The folder browser and the template grid are both mounted at the root of the
+ * window rather than beside the settings row that opens them, so the row can
+ * only say which note it belongs to; the root looks the rest up from the config.
+ */
+type NoteKind = 'daily' | 'week' | 'month' | 'quarter' | 'year' | 'meeting';
+
+/** The config field holding each note's settings. */
+const NOTE_CONFIG_KEY = {
+  daily: 'dailyNote',
+  week: 'weekNote',
+  month: 'monthNote',
+  quarter: 'quarterNote',
+  year: 'yearNote',
+  meeting: 'meetingNote',
+} as const satisfies Record<NoteKind, keyof ServerConfig>;
+
+/** What each note is called in a sheet's title. */
+const NOTE_LABEL: Record<NoteKind, string> = {
+  daily: 'Daily note',
+  week: 'Weekly note',
+  month: 'Monthly note',
+  quarter: 'Quarterly note',
+  year: 'Yearly note',
+  meeting: 'Meeting note',
+};
 type CalView = 'year' | 'quarter' | 'month' | 'week' | 'day';
 
 interface TaskDraftState {
@@ -302,6 +354,32 @@ export default function App(): React.JSX.Element {
   const [source, setSource] = useState<SourceRef | undefined>(undefined);
   const [tasks, setTasks] = useState<RemoteTask[]>([]);
   const [events, setEvents] = useState<RemoteEvent[]>([]);
+  /**
+   * The same two lists, readable without waiting for a render.
+   *
+   * The cache is written at the end of a fetch, which may have refreshed only
+   * one of the two — the other has to come from somewhere, and reading state
+   * there would read the value from before the setState.
+   */
+  const tasksRef = useRef<RemoteTask[]>([]);
+  const eventsRef = useRef<RemoteEvent[]>([]);
+  /**
+   * How much of the calendar has been fetched.
+   *
+   * Reset to the default on every opening rather than carried over: a session
+   * that wandered back to 2019 widened the window to reach it, and starting the
+   * next opening with that width would undo the whole point of having one. A
+   * ref as well as state, because a fetch started in the same tick as the
+   * navigation that widened it has to see the new value.
+   */
+  const [eventWindow, setEventWindow] = useState<DateRange>(() =>
+    defaultWindow(toDateInput(new Date())),
+  );
+  const eventWindowRef = useRef(eventWindow);
+  const setWindow = useCallback((next: DateRange) => {
+    eventWindowRef.current = next;
+    setEventWindow(next);
+  }, []);
   const [missing, setMissing] = useState<MissingCollection[]>([]);
   const [showDone, setShowDone] = useState(false);
   /**
@@ -314,7 +392,6 @@ export default function App(): React.JSX.Element {
    * Whether the month view's task list is open. Folded by default: the grid is
    * the point of that screen, and a day's tasks are a detail below it.
    */
-  const [monthTasksOpen, setMonthTasksOpen] = useState(false);
   const toggleSteps = useCallback((uid: string) => {
     setOpenSteps(previous => {
       const next = new Set(previous);
@@ -329,6 +406,24 @@ export default function App(): React.JSX.Element {
   const [showHelp, setShowHelp] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [loading, setLoading] = useState(false);
+  /**
+   * How many fetches are in flight.
+   *
+   * A count rather than the flag alone: the opening refresh and a widening
+   * fetch for a month the user has paged to can run at the same time, and
+   * whichever finished first would otherwise clear the loading line while the
+   * other was still working — the plugin would look finished and then keep
+   * changing under the user.
+   */
+  const busyCount = useRef(0);
+  const startWork = useCallback(() => {
+    busyCount.current += 1;
+    setLoading(true);
+  }, []);
+  const endWork = useCallback(() => {
+    busyCount.current = Math.max(0, busyCount.current - 1);
+    setLoading(busyCount.current > 0);
+  }, []);
   const [storePath, setStorePath] = useState<string | null>(null);
   /** The device's own name, shown in settings beside how the layout is scaled. */
   const [device, setDevice] = useState<string | null>(null);
@@ -347,9 +442,15 @@ export default function App(): React.JSX.Element {
     year: [],
   });
   const [meetingFiles, setMeetingFiles] = useState<string[]>([]);
-  const [pickingFolder, setPickingFolder] = useState<
-    'daily' | 'week' | 'month' | 'quarter' | 'year' | 'meeting' | null
-  >(null);
+  const [pickingFolder, setPickingFolder] = useState<NoteKind | null>(null);
+  /**
+   * Which note's template is being chosen, or null when the sheet is shut.
+   *
+   * Held here rather than inside the picker so the grid can be mounted at the
+   * root of the window — see TemplateSheet. The settings form only says which
+   * note the row belongs to; everything else is resolved from the config here.
+   */
+  const [pickingTemplate, setPickingTemplate] = useState<NoteKind | null>(null);
   const [pickingDate, setPickingDate] = useState<'day' | 'week' | null>(null);
   const [templates, setTemplates] = useState<NoteTemplate[]>([]);
   const [restored, setRestored] = useState(false);
@@ -451,6 +552,15 @@ export default function App(): React.JSX.Element {
 
 
   /**
+   * How much of a reload to do.
+   *
+   * 'opening' is the pair the first screen actually shows; 'notes' is the six
+   * folder walks behind the calendar's Open/Create buttons, which nothing on
+   * the Tasks tab reads.
+   */
+  type Scope = 'all' | 'opening' | 'tasks' | 'events' | 'notes';
+
+  /**
    * What a reload needs to fetch.
    *
    * A full refresh is eight operations: two CalDAV listings and six walks of
@@ -458,19 +568,21 @@ export default function App(): React.JSX.Element {
    * wait the user feels when they press Save — nothing about a new task changes
    * which days have notes. Each write says what it actually invalidated.
    */
-  const refresh = useCallback(
-    async (scope: 'all' | 'opening' | 'tasks' | 'events' | 'notes' = 'all') => {
+  const runRefresh = useCallback(
+    async (scope: Scope) => {
 
     const cfg = getConfig();
     // 'opening' is everything the first screen needs and nothing it does not.
     const wantTasks = scope === 'all' || scope === 'opening' || scope === 'tasks';
     const wantEvents = scope === 'all' || scope === 'opening' || scope === 'events';
     const wantNotes = scope === 'all' || scope === 'notes';
-    setLoading(true);
+    startWork();
     try {
       const [t, e, n, m, wn, mn, qn, yn] = await Promise.all([
         wantTasks && hasCollections(cfg) ? listTasks(cfg) : Promise.resolve(null),
-        wantEvents && hasCalendars(cfg) ? listEvents(cfg) : Promise.resolve(null),
+        wantEvents && hasCalendars(cfg)
+          ? listEvents(cfg, eventWindowRef.current)
+          : Promise.resolve(null),
         wantNotes ? findExistingNotes(cfg.dailyNote) : Promise.resolve(null),
         wantNotes ? findMeetingNotes(cfg.meetingNote) : Promise.resolve(null),
         wantNotes ? findPeriodNotes(cfg.weekNote) : Promise.resolve(null),
@@ -479,10 +591,19 @@ export default function App(): React.JSX.Element {
         wantNotes ? findPeriodNotes(cfg.yearNote) : Promise.resolve(null),
       ]);
       if (t) {
+        tasksRef.current = t.items;
         setTasks(t.items);
       }
       if (e) {
+        eventsRef.current = e.items;
         setEvents(e.items);
+      }
+      // Persisted so the next opening has something to draw before the server
+      // answers. Deliberately not awaited and deliberately not on the closing
+      // path: leaving the plugin to open a daily note must not wait on a file
+      // write, and a failed write is only a slower opening next time.
+      if (t || e) {
+        void writeNamed(CACHE_FILE, encodeCache(tasksRef.current, eventsRef.current));
       }
       if (n) {
         setNoteFiles(n);
@@ -502,26 +623,139 @@ export default function App(): React.JSX.Element {
     } catch (err) {
       setStatus({kind: 'error', message: describe(err)});
     } finally {
-      setLoading(false);
+      endWork();
     }
     },
-    [],
+    [startWork, endWork],
   );
+
+  /**
+   * Refreshes already running, by scope.
+   *
+   * Opening the hub asks for the same refresh twice — once from the button
+   * press in `openHub` and once from the effect that watches `screen` — and
+   * neither alone covers both ways the plugin can be dismissed, so neither can
+   * simply be deleted. Unjoined they raced, and every opening cost two CalDAV
+   * listings instead of one. A caller arriving while the same scope is already
+   * in flight now waits on that one rather than starting another.
+   *
+   * A ref, not state: the second caller runs in the same tick as the first and
+   * must see it, which a re-render would be too late for.
+   */
+  const inFlight = useRef(new Map<Scope, Promise<void>>());
+
+  const refresh = useCallback(
+    (scope: Scope = 'all'): Promise<void> => {
+      const running = inFlight.current.get(scope);
+      if (running) {
+        return running;
+      }
+      const started = runRefresh(scope).finally(() => {
+        inFlight.current.delete(scope);
+      });
+      inFlight.current.set(scope, started);
+      return started;
+    },
+    [runRefresh],
+  );
+
+  /**
+   * Fetch the part of the calendar a view needs and the window does not hold.
+   *
+   * Only the missing range is asked for, and the result is merged into what is
+   * already on screen, so paging back through the years costs one small fetch
+   * per new stretch rather than re-downloading everything each time.
+   *
+   * Nothing here blocks the view. The grid has already drawn from what is in
+   * hand; the events for the rest of it arrive when they arrive.
+   */
+  const widenEvents = useCallback(async (needed: DateRange) => {
+    const current = eventWindowRef.current;
+    if (covers(current, needed)) {
+      return;
+    }
+    const next = widen(current, needed);
+    const missingRange = gap(current, next);
+    // Claimed before the fetch, not after: paging quickly through months would
+    // otherwise start a fetch per month, each still seeing the old window.
+    setWindow(next);
+    const cfg = getConfig();
+    if (!hasCalendars(cfg)) {
+      return;
+    }
+    startWork();
+    try {
+      const more = await listEvents(cfg, missingRange);
+      const merged = mergeFetched(
+        eventsRef.current,
+        more.items,
+        // href and uid together are not enough: one calendar object can hold a
+        // repeating event and its overridden occurrences, which share both.
+        e => `${e.href}|${e.uid}|${e.startAt}`,
+        (a, b) => a.startAt - b.startAt,
+      );
+      eventsRef.current = merged;
+      setEvents(merged);
+    } catch {
+      // Deliberately silent, and the window is given back so the next visit
+      // tries again. This runs because somebody paged to another month, not
+      // because they asked for anything — an error banner over a calendar that
+      // is drawing correctly would be the plugin complaining to itself.
+      setWindow(current);
+    } finally {
+      endWork();
+    }
+  }, [setWindow, startWork, endWork]);
+
+  /**
+   * Whether the month grid's legend is showing.
+   *
+   * Open for the first few openings and shut after — long enough to be read,
+   * not so long as to become furniture. Per session, not stored: it costs one
+   * tap to open and nothing is lost by forgetting it.
+   */
+  const [legendOpen, setLegendOpen] = useState(false);
+
+  /** Bumped once per opening, so per-opening effects fire on every one. */
+  const [openings, setOpenings] = useState(0);
+  /**
+   * When this opening started.
+   *
+   * The clock the task list is cut against — see `sections`. A value rather
+   * than a call inside the memo, so "which tasks are overdue" is something
+   * React can actually tell has changed.
+   */
+  const [openedAt, setOpenedAt] = useState(() => Date.now());
 
   /**
    * Walk the note folders the first time the calendar is looked at.
    *
    * Deferred rather than skipped: the calendar needs them to say Open or Create
-   * on every note button, but the Tasks tab never touches them, and doing four
+   * on every note button, but the Tasks tab never touches them, and doing six
    * directory walks before the first screen appears is a wait for nothing.
    */
   const notesLoaded = useRef(false);
   useEffect(() => {
-    if (tab === 'calendar' && !notesLoaded.current) {
+    if (screen === 'hub' && tab === 'calendar' && !notesLoaded.current) {
       notesLoaded.current = true;
       void refresh('notes');
     }
-  }, [tab, refresh]);
+  }, [screen, tab, openings, refresh]);
+
+  /**
+   * Fetch more calendar when the view moves outside what has been fetched.
+   *
+   * Watches the view as well as the day because they need different amounts:
+   * the year view needs a year of it and the day view needs a day, and asking
+   * for a year's worth to draw one day would give back the cost that windowing
+   * the fetch just saved.
+   */
+  useEffect(() => {
+    if (screen !== 'hub' || tab !== 'calendar') {
+      return;
+    }
+    void widenEvents(viewRange(calView, day));
+  }, [screen, tab, calView, day, widenEvents]);
 
   /**
    * Pending auto-close, so it can be cancelled.
@@ -650,13 +884,15 @@ export default function App(): React.JSX.Element {
   }, [refresh, scheduleClose]);
 
   /** Confirm → push → success → reload. The single write path. */
-  const runAsk = useCallback(async () => {
-    // Every write in the plugin passes through here.
-    const pending = ask;
-    setAsk(null);
-    if (!pending) {
-      return;
-    }
+  /**
+   * Carry out one write, whether or not it was confirmed first.
+   *
+   * Every write in the plugin passes through here. Split from `runAsk` so an
+   * action that does not need confirming can still get the same status
+   * reporting, the same error handling and the same scoped reload — the
+   * alternative was either a dialog on everything or a second, divergent path.
+   */
+  const perform = useCallback(async (pending: Ask) => {
     setStatus({kind: 'working', message: 'Saving…'});
     setWriting(true);
     try {
@@ -679,7 +915,15 @@ export default function App(): React.JSX.Element {
     } finally {
       setWriting(false);
     }
-  }, [ask, refresh, scheduleClose]);
+  }, [refresh, scheduleClose]);
+
+  const runAsk = useCallback(async () => {
+    const pending = ask;
+    setAsk(null);
+    if (pending) {
+      await perform(pending);
+    }
+  }, [ask, perform]);
 
   const capture = useCallback(async () => {
     // The host is showing us again, so the next close is a real one.
@@ -719,13 +963,34 @@ export default function App(): React.JSX.Element {
     setStatus(null);
     setTaskForm(null);
     setEventForm(null);
+    // Let the note folders be walked again on this opening. The React tree
+    // outlives a closing, so a ref set once per plugin load would keep reading
+    // a note written in the NOTE app since as "Create". `openings` is what the
+    // effect watches: `screen` alone does not change when the host dismissed
+    // the view rather than our own close button, and `tab` does not change
+    // when the calendar was already the tab in front.
+    notesLoaded.current = false;
+    setOpenedAt(Date.now());
+    // The configured tab, read fresh each opening. getConfig rather than the
+    // `config` state: on a cold start this runs before the settings load has
+    // finished, and the restore below sets it again from what it read.
+    setTab(getConfig().startTab);
+    // Back to the default width. Last session may have paged to another year
+    // and widened it; carrying that over would make every later opening as slow
+    // as the widest thing that was ever looked at.
+    setWindow(defaultWindow(toDateInput(new Date())));
+    setOpenings(n => n + 1);
     setScreen('hub');
     // Refreshed here as well as by the screen effect below. The effect only
     // fires when `screen` changes, and `screen` stays 'hub' when the plugin is
     // dismissed by the host rather than by our own close button — so on the
     // next opening the effect saw no change and the list stayed as it was.
-    void refresh();
-  }, [refresh]);
+    // When both do fire they are coalesced into one fetch by `refresh`.
+    //
+    // 'opening', not the default: the six note-folder walks are not on this
+    // screen, and doing them here defeated the deferral below.
+    void refresh('opening');
+  }, [refresh, setWindow]);
 
   /**
    * Reload whenever the hub comes up.
@@ -740,7 +1005,7 @@ export default function App(): React.JSX.Element {
    */
   useEffect(() => {
     if (screen === 'hub') {
-      void refresh();
+      void refresh('opening');
     }
   }, [screen, refresh]);
 
@@ -756,6 +1021,29 @@ export default function App(): React.JSX.Element {
     }
     setRestored(true);
     void (async () => {
+      // Before the settings, and before any network call: this is the only
+      // thing that can put content on the first screen of a cold opening
+      // rather than an empty list behind a loading line. Whatever the fetch
+      // returns replaces it a moment later.
+      //
+      // Only seeded into empty state — a list already on screen is either from
+      // this session's fetch or newer than the file, and must not be rolled
+      // back to it.
+      void (async () => {
+        const cached = decodeCache(await readNamed(CACHE_FILE));
+        if (!cached) {
+          return;
+        }
+        if (tasksRef.current.length === 0 && cached.tasks.length > 0) {
+          tasksRef.current = cached.tasks;
+          setTasks(cached.tasks);
+        }
+        if (eventsRef.current.length === 0 && cached.events.length > 0) {
+          eventsRef.current = cached.events;
+          setEvents(cached.events);
+        }
+      })();
+
       const stored = await loadSettings();
       if (stored) {
         setConfig(stored);
@@ -772,6 +1060,10 @@ export default function App(): React.JSX.Element {
         // default list was then read from an empty config and nothing came out
         // pre-ticked. Only seeded when nothing has been chosen, so a choice
         // made in the meantime is not overwritten.
+        // Set here as well as in openHub: on a cold start this load finishes
+        // after the hub has already opened, so openHub saw an empty config.
+        // Only on the one restore, so a tab switched by hand is never undone.
+        setTab(stored.startTab);
         if (stored.defaultCollectionUrl) {
           setTargets(previous =>
             previous.length === 0 ? [stored.defaultCollectionUrl] : previous,
@@ -1282,11 +1574,34 @@ export default function App(): React.JSX.Element {
         label: 'Yes, create',
         run: async () => {
           await createDailyNote(cfg.dailyNote, iso, cfg.dateFormat);
+
+          // BEFORE the handover, and before the note is opened.
+          //
+          // This writes into the file, so it needs neither the note displayed
+          // nor a lasso nor anything else the plugin view owns — and doing it
+          // here means the plugin is still up to report what happened. The
+          // first attempt ran after `leaveForNote`, which had already called
+          // closePluginView, and the date silently never appeared.
+          let note = '';
+          if (cfg.dailyNote.dateHeading) {
+            const failure = await writeDateHeading(
+              await absoluteNotePath(path),
+              formatDate(iso, cfg.dateFormat),
+            );
+            if (failure) {
+              console.log(`[TaskHub] date heading failed — ${failure}`);
+              // Said out loud rather than only logged. A silent no-op is
+              // indistinguishable from the setting not working at all, which is
+              // exactly how the first attempt at this failed.
+              note = ` The date could not be written — ${failure}.`;
+            }
+          }
+
           // Close first, then open — the host keeps believing the plugin view
           // is up if closePluginView runs after openFile.
           leaveForNote();
           await openDailyNote(cfg.dailyNote, iso, cfg.dateFormat);
-          return `Saved successfully — created ${path}.`;
+          return `Saved successfully — created ${path}.${note}`;
         },
       });
     },
@@ -1361,7 +1676,7 @@ export default function App(): React.JSX.Element {
     // done the box is stale, so completing the task clears it — and the
     // confirmation says so, because it edits the user's own note.
     const marked = !!task.sourcePath;
-    setAsk({
+    const action: Ask = {
       title: 'Mark task complete?',
       reload: 'tasks',
       body: marked
@@ -1385,8 +1700,17 @@ export default function App(): React.JSX.Element {
         }
         return `Saved successfully — "${task.summary}" completed.${note}`;
       },
-    });
-  }, []);
+    };
+    // Only a captured task asks first, and only because completing it edits the
+    // user's own note by removing the box from the page. Ticking an ordinary
+    // task changes nothing but the task, and a dialog confirming what the tap
+    // already said is friction on the most common action in the plugin.
+    if (marked) {
+      setAsk(action);
+    } else {
+      void perform(action);
+    }
+  }, [perform]);
 
   const askSaveEvent = useCallback(() => {
     if (!eventForm) {
@@ -1541,6 +1865,70 @@ export default function App(): React.JSX.Element {
    * lives outside the plugin's private directory so it survives updates — so
    * this is the only way to get back to a clean install.
    */
+  /**
+   * Put every kind of note in one dated tree.
+   *
+   * Sets the six roots to the same folder and the five layouts to the ones that
+   * nest inside each other. Confirmed first, because it overwrites folder and
+   * layout settings the user may have arranged deliberately — and because the
+   * consequence worth saying out loud is that existing notes are not moved.
+   */
+  const askShareTree = useCallback(() => {
+    setAsk({
+      title: 'Use one folder for all notes?',
+      body:
+        `Sets every note type's folder to ${SHARED_TREE_ROOT} and its layout to the ` +
+        'matching dated scheme, so the year, quarter, month, week and daily notes ' +
+        'all nest in one tree. Notes you already have are NOT moved: until you ' +
+        'move them yourself they will show as "Create" rather than "Open". ' +
+        'Nothing is written until you save these settings.',
+      label: 'Use one folder',
+      run: async () => {
+        changeConfig(c => ({
+          ...c,
+          dailyNote: {...c.dailyNote, root: SHARED_TREE_ROOT, layout: SHARED_TREE_LAYOUTS.day},
+          weekNote: {...c.weekNote, root: SHARED_TREE_ROOT, layout: SHARED_TREE_LAYOUTS.week},
+          monthNote: {...c.monthNote, root: SHARED_TREE_ROOT, layout: SHARED_TREE_LAYOUTS.month},
+          quarterNote: {
+            ...c.quarterNote,
+            root: SHARED_TREE_ROOT,
+            layout: SHARED_TREE_LAYOUTS.quarter,
+          },
+          yearNote: {...c.yearNote, root: SHARED_TREE_ROOT, layout: SHARED_TREE_LAYOUTS.year},
+          // Meeting notes join the tree but keep their own layout: theirs is
+          // built from an event's title, not from a date alone, so there is no
+          // dated scheme here that would fit them.
+          meetingNote: {...c.meetingNote, root: SHARED_TREE_ROOT},
+        }));
+        return 'Every note type now uses one folder. Save to keep it.';
+      },
+    });
+  }, [changeConfig]);
+
+  /**
+   * Stop watching the collections the server no longer has.
+   *
+   * Written straight out rather than staged into the settings form: the user is
+   * answering a warning on the hub, not editing settings, and leaving it unsaved
+   * would bring the same warning back on the next refresh.
+   */
+  const forgetMissing = useCallback(() => {
+    const gone = missing.map(m => m.url);
+    const next = forgetCollections(getConfig(), gone);
+    setConfig(next);
+    setLocalConfig(next);
+    setMissing([]);
+    void saveSettings(next).catch(() => undefined);
+    setStatus({
+      kind: 'done',
+      message:
+        gone.length === 1
+          ? `Removed "${missing[0].label}". It is no longer watched.`
+          : `Removed ${gone.length} collections that are no longer on the server.`,
+    });
+    void refresh('opening');
+  }, [missing, refresh]);
+
   const askWipe = useCallback(() => {
     setAsk({
       title: 'Wipe all saved data?',
@@ -1579,6 +1967,27 @@ export default function App(): React.JSX.Element {
   const listed = useMemo(
     () => visible(arrange(searchTasks(open, query), sortKey), openSteps),
     [open, query, sortKey, openSteps],
+  );
+  /**
+   * The same rows, cut into Overdue / Today / Next 7 days / Later / No date.
+   *
+   * The flat sort meant "what is late" — the question most people open a to-do
+   * list to ask — had to be worked out by reading dates down the page. The cuts
+   * are the ones `DUE_FILTERS` already named and nothing used.
+   *
+   * Cut against `openedAt` rather than a fresh `new Date()` so the sections are
+   * a real function of their inputs: the React tree outlives a close, and a
+   * plugin left loaded overnight would otherwise still be calling yesterday
+   * "today" until something unrelated happened to re-render it.
+   */
+  const sections = useMemo(
+    () =>
+      groupRows(
+        listed,
+        DUE_BUCKETS.map(b => b.key),
+        todo => dueBucket(todo, new Date(openedAt)),
+      ),
+    [listed, openedAt],
   );
   // Finished steps stay with the other finished things rather than under a
   // parent that may still be open: this section exists to be opened and
@@ -1654,16 +2063,30 @@ export default function App(): React.JSX.Element {
     [noteFiles, day, config.dailyNote, config.dateFormat],
   );
 
+  /**
+   * The events every view actually draws: repeats turned into the days they
+   * fall on.
+   *
+   * Derived rather than stored. `events` stays exactly as the server sent it —
+   * one master VEVENT per series — because that is what gets cached, merged
+   * when the window widens, and written back on an edit. Expanding into state
+   * would put invented objects on all three of those paths.
+   */
+  const shownEvents = useMemo(
+    () => expandEvents(events, eventWindow),
+    [events, eventWindow],
+  );
+
   const eventNotes = useMemo(
-    () => eventsWithNotes(meetingFiles, events, config.meetingNote, config.meetingLinks),
-    [meetingFiles, events, config.meetingNote, config.meetingLinks],
+    () => eventsWithNotes(meetingFiles, shownEvents, config.meetingNote, config.meetingLinks),
+    [meetingFiles, shownEvents, config.meetingNote, config.meetingLinks],
   );
 
   const marks = useMemo(
-    () => monthMarks(events, tasks, noteDays),
-    [events, tasks, noteDays],
+    () => monthMarks(shownEvents, tasks, noteDays),
+    [shownEvents, tasks, noteDays],
   );
-  const dayEvents = useMemo(() => eventsOnDay(events, day), [events, day]);
+  const dayEvents = useMemo(() => eventsOnDay(shownEvents, day), [shownEvents, day]);
   const dayTasks = useMemo(() => tasksOnDay(open, day), [open, day]);
 
   if (screen === 'idle') {
@@ -1680,8 +2103,16 @@ export default function App(): React.JSX.Element {
       summary: event.summary,
       description: event.description ?? '',
       location: event.location ?? '',
-      date: event.startDate,
-      startTime: event.startTime ?? '',
+      // The SERIES' start date, not the occurrence's.
+      //
+      // A repeating event is one object on the server, and saving this form
+      // writes that object's DTSTART. Seeding the form with the occurrence the
+      // user happened to tap would move the whole series onto that date the
+      // moment they saved anything at all — change the title on the 14th and
+      // every past occurrence silently jumps. The occurrence marker is set
+      // only by `expandEvents`, so a one-off event is unaffected.
+      date: event.occurrence?.seriesStartDate ?? event.startDate,
+      startTime: event.occurrence?.seriesStartTime ?? event.startTime ?? '',
       endTime: event.endTime ?? '',
       repeat: repeatKey(event.rrule),
     });
@@ -2023,6 +2454,17 @@ will not duplicate them.`}
               disabled: writing,
             }}
           />
+          {/*
+            Said before anything is typed, because the consequence is invisible
+            otherwise: a repeat is one object on the server, so this form edits
+            every occurrence at once and the date below is the series' own
+            start, not the day that was tapped to get here.
+          */}
+          {!!editingEvent?.occurrence && (
+            <Text style={styles.noteCompact}>
+              {`This event repeats — you are editing the whole series, not one occurrence. The date below is when the series starts (${formatDate(editingEvent.occurrence.seriesStartDate, dateFormat)}), and changing it moves every occurrence.`}
+            </Text>
+          )}
           <Field
             scrollHandle={scrollHandle}
             onScrollTo={scrollFieldIntoView}
@@ -2174,6 +2616,13 @@ will not duplicate them.`}
                 // there is a list to look at, a big box in the middle of it is
                 // in the way.
                 prominent={tasks.length === 0 && events.length === 0}
+                // What is on screen came from the cache and is real, if
+                // possibly a few minutes old. "Loading" over it reads as "this
+                // is not ready yet", which would be a lie about content the
+                // user can already act on.
+                label={
+                  tasks.length === 0 && events.length === 0 ? undefined : 'Updating…'
+                }
               />
 
               {listed.length === 0 && !loading && !hasCollections(config) && (
@@ -2188,25 +2637,42 @@ will not duplicate them.`}
               {listed.length === 0 && !loading && hasCollections(config) && (
                 <Text style={styles.empty}>No open tasks match.</Text>
               )}
-              {listed.map(row => (
-                <TaskRow
-                  key={row.todo.uid}
-                  task={row.todo}
-                  depth={row.depth}
-                  stepCount={row.stepCount}
-                  stepsDone={row.stepsDone}
-                  stepsOpen={openSteps.has(row.todo.uid)}
-                  onToggleSteps={
-                    row.stepCount > 0 ? () => toggleSteps(row.todo.uid) : undefined
-                  }
-                  dateFormat={dateFormat}
-                  timeFormat={timeFormat}
-                  showNoDue
-                  listLabel={row.todo.collectionLabel}
-                  onToggle={() => askComplete(row.todo)}
-                  onEdit={() => openTaskEditor(row.todo)}
-                  onOpenSource={() => openSource(row.todo)}
-                />
+              {sections.map(section => (
+                <View key={section.key}>
+                  {/*
+                    The count is on the heading because it is the answer on its
+                    own: "Overdue · 3" is often all somebody needs from this
+                    screen.
+                  */}
+                  <Text
+                    style={[
+                      styles.dueHead,
+                      section.key === 'overdue' && styles.dueHeadUrgent,
+                    ]}>
+                    {DUE_BUCKETS.find(b => b.key === section.key)?.label} ·{' '}
+                    {section.rows.filter(r => r.depth === 0).length}
+                  </Text>
+                  {section.rows.map(row => (
+                    <TaskRow
+                      key={row.todo.uid}
+                      task={row.todo}
+                      depth={row.depth}
+                      stepCount={row.stepCount}
+                      stepsDone={row.stepsDone}
+                      stepsOpen={openSteps.has(row.todo.uid)}
+                      onToggleSteps={
+                        row.stepCount > 0 ? () => toggleSteps(row.todo.uid) : undefined
+                      }
+                      dateFormat={dateFormat}
+                      timeFormat={timeFormat}
+                      showNoDue
+                      listLabel={row.todo.collectionLabel}
+                      onToggle={() => askComplete(row.todo)}
+                      onEdit={() => openTaskEditor(row.todo)}
+                      onOpenSource={() => openSource(row.todo)}
+                    />
+                  ))}
+                </View>
               ))}
 
               {listedDone.length > 0 && (
@@ -2252,7 +2718,7 @@ will not duplicate them.`}
                 />
                 {viewHistory.length > 0 && (
                   <Pressable style={styles.backButton} onPress={goBackView}>
-                    <Text style={styles.backIcon}>↩</Text>
+                    <Text style={styles.backIcon}>‹</Text>
                     <Text style={styles.backLabel}>Back</Text>
                   </Pressable>
                 )}
@@ -2297,6 +2763,13 @@ will not duplicate them.`}
                 // there is a list to look at, a big box in the middle of it is
                 // in the way.
                 prominent={tasks.length === 0 && events.length === 0}
+                // What is on screen came from the cache and is real, if
+                // possibly a few minutes old. "Loading" over it reads as "this
+                // is not ready yet", which would be a lie about content the
+                // user can already act on.
+                label={
+                  tasks.length === 0 && events.length === 0 ? undefined : 'Updating…'
+                }
               />
 
               {!hasCalendars(config) && (
@@ -2362,18 +2835,31 @@ will not duplicate them.`}
                     weekNotes={config.weekNote.enabled ? weekNotesInView : undefined}
                     onWeekNote={(iso, exists) => askPeriodNote('week', iso, exists)}
                     onPickMonth={() => setPickingDate('day')}
+                    onOpenDay={iso => {
+                      setDay(iso);
+                      setCalView('day');
+                    }}
                   />
-                  <Text style={styles.legend}>
-                    <Text style={styles.markLegend}>C</Text> event ·{' '}
-                    <Text style={styles.markLegend}>T</Text> task due ·{' '}
-                    <Text style={styles.markLegend}>N</Text> daily note
-                  </Text>
-
-                  <Pressable onPress={() => setCalView('day')}>
-                    <Text style={styles.subheadingLink}>
-                      {formatDate(day, dateFormat)} — open day view ›
+                  {/*
+                    Folded, and shut by default after the first few openings.
+                    Three letters and a gesture are learned once and then read
+                    forever, and a permanent line of instructions under the grid
+                    is a line of the panel spent on somebody who already knows.
+                  */}
+                  <Pressable onPress={() => setLegendOpen(v => !v)} hitSlop={8}>
+                    <Text style={styles.legendToggle}>
+                      {legendOpen ? '▾ What the marks mean' : '▸ What the marks mean'}
                     </Text>
                   </Pressable>
+                  {legendOpen && (
+                    <Text style={styles.legend}>
+                      <Text style={styles.markLegend}>C</Text> event ·{' '}
+                      <Text style={styles.markLegend}>T</Text> task due ·{' '}
+                      <Text style={styles.markLegend}>N</Text> daily note · tap a day twice to
+                      open it
+                    </Text>
+                  )}
+
                   {/*
                     The selected day's note, below the grid with the rest of that
                     day's detail rather than up beside the month's own note —
@@ -2391,70 +2877,87 @@ will not duplicate them.`}
                       </Pressable>
                     </View>
                   )}
-                  {dayEvents.length === 0 && dayTasks.length === 0 && (
-                    <Text style={styles.empty}>Nothing scheduled.</Text>
-                  )}
-                  {dayEvents.map(event => (
-                    <View key={event.uid} style={styles.eventRow}>
-                      <Pressable
-                        style={[styles.grow, styles.agendaItemTight]}
-                        onPress={() => openEventEditor(event)}>
-                        {/*
-                          Smaller than the day view's rows on purpose: this list
-                          sits under a whole month grid, and the point of it is
-                          seeing what a day holds without scrolling past the
-                          calendar to find out.
-                        */}
-                        <Text style={styles.agendaTitleTight}>{event.summary}</Text>
-                        <Text style={styles.agendaMetaTight}>
-                          {event.allDay
-                            ? 'All day'
-                            : formatTime(event.startTime, timeFormat)}{' '}
-                          · {event.calendarLabel}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.noteChip}
-                        onPress={() => askEventNote(event, eventNotes.has(event.uid))}>
-                        <Text style={styles.noteChipText}>
-                          {eventNotes.has(event.uid) ? '🗒' : '+🗒'}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  ))}
+
                   {/*
-                    Folded away by default, and in the same tight type as the
-                    events above. A month grid plus a full-size task list pushed
-                    everything that matters off the bottom of the panel; the
-                    count says whether opening it is worth the tap.
+                    Tasks and appointments side by side, each in its own column.
+                    Stacked, the appointments sat below the fold under a whole
+                    month grid, so the answer to "what is on that day" needed a
+                    scroll after every tap — and the tasks had to be folded away
+                    to make even that much fit.
                   */}
-                  {dayTasks.length > 0 && (
-                    <>
-                      <Pressable
-                        style={styles.monthTasksHead}
-                        onPress={() => setMonthTasksOpen(v => !v)}
-                        hitSlop={8}>
-                        <Text style={styles.monthTasksHeadText}>
-                          {monthTasksOpen ? '▾' : '▸'} Tasks ({dayTasks.length})
-                        </Text>
-                      </Pressable>
-                      {monthTasksOpen &&
-                        dayTasks.map(task => (
-                          <Pressable
-                            key={task.uid}
-                            style={styles.agendaItemTight}
-                            onPress={() => openTaskEditor(task)}>
-                            <Text style={styles.agendaTitleTight}>
-                              {task.completed ? '☑' : '☐'} {task.summary}
+                  {/*
+                    Schedule on the left, to-dos on the right — the same way
+                    round as the Day view, so moving between the two views does
+                    not move the two lists. Stacked, the appointments sat below
+                    the fold under a whole month grid, so the answer to "what is
+                    on that day" needed a scroll after every tap.
+                  */}
+                  <View style={styles.dayPanel}>
+                    <View style={styles.dayPanelSchedule}>
+                      <Text style={styles.dayPanelTitle}>
+                        Appointments{dayEvents.length > 0 ? ` · ${dayEvents.length}` : ''}
+                      </Text>
+                      {dayEvents.length === 0 && (
+                        <Text style={styles.dayPanelEmpty}>Nothing scheduled.</Text>
+                      )}
+                      {dayEvents.map(event => (
+                        <View key={event.uid} style={[styles.dayPanelRow, styles.eventRow]}>
+                          <Pressable style={styles.grow} onPress={() => openEventEditor(event)}>
+                            {/*
+                              The time leads, as it does on a printed agenda:
+                              what somebody scanning a day wants first is when,
+                              not what.
+                            */}
+                            <Text style={styles.dayPanelTime}>
+                              {event.allDay
+                                ? 'All day'
+                                : formatTime(event.startTime, timeFormat)}
                             </Text>
-                            <Text style={styles.agendaMetaTight}>
-                              {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} · ` : ''}
-                              {task.collectionLabel}
+                            <Text style={styles.dayPanelTitleText}>{event.summary}</Text>
+                            <Text style={styles.dayPanelWhere}>
+                              {event.location ? `${event.location} · ` : ''}
+                              {event.calendarLabel}
                             </Text>
                           </Pressable>
-                        ))}
-                    </>
-                  )}
+                          <Pressable
+                            style={styles.noteChip}
+                            onPress={() => askEventNote(event, eventNotes.has(event.uid))}>
+                            <Text style={styles.noteChipText}>
+                              {eventNotes.has(event.uid) ? '🗒' : '+🗒'}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+
+                    <View style={styles.dayPanelTasks}>
+                      <Text style={styles.dayPanelTitle}>
+                        Tasks{dayTasks.length > 0 ? ` · ${dayTasks.length}` : ''}
+                      </Text>
+                      {dayTasks.length === 0 && (
+                        <Text style={styles.dayPanelEmpty}>Nothing due.</Text>
+                      )}
+                      {dayTasks.map(task => (
+                        <Pressable
+                          key={task.uid}
+                          style={styles.dayPanelRow}
+                          onPress={() => openTaskEditor(task)}>
+                          <View style={styles.dayPanelTaskRow}>
+                            <Text style={styles.dayPanelCheck}>
+                              {task.completed ? '☑' : '☐'}
+                            </Text>
+                            <View style={styles.grow}>
+                              <Text style={styles.dayPanelTitleText}>{task.summary}</Text>
+                              <Text style={styles.dayPanelWhere}>
+                                {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} · ` : ''}
+                                {task.collectionLabel}
+                              </Text>
+                            </View>
+                          </View>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
                 </>
               )}
 
@@ -2473,8 +2976,10 @@ will not duplicate them.`}
               {calView === 'week' && (
                 <WeekView
                   anchor={day}
-                  events={events}
+                  events={shownEvents}
                   tasks={tasks}
+                  marks={marks}
+                  selected={day}
                   dateFormat={dateFormat}
                   timeFormat={timeFormat}
                   noteDays={weekNoteDays}
@@ -2484,9 +2989,16 @@ will not duplicate them.`}
                   onEventNote={askEventNote}
                   onPickWeek={() => setPickingDate('week')}
                   onShiftWeek={weeks => setDay(prev => shiftWeek(prev, weeks))}
+                  // Select, then open — the same rule as the month grid, so the
+                  // two calendars answer a tap the same way. Tapping a day that
+                  // is already chosen is what opens it; the first tap moves the
+                  // highlight and the columns' day headings with it.
                   onSelectDay={iso => {
-                    setDay(iso);
-                    setCalView('day');
+                    if (iso === day) {
+                      setCalView('day');
+                    } else {
+                      setDay(iso);
+                    }
                   }}
                   onEditEvent={openEventEditor}
                 />
@@ -2495,7 +3007,7 @@ will not duplicate them.`}
               {calView === 'day' && (
                 <DayView
                   day={day}
-                  events={events}
+                  events={shownEvents}
                   tasks={tasks}
                   openSteps={openSteps}
                   onToggleSteps={toggleSteps}
@@ -2527,16 +3039,14 @@ will not duplicate them.`}
           status={status}
           scrollHandle={scrollHandle}
           onScrollTo={scrollFieldIntoView}
-          onBrowse={() => setPickingFolder('daily')}
-          onBrowseMeetings={() => setPickingFolder('meeting')}
-          onBrowsePeriod={period => setPickingFolder(period)}
+          onBrowseFolder={setPickingFolder}
+          onBrowseTemplate={setPickingTemplate}
+          onShareTree={askShareTree}
           templates={templates}
           showHelp={showHelp}
           onToggleHelp={() => setShowHelp(v => !v)}
           onChange={changeConfig}
           onDiscover={() => void discover()}
-          onSave={saveSettingsAndExit}
-          onCancel={cancelSettings}
           device={device}
           dirty={settingsDirty}
           onWipe={askWipe}
@@ -2547,41 +3057,72 @@ will not duplicate them.`}
     </ScrollView>
 
     {/*
+      Save and Cancel, pinned, for the whole time settings are open.
+      The settings form is many screens long and the only way out used to be a
+      pair of buttons roughly two thirds of the way down it, between the note
+      settings and the device fold — so "save and exit" was something you had to
+      go looking for, and anyone who scrolled past it had no way out at all.
+      Being a sibling of the ScrollView rather than an overlay, it also cannot
+      cover the form's last row.
+    */}
+    {screen === 'settings' && (
+      <View style={styles.settingsBar}>
+        <Button label="Cancel setup" onPress={cancelSettings} />
+        <Button
+          label={settingsDirty ? 'Save and exit •' : 'Save and exit'}
+          primary
+          onPress={saveSettingsAndExit}
+        />
+      </View>
+    )}
+
+    {/*
       Outside the ScrollView on purpose: these cover the window, so they must
       be positioned against the root rather than against scrolling content —
       inside it they would scroll away with the page underneath them.
     */}
     <FolderPicker
       visible={pickingFolder !== null}
-      initialPath={
-        pickingFolder === 'meeting'
-          ? config.meetingNote.root
-          : pickingFolder === 'week'
-            ? config.weekNote.root
-            : pickingFolder === 'month'
-              ? config.monthNote.root
-              : pickingFolder === 'quarter'
-                ? config.quarterNote.root
-                : pickingFolder === 'year'
-                  ? config.yearNote.root
-                  : config.dailyNote.root
-      }
+      initialPath={pickingFolder ? config[NOTE_CONFIG_KEY[pickingFolder]].root : ''}
       onCancel={() => setPickingFolder(null)}
       onPick={picked => {
-        setLocalConfig(
-          pickingFolder === 'meeting'
-            ? {...config, meetingNote: {...config.meetingNote, root: picked}}
-            : pickingFolder === 'week'
-              ? {...config, weekNote: {...config.weekNote, root: picked}}
-              : pickingFolder === 'month'
-                ? {...config, monthNote: {...config.monthNote, root: picked}}
-                : pickingFolder === 'quarter'
-                  ? {...config, quarterNote: {...config.quarterNote, root: picked}}
-                  : pickingFolder === 'year'
-                    ? {...config, yearNote: {...config.yearNote, root: picked}}
-                    : {...config, dailyNote: {...config.dailyNote, root: picked}},
-        );
+        const kind = pickingFolder;
+        if (kind) {
+          // changeConfig, not setLocalConfig: browsing to a folder is an edit
+          // like typing one, and a settings load still in flight must not
+          // overwrite it.
+          changeConfig(c => ({
+            ...c,
+            [NOTE_CONFIG_KEY[kind]]: {...c[NOTE_CONFIG_KEY[kind]], root: picked},
+          }));
+        }
         setPickingFolder(null);
+      }}
+    />
+
+    {/*
+      The template grid belongs here and not beside the settings row that opens
+      it. It is an absolutely positioned overlay, and inside the settings
+      ScrollView it was positioned against that row instead of against the
+      window: it drew over the settings underneath it, scrolled with the page,
+      and Android refused to deliver touches to the tiles that fell outside the
+      row's own bounds — so most of the grid could be seen but not chosen.
+    */}
+    <TemplateSheet
+      visible={pickingTemplate !== null}
+      templates={templates}
+      label={pickingTemplate ? `${NOTE_LABEL[pickingTemplate]} template` : ''}
+      value={pickingTemplate ? config[NOTE_CONFIG_KEY[pickingTemplate]].template : ''}
+      onCancel={() => setPickingTemplate(null)}
+      onPick={picked => {
+        const kind = pickingTemplate;
+        if (kind) {
+          changeConfig(c => ({
+            ...c,
+            [NOTE_CONFIG_KEY[kind]]: {...c[NOTE_CONFIG_KEY[kind]], template: picked},
+          }));
+        }
+        setPickingTemplate(null);
       }}
     />
 
@@ -2613,7 +3154,12 @@ will not duplicate them.`}
       visible={missing.length > 0 && ask === null}
       title="A list has gone"
       body={missingMessage(missing)}
-      label="Got it"
+      label="Not now"
+      // The fix, offered where the problem is named. Sending the user to
+      // Settings to untick something was advice they could not act on: the
+      // ticklists there are built from what discovery finds, and a collection
+      // deleted on the server is not in that list.
+      action={{label: 'Remove', onPress: forgetMissing}}
       // Cleared only for this refresh. It comes back on the next one, and keeps
       // coming back, until the configuration is corrected.
       onDismiss={() => setMissing([])}
@@ -2652,6 +3198,7 @@ function PeriodNoteSettings(props: {
   scrollHandle: number | null;
   onScrollTo: (y: number) => void;
   onBrowse: () => void;
+  onBrowseTemplate: () => void;
   onChange: React.Dispatch<React.SetStateAction<ServerConfig>>;
 }): React.JSX.Element {
   const {
@@ -2665,6 +3212,7 @@ function PeriodNoteSettings(props: {
     scrollHandle,
     onScrollTo,
     onBrowse,
+    onBrowseTemplate,
     onChange,
   } = props;
   const note = config[noteKey];
@@ -2742,7 +3290,7 @@ function PeriodNoteSettings(props: {
         templates={templates}
         label={`${title} template`}
         value={note.template}
-        onPick={v => set({template: v})}
+        onOpen={onBrowseTemplate}
       />
       </>
       )}
@@ -2757,19 +3305,24 @@ function SettingsScreen(props: {
   scrollHandle: number | null;
   onScrollTo: (y: number) => void;
   storePath: string | null;
-  onBrowse: () => void;
-  onBrowseMeetings: () => void;
-  onBrowsePeriod: (period: 'week' | 'month' | 'quarter' | 'year') => void;
+  /** Open the folder browser for one note. */
+  onBrowseFolder: (kind: NoteKind) => void;
+  /** Open the template grid for one note. It is drawn at the window root. */
+  onBrowseTemplate: (kind: NoteKind) => void;
+  /** Put every note type in one dated tree. Asks first — it moves nothing. */
+  onShareTree: () => void;
   templates: NoteTemplate[];
   showHelp: boolean;
   onToggleHelp: () => void;
   onChange: React.Dispatch<React.SetStateAction<ServerConfig>>;
   onDiscover: () => void;
-  onSave: () => void;
-  /** True when the form differs from what is stored, which the Save reports. */
+  /**
+   * True when the form differs from what is stored.
+   *
+   * Only the warning at the head of the page reads it here — saving and
+   * cancelling live in the bar pinned to the foot of the window.
+   */
   dirty: boolean;
-  /** Leave without saving, after confirming. */
-  onCancel: () => void;
   /** The device's own name, or null when the host does not report one. */
   device: string | null;
   onWipe: () => void;
@@ -2802,24 +3355,45 @@ function SettingsScreen(props: {
     scrollHandle,
     onScrollTo,
     storePath,
-    onBrowse,
-    onBrowseMeetings,
-    onBrowsePeriod,
+    onBrowseFolder,
+    onBrowseTemplate,
+    onShareTree,
     templates,
     showHelp,
     onToggleHelp,
     onChange,
     onDiscover,
-    onSave,
     dirty,
-    onCancel,
     device,
     onWipe,
     onClose,
   } = props;
 
-  const taskLists = collections.filter(acceptsTasks);
-  const calendars = collections.filter(acceptsEvents);
+  /**
+   * The rows to show, which is not the same as what discovery found.
+   *
+   * A collection still in the settings but no longer on the server is not in
+   * the discovered list, so it used to have no row — and therefore no box to
+   * untick. That made the "no longer on the server" warning impossible to act
+   * on: it told the user to untick something the screen would not show them.
+   * Stale entries are listed here too, marked, so there is always somewhere to
+   * turn one off.
+   */
+  const withStale = (
+    found: TaskCollection[],
+    configured: string[],
+  ): {url: string; displayName: string; stale: boolean}[] => {
+    const rows = found.map(c => ({url: c.url, displayName: c.displayName, stale: false}));
+    for (const url of configured) {
+      if (!rows.some(r => sameCollection(r.url, url))) {
+        rows.push({url, displayName: collectionName(url), stale: true});
+      }
+    }
+    return rows;
+  };
+
+  const taskLists = withStale(collections.filter(acceptsTasks), config.collectionUrls);
+  const calendars = withStale(collections.filter(acceptsEvents), config.calendarUrls);
 
   return (
     <>
@@ -2863,6 +3437,28 @@ function SettingsScreen(props: {
           Android asks for permission — decline it and every request fails silently, so allow it.
         </Text>
       </Section>
+
+      {/*
+        Outside every fold, and first.
+        This lived under "Date and time format" for a release, where it was
+        never found: the fold is named for how dates are written, which is not
+        where anybody looks for which tab the plugin opens on. It is one line,
+        so it costs the page almost nothing to be in the open.
+      */}
+      <Text style={styles.subheadingCompact}>Open on</Text>
+      <Text style={styles.noteCompact}>
+        Which tab you land on when the plugin opens. Without a CalDAV server the Tasks tab is
+        empty and everything you use is on the Calendar one, so opening on Tasks is a tap you
+        never wanted.
+      </Text>
+      <Choice
+        options={[
+          {key: 'tasks', label: 'Tasks'},
+          {key: 'calendar', label: 'Calendar'},
+        ]}
+        value={config.startTab}
+        onPick={k => onChange(c => ({...c, startTab: k as StartTab}))}
+      />
 
       <Fold
         title="Task and calendar server"
@@ -2945,8 +3541,8 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         <Text style={styles.noteCompact}>None yet — press "Find collections" above.</Text>
       )}
       {taskLists.map(collection => {
-        const checked = config.collectionUrls.includes(collection.url);
-        const isDefault = config.defaultCollectionUrl === collection.url;
+        const checked = config.collectionUrls.some(u => sameCollection(u, collection.url));
+        const isDefault = sameCollection(config.defaultCollectionUrl, collection.url);
         return (
           <View key={collection.url} style={styles.checkRowCompact}>
             <Pressable
@@ -2955,6 +3551,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
               <Text style={styles.optionTextCompact}>
                 {checked ? '☑' : '☐'} {collection.displayName}
                 {isDefault ? '  · new tasks' : ''}
+                {collection.stale ? '  · not on the server' : ''}
               </Text>
             </Pressable>
             {checked && !isDefault && (
@@ -2976,11 +3573,22 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         <CheckRow
           key={collection.url}
           compact
-          label={collection.displayName}
-          checked={config.calendarUrls.includes(collection.url)}
+          label={
+            collection.stale
+              ? `${collection.displayName}  · not on the server`
+              : collection.displayName
+          }
+          checked={config.calendarUrls.some(u => sameCollection(u, collection.url))}
           onToggle={() => onChange(toggleCalendar(config, collection.url))}
         />
       ))}
+      {(taskLists.some(c => c.stale) || calendars.some(c => c.stale)) && (
+        <Text style={styles.noteCompact}>
+          Anything marked "not on the server" was found in these settings but not on the
+          server — deleted, renamed, or no longer readable by this login. Untick it to stop
+          the plugin looking for it.
+        </Text>
+      )}
 
       <Field
         scrollHandle={scrollHandle}
@@ -3009,6 +3617,28 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         hint={'Daily, weekly, monthly, quarterly, yearly and meeting notes: where each lives, how its path is built, and which template a new one starts from. None of this needs a server.'}
         open={openFolds.has('notes')}
         onToggle={() => toggleFold('notes')}>
+      {/*
+        One tap for the arrangement most people want, because getting it by hand
+        means setting six roots and five layouts to values that have to agree
+        with each other — and a single mismatch scatters the notes across two
+        trees without saying so.
+      */}
+      <Text style={styles.subheadingCompact}>One folder for everything</Text>
+      <Text style={styles.noteCompact}>
+        {`Puts every kind of note in one calendar tree under ${SHARED_TREE_ROOT}, nested by date and named for what it is:
+
+${SHARED_TREE_ROOT}/2026/Year.note
+${SHARED_TREE_ROOT}/2026/Q3/Quarter.note
+${SHARED_TREE_ROOT}/2026/September/Month.note
+${SHARED_TREE_ROOT}/2026/September/Week 38.note
+${SHARED_TREE_ROOT}/2026/September/14/Daily.note
+
+Notes you already have are not moved, and the plugin looks for notes where the settings say they are — so after this, existing notes filed under the old scheme show as "Create" rather than "Open" until you move them.`}
+      </Text>
+      <View style={styles.actionsTight}>
+        <Button label="Use one folder for all notes" onPress={onShareTree} />
+      </View>
+
       <Text style={styles.subheadingCompact}>Daily notes</Text>
       <Text style={styles.noteCompact}>
         One note per day, created and opened from the Day, Week and Month views. The button on
@@ -3037,7 +3667,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
             onChange={v => onChange(c => ({...c, dailyNote: {...c.dailyNote, root: v}}))}
           />
         </View>
-        <Pressable style={styles.browseButton} onPress={onBrowse}>
+        <Pressable style={styles.browseButton} onPress={() => onBrowseFolder('daily')}>
           <FolderIcon />
           <Text style={styles.browseLabel}>Browse</Text>
         </Pressable>
@@ -3062,6 +3692,21 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
           '(invalid layout)'
         }`}
       </Text>
+      <CheckRow
+        compact
+        label="Write the date at the top of a new daily note"
+        checked={config.dailyNote.dateHeading}
+        onToggle={() =>
+          onChange(c => ({
+            ...c,
+            dailyNote: {...c.dailyNote, dateHeading: !c.dailyNote.dateHeading},
+          }))
+        }
+      />
+      <Text style={styles.noteCompact}>
+        {`Puts the date in a text box at the head of the first page, in the format chosen above — today would read "${formatDate(toDateInput(new Date()), config.dateFormat)}". Only when the note is created, never when an existing one is opened, so it cannot write into a page twice. Leave it off if your template already prints the date.`}
+      </Text>
+
       <Text style={styles.labelCompact}>Template for a new note</Text>
       <Text style={styles.noteCompact}>
         The page style a newly created daily note starts with. Applied once, when the note is
@@ -3071,7 +3716,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         templates={templates}
         label="Daily note template"
         value={config.dailyNote.template}
-        onPick={v => onChange(c => ({...c, dailyNote: {...c.dailyNote, template: v}}))}
+        onOpen={() => onBrowseTemplate('daily')}
       />
 
       <PeriodNoteSettings
@@ -3084,7 +3729,8 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         templates={templates}
         scrollHandle={scrollHandle}
         onScrollTo={onScrollTo}
-        onBrowse={() => onBrowsePeriod('week')}
+        onBrowse={() => onBrowseFolder('week')}
+        onBrowseTemplate={() => onBrowseTemplate('week')}
         onChange={onChange}
       />
 
@@ -3098,7 +3744,8 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         templates={templates}
         scrollHandle={scrollHandle}
         onScrollTo={onScrollTo}
-        onBrowse={() => onBrowsePeriod('month')}
+        onBrowse={() => onBrowseFolder('month')}
+        onBrowseTemplate={() => onBrowseTemplate('month')}
         onChange={onChange}
       />
 
@@ -3112,7 +3759,8 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         templates={templates}
         scrollHandle={scrollHandle}
         onScrollTo={onScrollTo}
-        onBrowse={() => onBrowsePeriod('quarter')}
+        onBrowse={() => onBrowseFolder('quarter')}
+        onBrowseTemplate={() => onBrowseTemplate('quarter')}
         onChange={onChange}
       />
 
@@ -3126,7 +3774,8 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         templates={templates}
         scrollHandle={scrollHandle}
         onScrollTo={onScrollTo}
-        onBrowse={() => onBrowsePeriod('year')}
+        onBrowse={() => onBrowseFolder('year')}
+        onBrowseTemplate={() => onBrowseTemplate('year')}
         onChange={onChange}
       />
 
@@ -3157,7 +3806,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
             onChange={v => onChange(c => ({...c, meetingNote: {...c.meetingNote, root: v}}))}
           />
         </View>
-        <Pressable style={styles.browseButton} onPress={onBrowseMeetings}>
+        <Pressable style={styles.browseButton} onPress={() => onBrowseFolder('meeting')}>
           <FolderIcon />
           <Text style={styles.browseLabel}>Browse</Text>
         </Pressable>
@@ -3171,7 +3820,7 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         templates={templates}
         label="Meeting note template"
         value={config.meetingNote.template}
-        onPick={v => onChange(c => ({...c, meetingNote: {...c.meetingNote, template: v}}))}
+        onOpen={() => onBrowseTemplate('meeting')}
       />
 
       </Fold>
@@ -3282,26 +3931,15 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
       )}
       </Fold>
 
-      {/* Outside every fold: the bottom Save has to be reachable whatever is
-          open, the same as the one at the top. */}
+      {/* Outside every fold: where the settings are kept is not something to
+          have to open a section to read. Save and Cancel are no longer here —
+          they are pinned to the foot of the window, so they are reachable from
+          anywhere in this page rather than only from this point in it. */}
       <Text style={styles.noteCompact}>
         {storePath
           ? `Saved to ${storePath} — survives plugin updates and reinstalls. Plain text on shared storage, so prefer an app password or a credential scoped to these collections.`
           : 'This build has no on-device storage, so settings last only for this session.'}
       </Text>
-
-      <View style={styles.actions}>
-        <Button
-          label={dirty ? 'Save and exit •' : 'Save and exit'}
-          primary
-          onPress={onSave}
-        />
-        {/*
-          Not filled: leaving without saving should not look like the thing to
-          press. It is the same weight as the other secondary buttons.
-        */}
-        <Button label="Cancel setup" onPress={onCancel} />
-      </View>
 
       <Fold
         title="This device"

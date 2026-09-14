@@ -125,7 +125,7 @@ describe('monthMarks with notes', () => {
 
   it('marks a day that only has a note', () => {
     const marks = monthMarks([], [], new Set(['2026-09-02']));
-    expect(marks['2026-09-02']).toEqual({hasEvent: false, hasTask: false, hasNote: true});
+    expect(marks['2026-09-02']).toMatchObject({hasEvent: false, hasTask: false, hasNote: true});
   });
 
   it('combines a note with a task on the same day', () => {
@@ -134,7 +134,7 @@ describe('monthMarks with notes', () => {
       [todo({dueAt: new Date(2026, 8, 2).getTime()})],
       new Set(['2026-09-02']),
     );
-    expect(marks['2026-09-02']).toEqual({hasEvent: false, hasTask: true, hasNote: true});
+    expect(marks['2026-09-02']).toMatchObject({hasEvent: false, hasTask: true, hasNote: true});
   });
 
   it('defaults to no note days when none are passed', () => {

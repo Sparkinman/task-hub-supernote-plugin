@@ -15,6 +15,7 @@ import {
 import {AuthError, authHeader} from './caldav';
 import {resolveHref} from './discovery';
 import {ensureInternet} from './permissions';
+import {caldavStamp, type DateRange} from './eventwindow';
 import {collectionName, type ServerConfig} from './settings';
 
 /**
@@ -135,14 +136,46 @@ export function missingMessage(missing: MissingCollection[]): string {
       ? ' It was deleted, or this login has lost access to it.'
       : ' They were deleted, or this login has lost access to them.'
     : '';
-  const fix = one ? 'untick it' : 'untick them';
+  // Says what the button below it does, rather than sending the user to
+  // Settings. The old wording told them to tap Discover and untick it, which
+  // could not be done: the ticklists there are built from what discovery finds,
+  // and a collection deleted on the server is not among them.
+  const fix = one ? 'stop watching it' : 'stop watching them';
   return (
     `${lead}${why} Everything else refreshed normally. ` +
-    `Open Settings, tap Discover, and ${fix} to stop this message.`
+    `Remove will ${fix}; you can add ${one ? 'it' : 'them'} again from Settings if ${one ? 'it comes' : 'they come'} back.`
   );
 }
 
-const EVENT_QUERY =
+/**
+ * Events within a date range.
+ *
+ * The unfiltered form of this — every VEVENT in the collection, for all time —
+ * was the largest single cost in opening the plugin: transferred in full iCal
+ * and then parsed in JavaScript on an e-ink CPU, on every opening, for a set
+ * that only ever grows. See `eventwindow.ts` for how the range is chosen and
+ * widened.
+ *
+ * A time-range filter is expanded by the server, per RFC 4791 -- a weekly
+ * meeting whose DTSTART is two years old still matches a window it recurs into,
+ * so repeating events are not lost by narrowing the range.
+ */
+function eventQuery(range: DateRange): string {
+  return (
+    '<?xml version="1.0" encoding="utf-8"?>' +
+    '<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">' +
+    '<D:prop><D:getetag/><C:calendar-data/></D:prop>' +
+    '<C:filter><C:comp-filter name="VCALENDAR">' +
+    '<C:comp-filter name="VEVENT">' +
+    `<C:time-range start="${caldavStamp(range.start)}" end="${caldavStamp(range.end)}"/>` +
+    '</C:comp-filter>' +
+    '</C:comp-filter></C:filter>' +
+    '</C:calendar-query>'
+  );
+}
+
+/** Every VEVENT, used only when a server rejects the filtered form above. */
+const ALL_EVENT_QUERY =
   '<?xml version="1.0" encoding="utf-8"?>' +
   '<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">' +
   '<D:prop><D:getetag/><C:calendar-data/></D:prop>' +
@@ -151,12 +184,49 @@ const EVENT_QUERY =
   '</C:comp-filter></C:filter>' +
   '</C:calendar-query>';
 
-const CALENDAR_QUERY =
+/**
+ * Every VTODO, used only as a fallback.
+ *
+ * See OPEN_TASK_QUERY for why the filtered form is tried first.
+ */
+const ALL_TASK_QUERY =
   '<?xml version="1.0" encoding="utf-8"?>' +
   '<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">' +
   '<D:prop><D:getetag/><C:calendar-data/></D:prop>' +
   '<C:filter><C:comp-filter name="VCALENDAR">' +
   '<C:comp-filter name="VTODO"/>' +
+  '</C:comp-filter></C:filter>' +
+  '</C:calendar-query>';
+
+/**
+ * Open tasks only — completed ones are deliberately never downloaded.
+ *
+ * Pulling every VTODO ever written, in full, on every opening was a large part
+ * of the wait before the task list appeared: it is transferred over the network
+ * and then parsed in JS on an e-ink CPU, only for each completed task to be
+ * added to the list and immediately filtered back out of it. The set grows for
+ * as long as the user keeps using the plugin, so it got slower over time.
+ *
+ * Only `COMPLETED is-not-defined` is asked for, not a negated text-match on
+ * STATUS. `is-not-defined` has one unambiguous meaning; a negated text-match
+ * against a property that is absent altogether does not, and servers disagree
+ * about it — a task with no STATUS line at all, which is most of them, could be
+ * dropped by a server that reads it the other way. Under-filtering here is
+ * harmless because the client filters again; over-filtering would hide open
+ * tasks.
+ *
+ * The client-side filter therefore stays, and is not redundant: Task Hub counts
+ * three separate signals as completed (STATUS, a COMPLETED stamp, or
+ * PERCENT-COMPLETE) and this filter can only catch the second.
+ */
+const OPEN_TASK_QUERY =
+  '<?xml version="1.0" encoding="utf-8"?>' +
+  '<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">' +
+  '<D:prop><D:getetag/><C:calendar-data/></D:prop>' +
+  '<C:filter><C:comp-filter name="VCALENDAR">' +
+  '<C:comp-filter name="VTODO">' +
+  '<C:prop-filter name="COMPLETED"><C:is-not-defined/></C:prop-filter>' +
+  '</C:comp-filter>' +
   '</C:comp-filter></C:filter>' +
   '</C:calendar-query>';
 
@@ -175,17 +245,62 @@ function asArray<T>(value: T | T[] | undefined | null): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-async function listOne(config: ServerConfig, collection: string): Promise<RemoteTask[]> {
-  const url = collection.trim().replace(/\/+$/, '');
-  const response = await fetch(url, {
+/**
+ * How many calendar objects are parsed before handing the thread back.
+ *
+ * Parsing iCal is synchronous, and a collection of any size holds the JavaScript
+ * thread for the whole of it — which is what made an opening feel like a freeze
+ * rather than a wait: the panel had already drawn, but taps went nowhere until
+ * the last object was done. Yielding to the event loop lets queued touches run
+ * in between. 40 is small enough to keep the gaps short and large enough that
+ * the yields themselves cost nothing measurable.
+ */
+const PARSE_CHUNK = 40;
+
+/**
+ * Hand the thread back so queued work — a tap, a render — can run.
+ *
+ * setTimeout rather than an awaited promise: a resolved promise is a microtask
+ * and runs before the event loop gets a turn, so it would yield to nothing.
+ */
+function breathe(): Promise<void> {
+  return new Promise<void>(resolve => setTimeout(resolve, 0));
+}
+
+/** One REPORT against a collection. */
+function report(config: ServerConfig, url: string, body: string): Promise<Response> {
+  return fetch(url, {
     method: 'REPORT',
     headers: {
       Authorization: authHeader(config),
       Depth: '1',
       'Content-Type': 'application/xml; charset=utf-8',
     },
-    body: CALENDAR_QUERY,
+    body,
   });
+}
+
+async function listOne(config: ServerConfig, collection: string): Promise<RemoteTask[]> {
+  const url = collection.trim().replace(/\/+$/, '');
+  let response = await report(config, url, OPEN_TASK_QUERY);
+
+  // Checked before the retry below: neither is a complaint about the filter,
+  // and asking again unfiltered would only produce the same answer more slowly
+  // — or, for a bad password, a second permission-shaped failure to explain.
+  if (response.status === 401) {
+    throw new AuthError();
+  }
+  if (collectionIsGone(response.status)) {
+    throw new CollectionGoneError(url, collectionName(url), response.status, 'task');
+  }
+
+  // A server that will not accept the prop-filter rejects the whole REPORT, and
+  // an unhandled rejection here would empty the task list rather than slow it
+  // down. One unfiltered retry costs a round trip on servers that need it and
+  // nothing at all on servers that do not.
+  if (!response.ok && response.status !== 207) {
+    response = await report(config, url, ALL_TASK_QUERY);
+  }
 
   if (response.status === 401) {
     throw new AuthError();
@@ -201,7 +316,12 @@ async function listOne(config: ServerConfig, collection: string): Promise<Remote
   const label = collectionName(url);
   const tasks: RemoteTask[] = [];
 
+  let since = 0;
   for (const entry of asArray(doc?.multistatus?.response)) {
+    if (++since >= PARSE_CHUNK) {
+      since = 0;
+      await breathe();
+    }
     const href = typeof entry?.href === 'string' ? entry.href : '';
     if (!href) {
       continue;
@@ -261,24 +381,32 @@ export interface RemoteEvent extends VEvent {
   raw: string;
 }
 
-async function listEventsOne(config: ServerConfig, calendar: string): Promise<RemoteEvent[]> {
+async function listEventsOne(
+  config: ServerConfig,
+  calendar: string,
+  range: DateRange,
+): Promise<RemoteEvent[]> {
   const url = calendar.trim().replace(/\/+$/, '');
-  const response = await fetch(url, {
-    method: 'REPORT',
-    headers: {
-      Authorization: authHeader(config),
-      Depth: '1',
-      'Content-Type': 'application/xml; charset=utf-8',
-    },
-    body: EVENT_QUERY,
-  });
+  let response = await report(config, url, eventQuery(range));
 
+  // Checked before the retry below, exactly as the task listing does: neither
+  // is a complaint about the filter, and asking again unfiltered would only
+  // produce the same failure more slowly.
   if (response.status === 401) {
     throw new AuthError();
   }
   if (collectionIsGone(response.status)) {
     throw new CollectionGoneError(url, collectionName(url), response.status, 'calendar');
   }
+
+  // A server that will not accept a time-range rejects the whole REPORT. One
+  // unfiltered retry costs a round trip on such a server and nothing at all on
+  // one that handles the filter — and an empty calendar would be a worse
+  // outcome than a slow one.
+  if (!response.ok && response.status !== 207) {
+    response = await report(config, url, ALL_EVENT_QUERY);
+  }
+
   if (!response.ok && response.status !== 207) {
     throw new Error(`Could not list "${collectionName(url)}" (HTTP ${response.status}).`);
   }
@@ -287,7 +415,12 @@ async function listEventsOne(config: ServerConfig, calendar: string): Promise<Re
   const label = collectionName(url);
   const events: RemoteEvent[] = [];
 
+  let since = 0;
   for (const entry of asArray(doc?.multistatus?.response)) {
+    if (++since >= PARSE_CHUNK) {
+      since = 0;
+      await breathe();
+    }
     const href = typeof entry?.href === 'string' ? entry.href : '';
     if (!href) {
       continue;
@@ -317,11 +450,14 @@ async function listEventsOne(config: ServerConfig, calendar: string): Promise<Re
   return events;
 }
 
-/** Every event across every watched calendar. */
-export async function listEvents(config: ServerConfig): Promise<ListResult<RemoteEvent>> {
+/** Every event across every watched calendar, within `range`. */
+export async function listEvents(
+  config: ServerConfig,
+  range: DateRange,
+): Promise<ListResult<RemoteEvent>> {
   await ensureInternet();
   const settled = await Promise.allSettled(
-    config.calendarUrls.map(url => listEventsOne(config, url)),
+    config.calendarUrls.map(url => listEventsOne(config, url, range)),
   );
   const {items, missing} = collect(settled);
   return {items: items.sort((a, b) => a.startAt - b.startAt), missing};

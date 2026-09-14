@@ -52,8 +52,19 @@ month headings; the quarter is three; the month has a week-number gutter that op
 creates that week's note. Days carrying an event, an open task or a note are marked, so the
 shape of a month is visible before you touch anything.
 
-Tapping a day anywhere drops you into it. "Go to today" is one press from any view, and
-switching views lands on today rather than wherever the last view happened to be pointing.
+The **week** is a horizontal strip of seven days, like one row of the month grid, with the
+week's schedule and to-dos in two columns beneath it. Days already past are greyed but stay
+selectable — last Tuesday is exactly where you go to write up what happened. Picking a day in
+the strip brings that day's entries forward and drops the other six back to grey.
+
+In the month and week grids, the first tap selects a day and the second opens it. "Go to
+today" is one press from any view, and switching views lands on today rather than wherever
+the last view happened to be pointing.
+
+**Repeating events appear on every day they fall on.** `FREQ`, `INTERVAL`, `COUNT`, `UNTIL`
+and `BYDAY` are expanded over the fetched window, and `EXDATE` is honoured so an occurrence
+you cancelled stays cancelled. Editing one occurrence edits the series, and the form says so
+— the date it shows is when the series starts, not the day you tapped to get there.
 
 ### Every calendar you watch, together
 
@@ -81,6 +92,25 @@ Every day inside a period resolves to the same path, so Tuesday and Thursday can
 with two different "weekly" notes. Weeks start on Sunday, matching the week view the button
 is pressed from.
 
+**One folder for everything**, if you want it: one button sets all six note types to a single
+dated tree, so a year's folder holds that year's note, its quarters, its months, and each
+month holds its own note beside the days inside it.
+
+```
+Note/Journal/2026/Year.note
+Note/Journal/2026/Q3/Quarter.note
+Note/Journal/2026/September/Month.note
+Note/Journal/2026/September/Week 38.note
+Note/Journal/2026/September/14/Daily.note
+```
+
+Notes you already have are never moved. The layouts are offered as presets too, so you can
+take one and leave the rest.
+
+**The date at the top of a new daily note**, optionally — written into a text box in the
+format you chose, when the note is created and never when an existing one is opened, so it
+cannot write into a page twice. Leave it off if your template already prints the date.
+
 **Templates** come from the device's built-in set, your own `MyStyle` folder, or any PNG or
 JPG anywhere on the device — three tabs, real thumbnails, and a search box. The template is
 applied when the note is created; changing it later does not restyle notes you already have.
@@ -105,8 +135,16 @@ CalDAV, so the plugin never modifies anyone else's event.
 
 ### Tasks, properly
 
-Every watched list in one place, earliest-due first so overdue leads. Search, sort, tick off,
-edit anything.
+Every watched list in one place, cut into **Overdue, Today, Next 7 days, Later** and **No
+date**, with a count on each heading — so "what is late" is answered by looking rather than by
+reading dates down the page. Search, sort, tick off, edit anything.
+
+Ticking an ordinary task completes it there and then. Only a task captured from handwriting
+asks first, because completing that one also edits your own note by removing the box from the
+page it came from.
+
+A task and its steps stay together: a step due next week under a parent that is already
+overdue is filed with its parent, because the two are one piece of work.
 
 **Sub tasks.** A task with steps shows a fold arrow and a count, folded by default, with each
 family placed by its **soonest outstanding step** — so a piece of work due this morning sits
@@ -151,6 +189,17 @@ that reads the list.
 The reverse trip is the one thing that cannot work. Tapping the box on the page shows the Task
 Hub logo — the SDK's link types are pages, files, documents, images and URLs, none of which
 can reach a plugin, and the image says so rather than leaving you wondering.
+
+### Opens fast, and stays usable while it loads
+
+The last lists fetched are kept on the device, so a cold open draws real content immediately
+rather than an empty list behind a spinner; the fetch then replaces it in the background.
+
+Events are requested for a **window** — three months back, twelve forward — rather than every
+`VEVENT` ever written. Paging outside it fetches the missing stretch and merges it, so going
+back through the years costs one small fetch per new stretch instead of re-downloading
+everything. Only open tasks are fetched at all. Parsing yields to the interface every few
+objects, so taps still land while a large collection is being read.
 
 ### Built for e-ink
 
@@ -286,6 +335,13 @@ Copyright © 2026 Sparkinman.
 - Handwriting inside plugin views is impossible on this firmware — showing a plugin view
   gates the EMR pen at the hardware level. Capture via lasso on the page is the supported
   path; finger touch works normally in the UI.
+- Recurrence is expanded by this plugin, not by the server, and only for the rules it can
+  read: `FREQ`, `INTERVAL`, `COUNT`, `UNTIL` and `BYDAY`. Anything else — a `BYSETPOS`, an
+  ordinal `BYDAY` on a monthly rule — falls back to showing the event on its start date
+  alone rather than guessing at days it does not fall on.
+- Editing a repeating event edits the whole series. There is no "this occurrence only": the
+  server holds one object, and the form is explicit that changing the date moves every
+  occurrence.
 - `TZID` is treated as device-local. No timezone database is bundled, so a foreign-zone event
   can sit an hour out — better than dropping it.
 - One-way for now: nothing is read back beyond listing. No un-complete, no dedupe, no

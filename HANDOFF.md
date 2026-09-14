@@ -1,11 +1,11 @@
-# Task Hub — state as of 2026-09-06
+# Task Hub — state as of 2026-09-14
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-**317 tests across 16 suites**; `tsc` and eslint clean, all verified 2026-09-06.
-Current build **0.50.0** (versionCode 65).
+**447 tests across 25 suites**; `tsc` and eslint clean, all verified 2026-09-14.
+Current build **0.64.0** (versionCode 79).
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
-**licensed GPLv3**, with v0.50.0 released and `TaskHub.snplg` attached to it.
+**licensed GPLv3**, with v0.64.0 released and `TaskHub.snplg` attached to it.
 
 One plugin: **Task Hub** (`vfmnvjq0i1hxf8gu`).
 
@@ -17,12 +17,150 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
 
+## What changed in 0.54.0 – 0.64.0
+
+All device-verified unless said otherwise. Roughly in the order it was done.
+
+### Settings were unusable in two ways
+
+**The template picker covered the page and could not be tapped.** `TemplatePicker` drew its
+grid inline, inside the settings `ScrollView`, and `styles.overlayScrim` is
+`position: absolute` — so it was positioned against the *row* that opened it rather than
+against the window. It painted over whatever settings were underneath, scrolled with the
+page, and Android does not deliver touches to a child drawn outside its parent's bounds, so
+most of the tiles could be seen but not chosen. Split into `TemplatePicker` (the summary row)
+and `TemplateSheet` (the grid), with the sheet mounted at the window root beside
+`FolderPicker` and `MiniCalendar`. **Any absolutely-positioned overlay belongs at the root,
+never in scrolling content** — this is the second time that has bitten.
+
+**Save and exit had gone missing.** Commit `7ada139` removed both the header's Done & Exit
+and the Save at the top of the page, leaving one pair of buttons about two thirds of the way
+down a page many screens long. Scroll past them and there was no way out at all. They are now
+a bar pinned at the foot of the window while settings are open — a flex sibling of the
+`ScrollView`, not an overlay, so it cannot cover the last row, and the window is
+`adjustResize` so it rides above the keyboard.
+
+Browsing to a folder now goes through `changeConfig` rather than `setLocalConfig`, so it
+marks the form edited; it did not before, and a slow settings load could wipe a folder just
+picked.
+
+### Opening got much faster
+
+`EVENT_QUERY` had no `time-range`, so every opening downloaded **every VEVENT ever written**,
+in full iCal, and parsed it in JS on an e-ink CPU. That was the bulk of the wait, and it grew
+with the calendar. Now:
+
+- `src/eventwindow.ts` (pure) decides a window — three months back, twelve forward — and
+  widens it when the view moves outside. Widening fetches only the missing stretch and merges
+  it by `href|uid|startAt`. The window resets to the default on every opening, or a session
+  that wandered back to 2019 would make every later opening as slow as the widest thing ever
+  looked at.
+- Servers expand recurrence for time-range matching per RFC 4791, so repeating events are not
+  lost by narrowing. A server that rejects the filter gets one unfiltered retry — an empty
+  calendar would be a worse regression than a slow one.
+- Parsing yields to the event loop every 40 objects. `setTimeout`, not an awaited promise: a
+  resolved promise is a microtask and yields to nothing. This is what made an opening feel
+  like a freeze rather than a wait — the panel had drawn, but taps went nowhere.
+- `src/cache.ts` keeps the last lists in `Document/TaskHub/cache.json` so a cold open draws
+  real content immediately. State holds the server's own objects; the cache and every write
+  path see those, never anything derived.
+- `loading` is a **count**, not a flag: the opening refresh and a widening fetch overlap, and
+  whichever finished first used to clear the line while the other was still working.
+
+### Recurring events only ever appeared once
+
+`eventsOnDay` buckets by `startDate`, and the server returns one master VEVENT carrying an
+RRULE — so a weekly stand-up showed on the day it was created and never again. `src/expand.ts`
+(pure) reads `FREQ`, `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`, and `EXDATE` is now parsed so
+cancelled occurrences stay cancelled. Two traps, both caught by tests before the device saw
+them:
+
+1. **Editing an occurrence would have moved the whole series.** A repeat is one object on the
+   server, so seeding the edit form with the tapped occurrence's date meant changing a title
+   on the 14th silently rewrote DTSTART. Each expanded copy carries `occurrence.seriesStartDate`,
+   the form uses that, and the editor says plainly that it edits the series.
+2. **Monthly and yearly rules drifted.** Stepping a year on from 29 February lands on 1 March
+   and every step after is anchored wrong. Each occurrence is computed from the start date
+   rather than by advancing a cursor. The "this month has no 31st" skip must apply only to
+   MONTHLY and YEARLY — applied to DAILY/WEEKLY it kills every occurrence after the first,
+   because the day of the month legitimately changes.
+
+Expansion is **derived for display** (`shownEvents`), never stored.
+
+### A dead collection could not be removed
+
+Reported on device: a calendar deleted from the server warned on every refresh, and the
+warning said to open Settings and untick it — but the ticklists there are built from what
+**discovery** finds, so a collection no longer on the server had no row and no box. The
+advice could not be followed. Three fixes: the warning itself has a **Remove** button
+(`forgetCollections`); stale entries are listed in Settings marked "not on the server"; and
+URLs are compared with `sameCollection`, which ignores a trailing slash — the listing code
+strips one before asking the server, so an untick comparing raw strings could silently fail
+to match the very collection being removed.
+
+### The date at the top of a new daily note — and how the first attempt failed
+
+Optional, off by default, under Settings → Notes → Daily notes.
+
+**The first attempt did nothing at all, silently.** It used `PluginNoteAPI.insertText` and ran
+*after* `leaveForNote()`, which calls `closePluginView` — so the plugin view had already been
+torn down, and `insertText` writes into whatever page is *displayed*, which nothing was. It
+failed its wait and reported the reason only to logcat.
+
+The working version writes into the **file**, before the note is opened and before the
+handover:
+
+- `PluginCommAPI.createElement(Element.TYPE_TEXT)` first, always. An object of the right shape
+  is rejected outright — it must be allocated natively so the host finds its accessors behind
+  the uuid. Same lesson the Tables plugin paid a round trip for.
+- `PluginFileAPI.insertElements(path, 0, [element])`, and **no `saveCurrentNote` afterwards**:
+  this wrote straight to the file, and saving would push the host's in-memory page back over
+  it. That is the reverse of the rule for the in-memory calls. Getting the two the wrong way
+  round destroys the work silently.
+- The note is not open, so `getPageDisplaySize` has nothing to answer for; `getPageSize(path, 0)`
+  is used and falls back to a Manta page if refused (it is FILE:READ-gated on recent firmware).
+- Failure is reported **in the confirmation the user sees**, not only in logcat. A silent
+  no-op is indistinguishable from the setting not working, which is exactly how the first
+  attempt wasted a build cycle.
+
+**`insertText` does not draw at the top of the rect it is given.** The glyph baseline falls
+about `2.05 x fontSize` **below** `textRect.top`, and the call **ignores the height** entirely,
+building a fixed-height element — what scales with the font is where the text sits inside it.
+Taking the rect at face value put the "heading" a fifth of the way down the page. The figure
+is taken from taoist22's `sn-datetime`, which measured it on hardware against 8mm ruled lines;
+`src/headinglayout.ts` works backwards from where the glyphs should land. Not re-derived here,
+because deriving it costs a build-and-install cycle to learn what somebody has written down.
+
+### Notes, tasks, and the look
+
+- **One folder for everything**: a button setting all six note types to one dated tree
+  (`SHARED_TREE_LAYOUTS` / `SHARED_TREE_ROOT`), plus the same layouts as presets. Confirms
+  first, and says plainly that existing notes are not moved.
+- **Open on** — Tasks or Calendar. Shipped in 0.55.0 buried inside the "Date and time format"
+  fold, where it was never found; it is now outside every fold at the top of Settings. A
+  setting nobody would look for under that heading may as well not exist.
+- **Tasks are grouped** Overdue / Today / Next 7 days / Later / No date (`dueBucket`,
+  `groupRows`), cut against a timestamp captured per opening — the React tree outlives a
+  close, so a plugin left loaded overnight would keep calling yesterday "today". Families stay
+  whole. `DUE_FILTERS` stayed, and a test pins the two to the same boundaries.
+- **Ticking an ordinary task no longer asks.** `perform` was split out of `runAsk` so an
+  unconfirmed action still gets the same status, error handling and scoped reload. A captured
+  task still confirms, because completing it edits the user's note.
+- **Rounded corners throughout** (`R.sm/md/lg/pill`), a hairline month grid with neighbouring
+  days filled in, the selected day as a filled pill, C/T/N as filled discs. Counts and
+  progress bars were tried and rejected by the author — the circled letters say *which*, which
+  is what a grid is read for.
+- **Week view rebuilt**: horizontal strip plus Schedule / To-dos columns, matching the Day and
+  Month views' order. Selecting a day emphasises its rows and greys the rest. A "now" rule was
+  tried and removed as redundant beside today's outlined cell.
+- Month and week both **select on first tap, open on second**.
+
 ## Build
 
 ```powershell
 npx tsc --noEmit                              # MUST pass before building
 npx eslint . --ext .ts,.tsx,.js
-npx jest                                      # 317 tests, 16 suites
+npx jest                                      # 447 tests, 25 suites
 .uildPlugin.ps1                             # ~15 s -> build/outputs/TaskHub.snplg (6.91 MB)
 .uildDemo.ps1                               # -> build/outputs/TaskHubDemo.snplg, restores the tree
 ```
@@ -394,11 +532,28 @@ Borders are deliberately not scaled, and positive spacing never rounds to zero.
    marking* above).
 3. `ios/` is dead RN template scaffolding, still full of `tasksync` names.
    Deleting it was offered and not yet decided.
-4. `matchesFilter` / `DUE_FILTERS` in `src/ical.ts` are exported and tested but
-   unused since search + sort replaced the filter chips. Delete, or reinstate an
-   Overdue/Today row on the Tasks tab.
-5. Day view's two-column split is unverified for cramping on a real panel.
-6. Publish-review item 7 (end-to-end device testing) is still the author's to do.
+4. Day view's two-column split is unverified for cramping on a real panel.
+5. Publish-review item 7 (end-to-end device testing) is still the author's to do.
+6. **The calendar as an image in a note** — the next real feature, and what the author
+   actually asked for when they asked about handwriting on the views. `PluginNoteAPI.insertImage(pngPath)`
+   inserts a PNG into the current page and layer, and pictures are allowed on custom layers,
+   so a day, week or month view could go onto its own layer with the user writing over it on
+   the main one. Layer mechanics are proven in the Tables plugin: `modifyLayers` to make the
+   layer current, write, restore in a `finally`, filter `layerId >= 0` or the call is rejected
+   outright, and never leave the user on the plugin's layer. **Render the calendar
+   purpose-built at page resolution — do not screenshot the plugin view**, which would be
+   panel-resolution, soft when scaled, and full of our own buttons.
+7. **Handwriting inside the plugin's own views is not worth attempting.** Checked against the
+   docs: the only primitive is `PluginManager.registerMotionListener` (raw pointers,
+   `toolType 2` is the EMR pen), the ink would have to be drawn in React Native on a panel
+   that redraws in ~300ms, and pen events also reach the note file by a hardware direct path
+   no overlay can gate — so it would need full-screen EMR disable throughout. Item 6 is the
+   answer to the same want.
+8. **A `YYYYMMDD` search keyword on daily notes**, so they are findable by date in the
+   device's own search whatever the visible format is set to. `sn-datetime` does exactly
+   this; not implemented here.
+9. `matchesFilter` / `DUE_FILTERS` now serve as a cross-check in `dueBucket`'s tests but still
+   have no UI of their own. Either build the filter row or let the buckets be the only cut.
 
 ---
 
@@ -426,3 +581,5 @@ Two things worth not re-litigating:
   gets "no task lists found" when the real problem is their password.
 
 Covered by `__tests__/discovery-wellknown.test.ts`.
+
+

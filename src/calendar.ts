@@ -62,8 +62,44 @@ export function monthGrid(year: number, month: number): DayCell[] {
   return cells;
 }
 
-export function chunkWeeks(cells: DayCell[]): DayCell[][] {
-  const weeks: DayCell[][] = [];
+/** A grid cell that always names a real day, and says whose month it is. */
+export interface FilledCell {
+  iso: string;
+  day: number;
+  /** True for the days either side that only exist to square off the grid. */
+  outside: boolean;
+}
+
+/**
+ * The same grid, with the padding filled in from the neighbouring months.
+ *
+ * A month grid that stops dead at the 1st and the 30th leaves ragged white
+ * corners, which is most of what makes a calendar look unfinished. Paper diaries
+ * print the surrounding days in grey, and so does every calendar app worth
+ * copying.
+ *
+ * Deliberately additive rather than a change to `monthGrid`: that function's
+ * nulls are what the week-number gutter keys off, and its tests pin the
+ * behaviour. This one is for drawing.
+ */
+export function monthGridFilled(year: number, month: number): FilledCell[] {
+  return monthGrid(year, month).map((cell, index) => {
+    if (cell.iso !== null && cell.day !== null) {
+      return {iso: cell.iso, day: cell.day, outside: false};
+    }
+    // Padding: count from the 1st of the month by this cell's distance from it.
+    const leading = new Date(year, month, 1).getDay();
+    const date = new Date(year, month, 1 + (index - leading));
+    return {
+      iso: iso(date.getFullYear(), date.getMonth(), date.getDate()),
+      day: date.getDate(),
+      outside: true,
+    };
+  });
+}
+
+export function chunkWeeks<T>(cells: T[]): T[][] {
+  const weeks: T[][] = [];
   for (let i = 0; i < cells.length; i += 7) {
     weeks.push(cells.slice(i, i + 7));
   }

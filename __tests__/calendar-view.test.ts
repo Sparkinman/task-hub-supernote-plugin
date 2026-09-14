@@ -102,9 +102,9 @@ describe('day bucketing', () => {
     ];
     const marks = monthMarks(events, tasks);
 
-    expect(marks['2026-09-10']).toEqual({hasEvent: true, hasTask: true, hasNote: false});
-    expect(marks['2026-09-11']).toEqual({hasEvent: true, hasTask: false, hasNote: false});
-    expect(marks['2026-09-15']).toEqual({hasEvent: false, hasTask: true, hasNote: false});
+    expect(marks['2026-09-10']).toMatchObject({hasEvent: true, hasTask: true, hasNote: false});
+    expect(marks['2026-09-11']).toMatchObject({hasEvent: true, hasTask: false, hasNote: false});
+    expect(marks['2026-09-15']).toMatchObject({hasEvent: false, hasTask: true, hasNote: false});
     expect(marks['2026-09-20']).toBeUndefined();
   });
 

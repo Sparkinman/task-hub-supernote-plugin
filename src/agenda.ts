@@ -11,6 +11,7 @@ import {toDateInput, type VEvent, type VTodo} from './ical';
 
 export interface DayMarks {
   hasEvent: boolean;
+  /** True only when something is still outstanding — see `monthMarks`. */
   hasTask: boolean;
   hasNote: boolean;
 }
@@ -52,8 +53,8 @@ export function monthMarks(
     touch(event.startDate).hasEvent = true;
   }
   for (const task of tasks) {
-    // Only open tasks mark a day. A T on a day whose tasks are all finished is
-    // noise — the marker exists to show where work is still outstanding.
+    // Only open tasks mark a day. A marker on a day whose tasks are all
+    // finished is noise — it exists to show where work is still outstanding.
     if (task.dueAt !== null && !task.completed) {
       touch(dayOf(task.dueAt)).hasTask = true;
     }

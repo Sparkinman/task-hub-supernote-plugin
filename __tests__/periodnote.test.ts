@@ -171,7 +171,7 @@ describe('layout tokens', () => {
       for (const preset of presets) {
         const path = periodNotePath(
           period as Period,
-          {enabled: true, root: 'Note/X', layout: preset.layout, template: ''},
+          {enabled: true, root: 'Note/X', layout: preset.layout, template: '', dateHeading: false},
           '2026-09-09',
           'iso',
         );

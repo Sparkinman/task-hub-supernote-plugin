@@ -178,6 +178,11 @@ export async function openNote(relativePath: string): Promise<void> {
   unwrap(await PluginFileAPI.openFile(path, 0), 'openFile');
 }
 
+/** The absolute path a relative note path resolves to, for the SDK's own calls. */
+export async function absoluteNotePath(relativePath: string): Promise<string> {
+  return absolute(relativePath);
+}
+
 /**
  * Create the note file for a day. Does not open it.
  *

@@ -9,6 +9,9 @@ import {
 } from './periodnote';
 import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from './meetingnote';
 import type {DateFormat, TimeFormat} from './format';
+
+/** The hub's two tabs, named here because the stored settings carry the choice. */
+export type StartTab = 'tasks' | 'calendar';
 import type {MarkStyle} from './markstyle';
 
 export interface ServerConfig {
@@ -32,6 +35,15 @@ export interface ServerConfig {
   calendarUrls: string[];
   dateFormat: DateFormat;
   timeFormat: TimeFormat;
+  /**
+   * Which tab the hub opens on.
+   *
+   * Somebody who runs no CalDAV server has an empty Tasks tab and everything
+   * they use on the Calendar one, and opening on the empty tab every time is a
+   * tap they never wanted. Defaults to tasks, which is what the plugin has
+   * always done, so nobody's opening changes under them.
+   */
+  startTab: StartTab;
   /**
    * How a captured task marks the page it came from. Writes into the user's own
    * note, so it is configurable and can be turned off entirely.
@@ -92,6 +104,7 @@ export const EMPTY_CONFIG: ServerConfig = {
   defaultCollectionUrl: '',
   calendarUrls: [],
   dateFormat: 'iso',
+  startTab: 'tasks',
   timeFormat: '24',
   markStyle: 'dashed',
   markShade: false,
@@ -115,10 +128,13 @@ export function hasCalendars(config: ServerConfig): boolean {
 
 /** Toggle a VEVENT collection in the watched calendar set. */
 export function toggleCalendar(config: ServerConfig, url: string): ServerConfig {
+  // Compared loosely, not by string equality: a URL that reached the settings
+  // by a different route may differ only by a trailing slash, and an untick
+  // that silently failed to match is how a dead collection became unremovable.
   return {
     ...config,
-    calendarUrls: config.calendarUrls.includes(url)
-      ? config.calendarUrls.filter(u => u !== url)
+    calendarUrls: config.calendarUrls.some(u => sameCollection(u, url))
+      ? config.calendarUrls.filter(u => !sameCollection(u, url))
       : [...config.calendarUrls, url],
   };
 }
@@ -144,6 +160,41 @@ export function isConfigured(config: ServerConfig): boolean {
 }
 
 /**
+ * The form a collection URL is compared in.
+ *
+ * The listing code strips a trailing slash before it asks the server, so the
+ * URL a "collection has gone" report carries need not match the one in the
+ * settings character for character. Comparing raw strings therefore silently
+ * failed to find the very collection the user was trying to get rid of.
+ */
+export function sameCollection(a: string, b: string): boolean {
+  const tidy = (u: string) => u.trim().replace(/\/+$/, '');
+  return tidy(a) === tidy(b);
+}
+
+/**
+ * Forget collections that are no longer on the server.
+ *
+ * Removing them from the settings form is the only way to stop the warning
+ * about them, and until this existed there was no way to do it at all: the
+ * ticklists in Settings are built from what discovery finds, so a collection
+ * deleted on the server has no row and therefore no box to untick. The advice
+ * the warning gave — "tap Discover, and untick it" — could not be followed.
+ *
+ * The default task list follows the removal rather than being left dangling,
+ * exactly as `toggleCollection` does when the same list is unticked by hand.
+ */
+export function forgetCollections(config: ServerConfig, urls: string[]): ServerConfig {
+  const gone = (url: string) => urls.some(u => sameCollection(u, url));
+  const collectionUrls = config.collectionUrls.filter(u => !gone(u));
+  const calendarUrls = config.calendarUrls.filter(u => !gone(u));
+  const target = collectionUrls.some(u => sameCollection(u, config.defaultCollectionUrl))
+    ? config.defaultCollectionUrl
+    : collectionUrls[0] ?? '';
+  return {...config, collectionUrls, calendarUrls, defaultCollectionUrl: target};
+}
+
+/**
  * Toggle a collection in the watched set.
  *
  * Deselecting the collection that new tasks go to would leave the target
@@ -151,12 +202,12 @@ export function isConfigured(config: ServerConfig): boolean {
  * still selected, and a first selection claims it automatically.
  */
 export function toggleCollection(config: ServerConfig, url: string): ServerConfig {
-  const selected = config.collectionUrls.includes(url)
-    ? config.collectionUrls.filter(u => u !== url)
+  const selected = config.collectionUrls.some(u => sameCollection(u, url))
+    ? config.collectionUrls.filter(u => !sameCollection(u, url))
     : [...config.collectionUrls, url];
 
   let target = config.defaultCollectionUrl;
-  if (!selected.includes(target)) {
+  if (!selected.some(u => sameCollection(u, target))) {
     target = selected[0] ?? '';
   }
   return {...config, collectionUrls: selected, defaultCollectionUrl: target};

@@ -28,6 +28,17 @@ export interface DailyNoteConfig {
   layout: string;
   /** Optional .note template path passed to createNote; blank means the default. */
   template: string;
+  /**
+   * Write the date into a text box at the top of a newly created note.
+   *
+   * Only on creation, never on opening: adding it every time a note was opened
+   * would write into the user's own page repeatedly. Optional because a
+   * template may already print the date, in which case this would say it twice.
+   *
+   * Always set — the sanitiser fills it in as false for a settings file written
+   * before it existed, so nobody's existing notes change behaviour under them.
+   */
+  dateHeading: boolean;
 }
 
 export const DEFAULT_DAILY_NOTE: DailyNoteConfig = {
@@ -35,9 +46,14 @@ export const DEFAULT_DAILY_NOTE: DailyNoteConfig = {
   root: 'Note/Daily',
   layout: '{YYYY}/{MM}-{MMMM}/{DATE}',
   template: '',
+  dateHeading: false,
 };
 
 export const LAYOUT_PRESETS: {key: string; label: string; layout: string}[] = [
+  // First because it is the one that lets every kind of note share a tree: set
+  // all six roots to the same folder and this puts the day's note inside the
+  // month's, beside the month note itself. See SHARED_TREE_LAYOUTS.
+  {key: 'shared', label: 'Year / Month name / Day / Daily', layout: '{YYYY}/{MMMM}/{DD}/Daily'},
   {key: 'ymd', label: 'Year / Month / Date', layout: '{YYYY}/{MM}-{MMMM}/{DATE}'},
   {key: 'ym', label: 'Year-Month / Date', layout: '{YYYY}-{MM}/{DATE}'},
   {key: 'y', label: 'Year / Date', layout: '{YYYY}/{DATE}'},

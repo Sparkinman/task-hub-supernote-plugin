@@ -397,8 +397,23 @@ export interface VEvent {
   recurring: boolean;
   /** The RRULE value as stored, without the property name. See `recurrence.ts`. */
   rrule?: string;
+  /**
+   * Dates the series explicitly skips, as local 'YYYY-MM-DD'.
+   *
+   * A deleted occurrence of a repeating event is recorded as an EXDATE on the
+   * master rather than by removing anything, so expanding a rule without
+   * reading these puts back every occurrence the user has ever cancelled.
+   */
+  exdates?: string[];
   origin?: string;
   originName?: string;
+  /**
+   * Set on the copies `expandEvents` makes, never on anything read from the
+   * server. It carries the date the series itself starts on, because an
+   * occurrence's own date must not be written back as the series' DTSTART —
+   * see `expand.ts`.
+   */
+  occurrence?: {seriesStartDate: string; seriesStartTime?: string};
 }
 
 /**
@@ -468,6 +483,7 @@ export function parseVEvents(text: string): VEvent[] {
           allDay: current.allDay ?? false,
           recurring: current.recurring ?? false,
           rrule: current.rrule,
+          exdates: current.exdates,
           origin: current.origin,
           originName: current.originName,
         });
@@ -502,6 +518,21 @@ export function parseVEvents(text: string): VEvent[] {
       case 'LOCATION':
         current.location = unescapeText(value);
         break;
+      case 'EXDATE': {
+        // Comma-separated, and repeatable — a series with many cancellations
+        // may carry several EXDATE lines, so these accumulate.
+        const dates: string[] = [];
+        for (const part of value.split(',')) {
+          const parsed = parseStamp(part.trim(), dateOnly);
+          if (parsed) {
+            dates.push(parsed.date);
+          }
+        }
+        if (dates.length > 0) {
+          current.exdates = [...(current.exdates ?? []), ...dates];
+        }
+        break;
+      }
       case 'RRULE':
         // Presence decides how notes are filed — a repeating event shares one
         // note across occurrences, a one-off gets its date in the filename —
@@ -715,6 +746,59 @@ export function matchesFilter(todo: VTodo, filter: DueFilter, now: Date): boolea
     default:
       return true;
   }
+}
+
+/**
+ * Which section of the task list a task belongs in.
+ *
+ * The list used to be one flat sort, so "what is late" — the only question most
+ * people open a to-do list to ask — had to be worked out by reading dates down
+ * the page. These buckets are the same cuts `DUE_FILTERS` already names, in the
+ * order they matter.
+ */
+export type DueBucket = 'overdue' | 'today' | 'week' | 'later' | 'nodate';
+
+export const DUE_BUCKETS: {key: DueBucket; label: string}[] = [
+  {key: 'overdue', label: 'Overdue'},
+  {key: 'today', label: 'Today'},
+  {key: 'week', label: 'Next 7 days'},
+  {key: 'later', label: 'Later'},
+  {key: 'nodate', label: 'No date'},
+];
+
+/**
+ * The bucket a task falls in.
+ *
+ * Built on the same boundaries as `matchesFilter` — day starts in local time,
+ * lateness measured against the actual moment rather than the start of the day
+ * — so the sections and the filters cannot disagree about where a task sits.
+ *
+ * Unlike `matchesFilter`, completion is not considered. The two answer
+ * different questions: the filter asks "what should I chase", where a finished
+ * task plainly should not be, while this asks "when was this due", which has
+ * the same answer either way. Completed tasks are listed in their own Done
+ * section rather than among these, so in practice the case does not arise —
+ * and excluding them here only created a hole to fall through, which put a task
+ * finished a fortnight ago under Today.
+ */
+export function dueBucket(todo: VTodo, now: Date): DueBucket {
+  if (todo.dueAt === null) {
+    return 'nodate';
+  }
+  const todayStart = startOfDay(now);
+  const dayMs = 24 * 60 * 60 * 1000;
+  // Past its moment, not merely past its day: something due at 09:00 is late at
+  // 10:00, which is exactly when the user wants to be told.
+  if (todo.dueAt < now.getTime()) {
+    return 'overdue';
+  }
+  if (todo.dueAt < todayStart + dayMs) {
+    return 'today';
+  }
+  if (todo.dueAt < todayStart + 7 * dayMs) {
+    return 'week';
+  }
+  return 'later';
 }
 
 export type SortKey = 'due-desc' | 'due-asc' | 'name';

@@ -73,6 +73,51 @@ class SettingsStoreModule(reactContext: ReactApplicationContext) :
   }
 
   /**
+   * A file in the plugin's own folder, addressed by bare name.
+   *
+   * Separate from read()/write(), which are bound to settings.json: the cache
+   * that lets the task list paint before the server answers must not share a
+   * file with the user's settings, or a corrupt cache would cost them their
+   * server configuration.
+   *
+   * The name is reduced to its last path segment, so nothing a caller passes can
+   * reach outside Document/TaskHub.
+   */
+  private fun namedFile(name: String): File = File(storeDir(), File(name).name)
+
+  /** Resolves to the file's contents, or null when it is not there. */
+  @ReactMethod
+  fun readNamed(name: String, promise: Promise) {
+    try {
+      val file = namedFile(name)
+      if (!file.exists() || !file.canRead()) {
+        promise.resolve(null)
+        return
+      }
+      promise.resolve(file.readText(Charsets.UTF_8))
+    } catch (e: Exception) {
+      promise.reject("READ_FAILED", e.message ?: "Could not read " + name, e)
+    }
+  }
+
+  /** Resolves to the absolute path written. */
+  @ReactMethod
+  fun writeNamed(name: String, contents: String, promise: Promise) {
+    try {
+      val dir = storeDir()
+      if (!dir.exists() && !dir.mkdirs()) {
+        promise.reject("WRITE_FAILED", "Could not create " + dir.absolutePath)
+        return
+      }
+      val file = namedFile(name)
+      file.writeText(contents, Charsets.UTF_8)
+      promise.resolve(file.absolutePath)
+    } catch (e: Exception) {
+      promise.reject("WRITE_FAILED", e.message ?: "Could not write " + name, e)
+    }
+  }
+
+  /**
    * Composes the image a page mark links to: the logo, large, with a caption.
    *
    * Drawn natively rather than shipped as a finished PNG because the caption has

@@ -41,6 +41,7 @@ export const DEFAULT_WEEK_NOTE: PeriodNoteConfig = {
   root: 'Note/Weekly',
   layout: '{YYYY}/W{WW}',
   template: '',
+  dateHeading: false,
 };
 
 export const DEFAULT_MONTH_NOTE: PeriodNoteConfig = {
@@ -48,6 +49,7 @@ export const DEFAULT_MONTH_NOTE: PeriodNoteConfig = {
   root: 'Note/Monthly',
   layout: '{YYYY}/{MM}-{MMMM}',
   template: '',
+  dateHeading: false,
 };
 
 export const DEFAULT_QUARTER_NOTE: PeriodNoteConfig = {
@@ -55,6 +57,7 @@ export const DEFAULT_QUARTER_NOTE: PeriodNoteConfig = {
   root: 'Note/Quarterly',
   layout: '{YYYY}/{QQ}',
   template: '',
+  dateHeading: false,
 };
 
 export const DEFAULT_YEAR_NOTE: PeriodNoteConfig = {
@@ -62,6 +65,7 @@ export const DEFAULT_YEAR_NOTE: PeriodNoteConfig = {
   root: 'Note/Yearly',
   layout: '{YYYY}',
   template: '',
+  dateHeading: false,
 };
 
 /** Layout choices offered per period, mirroring the daily note's presets. */
@@ -70,26 +74,60 @@ export const PERIOD_LAYOUT_PRESETS: Record<
   {key: string; label: string; layout: string}[]
 > = {
   week: [
+    {key: 'shared', label: 'Year / Month name / Week', layout: '{YYYY}/{MMMM}/Week {WW}'},
     {key: 'y-w', label: 'Year / Week number', layout: '{YYYY}/W{WW}'},
     {key: 'y-m-w', label: 'Year / Month / Week', layout: '{YYYY}/{MM}-{MMMM}/W{WW}'},
     {key: 'y-start', label: 'Year / Week starting', layout: '{YYYY}/Week of {START}'},
     {key: 'flat', label: 'All in one folder', layout: '{YYYY}-W{WW}'},
   ],
   month: [
+    {key: 'shared', label: 'Year / Month name / Month', layout: '{YYYY}/{MMMM}/Month'},
     {key: 'y-m', label: 'Year / Month', layout: '{YYYY}/{MM}-{MMMM}'},
     {key: 'y-name', label: 'Year / Month name', layout: '{YYYY}/{MMMM}'},
     {key: 'flat', label: 'All in one folder', layout: '{YYYY}-{MM}'},
   ],
   quarter: [
+    {key: 'shared', label: 'Year / Quarter / Quarter', layout: '{YYYY}/{QQ}/Quarter'},
     {key: 'y-q', label: 'Year / Quarter', layout: '{YYYY}/{QQ}'},
     {key: 'y-q-months', label: 'Year / Quarter and months', layout: '{YYYY}/{QQ} {MMM}-{MMM_END}'},
     {key: 'flat', label: 'All in one folder', layout: '{YYYY}-{QQ}'},
   ],
   year: [
+    {key: 'shared', label: 'Year / Year', layout: '{YYYY}/Year'},
     {key: 'flat', label: 'All in one folder', layout: '{YYYY}'},
     {key: 'nested', label: 'Year folder', layout: '{YYYY}/{YYYY}'},
   ],
 };
+
+/**
+ * The layouts that put every kind of note in one calendar tree.
+ *
+ * Applied together with a single root, these nest by date and name the file
+ * after what it is, so a year's folder holds that year's note, its quarters,
+ * its months, and each month holds its own note beside the days inside it:
+ *
+ * ```
+ * Note/Journal/2026/Year.note
+ * Note/Journal/2026/Q3/Quarter.note
+ * Note/Journal/2026/September/Month.note
+ * Note/Journal/2026/September/Week 38.note
+ * Note/Journal/2026/September/14/Daily.note
+ * ```
+ *
+ * Kept here as one object rather than being read back out of the preset lists:
+ * the settings screen applies all five at once, and matching them up by the
+ * 'shared' key at the call site would break silently if a key were ever renamed.
+ */
+export const SHARED_TREE_LAYOUTS: Record<Period, string> = {
+  day: '{YYYY}/{MMMM}/{DD}/Daily',
+  week: '{YYYY}/{MMMM}/Week {WW}',
+  month: '{YYYY}/{MMMM}/Month',
+  quarter: '{YYYY}/{QQ}/Quarter',
+  year: '{YYYY}/Year',
+};
+
+/** Where the shared tree is put when the user has not chosen somewhere else. */
+export const SHARED_TREE_ROOT = 'Note/Journal';
 
 function safeSegment(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, '-').trim();

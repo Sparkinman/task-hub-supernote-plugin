@@ -11,6 +11,10 @@
  * the user keeps in MyStyle. They are separate collections that happen to be
  * usable in the same place, and mixing them into one long grid made it
  * impossible to tell which was which or to find your own among fifty built-ins.
+ *
+ * Deliberately two components. `TemplatePicker` is the one row that sits in the
+ * settings form; `TemplateSheet` is the grid, and it must be mounted at the app
+ * root, OUTSIDE the settings ScrollView — see its own note for why.
  */
 
 import React, {useEffect, useState} from 'react';
@@ -21,45 +25,79 @@ import {externalRoot} from '../storage';
 import {TemplateBrowser} from './TemplateBrowser';
 import {Button, Field, Tabs, styles} from './common';
 
+/** The label a chosen template shows, falling back to the file's own name. */
+function chosenLabel(templates: NoteTemplate[], value: string): string {
+  const chosen = templates.find(t => t.vUri === value);
+  if (chosen) {
+    return chosen.name;
+  }
+  return value ? value.slice(value.lastIndexOf('/') + 1) : 'Device default';
+}
+
 /**
- * Template chooser as a modal.
+ * The settings row that opens the chooser.
  *
- * The grid was previously inline, which pushed the rest of settings off screen.
- * As a sheet it can scroll independently and costs one row when closed.
+ * It owns nothing but the summary line: opening is the caller's business,
+ * because the sheet it opens is mounted somewhere else entirely.
  */
 export function TemplatePicker(props: {
   templates: NoteTemplate[];
   /** Currently chosen vUri, or '' for the device default. */
   value: string;
   label: string;
-  onPick: (vUri: string) => void;
+  onOpen: () => void;
 }): React.JSX.Element {
-  const {templates, value, label, onPick} = props;
-  const [open, setOpen] = useState(false);
+  const {templates, value, label, onOpen} = props;
+  return (
+    <Pressable style={styles.templateSummary} onPress={onOpen}>
+      <Text style={styles.templateSummaryText}>
+        {label}: {chosenLabel(templates, value)}
+      </Text>
+      <Text style={styles.templateSummaryHint}>Tap to change</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * The chooser itself, as a full-window sheet.
+ *
+ * Mount this at the app root, beside FolderPicker and MiniCalendar, and never
+ * inside the settings ScrollView. `overlayScrim` is absolutely positioned, so
+ * inside the scroll content it is positioned against the row that rendered it
+ * rather than against the window: the grid drew on top of whatever settings
+ * happened to be underneath, scrolled with the page, and — because Android does
+ * not deliver touches to a child drawn outside its parent's bounds — most of
+ * the tiles could be seen but not tapped. That is what this split is for.
+ */
+export function TemplateSheet(props: {
+  visible: boolean;
+  templates: NoteTemplate[];
+  /** Currently chosen vUri, or '' for the device default. */
+  value: string;
+  label: string;
+  onPick: (vUri: string) => void;
+  onCancel: () => void;
+}): React.JSX.Element | null {
+  const {visible, templates, value, label, onPick, onCancel} = props;
   /**
-   * Which collection is showing. Opens on whichever one holds the current
-   * choice, so reopening the sheet shows the template that is actually set
-   * rather than making the user find the right tab first.
+   * Which collection is showing.
+   *
+   * Every opening starts on Built in, with no search. The tab used to be chosen
+   * once, from wherever the current template happened to live — so after picking
+   * a file through the browser, every subsequent opening began in the file
+   * browser, several folders from anything useful. The templates you would
+   * normally want are the built-in ones, so that is where the sheet opens; the
+   * other two tabs are one tap away.
    */
   const [source, setSource] = useState<'system' | 'user' | 'browse'>('system');
   /** Filters the tiles by name, for a device with fifty built-in templates. */
   const [search, setSearch] = useState('');
-
-  /**
-   * Every opening starts on Built in, with no search.
-   *
-   * The tab used to be chosen once, from wherever the current template happened
-   * to live — so after picking a file through the browser, every subsequent
-   * opening began in the file browser, several folders from anything useful.
-   * The templates you would normally want are the built-in ones, so that is
-   * where the sheet opens; the other two tabs are one tap away.
-   */
   useEffect(() => {
-    if (open) {
+    if (visible) {
       setSource('system');
       setSearch('');
     }
-  }, [open]);
+  }, [visible]);
   /**
    * Absolute storage root, needed to turn a browsed file's relative path into a
    * URI the Image component can render. Read once when the sheet first opens
@@ -67,32 +105,30 @@ export function TemplatePicker(props: {
    */
   const [storageRoot, setStorageRoot] = useState('');
   useEffect(() => {
-    if (open && !storageRoot) {
+    if (visible && !storageRoot) {
       void externalRoot().then(root => setStorageRoot(root ?? ''));
     }
-  }, [open, storageRoot]);
+  }, [visible, storageRoot]);
   // A URI the host reports but cannot render should degrade to its name rather
   // than leaving an empty tile.
   const [broken, setBroken] = useState<Record<string, boolean>>({});
 
+  if (!visible) {
+    return null;
+  }
 
-  const chosen = templates.find(t => t.vUri === value);
   const system = templates.filter(t => !t.userPath);
   const user = templates.filter(t => t.userPath);
-  const matching = (list: NoteTemplate[]) => {
-    const needle = search.trim().toLowerCase();
-    return needle ? list.filter(t => t.name.toLowerCase().includes(needle)) : list;
-  };
-  const showing = matching(source === 'user' ? user : system);
+  const needle = search.trim().toLowerCase();
+  const showing = (source === 'user' ? user : system).filter(
+    t => !needle || t.name.toLowerCase().includes(needle),
+  );
 
   const grid = (
     <View style={styles.templateGrid}>
       <Pressable
         style={[styles.templateTile, value === '' && styles.templateTileOn]}
-        onPress={() => {
-          onPick('');
-          setOpen(false);
-        }}>
+        onPress={() => onPick('')}>
         <View style={styles.templateBlank}>
           <Text style={styles.templateBlankText}>Default</Text>
         </View>
@@ -103,7 +139,7 @@ export function TemplatePicker(props: {
 
       {showing.length === 0 && (
         <Text style={styles.noteCompact}>
-          {search.trim()
+          {needle
             ? `Nothing here matches "${search.trim()}".`
             : source === 'user'
               ? 'No templates found in MyStyle. Copy a PNG, JPG or JPEG into that folder on the device and reopen this.'
@@ -117,10 +153,7 @@ export function TemplatePicker(props: {
           <Pressable
             key={t.vUri}
             style={[styles.templateTile, selected && styles.templateTileOn]}
-            onPress={() => {
-              onPick(t.vUri);
-              setOpen(false);
-            }}>
+            onPress={() => onPick(t.vUri)}>
             {broken[t.vUri] ? (
               <View style={styles.templateBlank}>
                 <Text style={styles.templateBlankText}>?</Text>
@@ -143,74 +176,52 @@ export function TemplatePicker(props: {
   );
 
   return (
-    <>
-      <Pressable style={styles.templateSummary} onPress={() => setOpen(true)}>
-        <Text style={styles.templateSummaryText}>
-          {label}:{' '}
-          {chosen
-            ? chosen.name
-            : value
-              ? value.slice(value.lastIndexOf('/') + 1)
-              : 'Device default'}
+    <View style={styles.overlayScrim}>
+      <View style={styles.pickerCard}>
+        <Text style={styles.modalTitle}>{label}</Text>
+        <Text style={styles.pickerPath}>Current: {chosenLabel(templates, value)}</Text>
+        <Tabs
+          tabs={[
+            {key: 'system', label: `Built in (${system.length})`},
+            {key: 'user', label: `My Style (${user.length})`},
+            {key: 'browse', label: 'File Browser'},
+          ]}
+          value={source}
+          onPick={k => setSource(k as 'system' | 'user' | 'browse')}
+        />
+        <Text style={styles.noteCompact}>
+          Built in: the device's own page styles. My Style: templates you have put in the
+          MyStyle folder. File Browser: any PNG, JPG or JPEG anywhere on the device — those
+          are the only formats the device accepts as a template.
         </Text>
-        <Text style={styles.templateSummaryHint}>Tap to change</Text>
-      </Pressable>
-
-      {open && (
-        <View style={styles.overlayScrim}>
-          <View style={styles.pickerCard}>
-            <Text style={styles.modalTitle}>{label}</Text>
-            <Tabs
-              tabs={[
-                {key: 'system', label: `Built in (${system.length})`},
-                {key: 'user', label: `My Style (${user.length})`},
-                {key: 'browse', label: 'File Browser'},
-              ]}
-              value={source}
-              onPick={k => setSource(k as 'system' | 'user' | 'browse')}
-            />
-            <Text style={styles.noteCompact}>
-              Built in: the device's own page styles. My Style: templates you have put in the
-              MyStyle folder. File Browser: any PNG, JPG or JPEG anywhere on the device — those
-              are the only formats the device accepts as a template.
-            </Text>
-            {source !== 'browse' && (
-              <Field
-                label="Search templates"
-                value={search}
-                placeholder="Type part of a name"
-                onChange={setSearch}
-                compact
-              />
-            )}
-            <ScrollView style={styles.templateScroll}>
-              {source === 'browse' ? (
-                <TemplateBrowser
-                  storageRoot={storageRoot}
-                  value={value}
-                  onPick={uri => {
-                    onPick(uri);
-                    setOpen(false);
-                  }}
-                />
-              ) : (
-                grid
-              )}
-            </ScrollView>
-            {/*
-              Two ways out, one at each end, because the sheet fills the screen
-              and the file browser can be several folders deep: Exit on the left
-              leaves it, Done on the right confirms and leaves. Both close it —
-              the choice is already made by tapping a template — but a sheet
-              with only one corner to escape from reads as a trap.
-            */}
-            <View style={styles.sheetActions}>
-              <Button label="Exit" onPress={() => setOpen(false)} />
-              <Button label="Done" primary onPress={() => setOpen(false)} />
-            </View>
-          </View>
+        {source !== 'browse' && (
+          <Field
+            label="Search templates"
+            value={search}
+            placeholder="Type part of a name"
+            onChange={setSearch}
+            compact
+          />
+        )}
+        <ScrollView style={styles.templateScroll}>
+          {source === 'browse' ? (
+            <TemplateBrowser storageRoot={storageRoot} value={value} onPick={onPick} />
+          ) : (
+            grid
+          )}
+        </ScrollView>
+        {/*
+          Two ways out, one at each end, because the sheet fills the screen
+          and the file browser can be several folders deep: Exit on the left
+          leaves it, Done on the right confirms and leaves. Both close it —
+          the choice is already made by tapping a template — but a sheet
+          with only one corner to escape from reads as a trap.
+        */}
+        <View style={styles.sheetActions}>
+          <Button label="Exit" onPress={onCancel} />
+          <Button label="Done" primary onPress={onCancel} />
         </View>
-      )}
-    </>
+      </View>
+    </View>
   );
 }

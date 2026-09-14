@@ -158,3 +158,42 @@ export function visible<T extends VTodo>(
     return parentUid ? opened.has(parentUid) : true;
   });
 }
+
+/**
+ * Split a list of rows into sections, keeping each family whole.
+ *
+ * Grouping is decided by the parent — the depth-0 row that starts a family —
+ * and its steps follow it wherever it lands. A step due next week under a task
+ * that is already overdue belongs with its parent: the two are one piece of
+ * work, and separating them is how a list stops being readable.
+ *
+ * Sections come back in the order `order` gives, and an empty one is dropped
+ * rather than drawn as a heading with nothing under it.
+ */
+export function groupRows<T extends VTodo, K extends string>(
+  rows: TaskRow<T>[],
+  order: readonly K[],
+  keyOf: (todo: T) => K,
+): {key: K; rows: TaskRow<T>[]}[] {
+  const byKey = new Map<K, TaskRow<T>[]>();
+  let current: K | null = null;
+
+  for (const row of rows) {
+    if (row.depth === 0) {
+      current = keyOf(row.todo);
+    }
+    // A step whose parent was filtered out of the list keeps its own bucket,
+    // so nothing can fall through to whichever section happened to come last.
+    const key = row.depth === 0 || current === null ? keyOf(row.todo) : current;
+    const bucket = byKey.get(key);
+    if (bucket) {
+      bucket.push(row);
+    } else {
+      byKey.set(key, [row]);
+    }
+  }
+
+  return order
+    .map(key => ({key, rows: byKey.get(key) ?? []}))
+    .filter(section => section.rows.length > 0);
+}
