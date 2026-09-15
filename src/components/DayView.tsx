@@ -64,6 +64,14 @@ function DayViewImpl(props: {
   onShiftDay: (days: number) => void;
   onEditEvent: (event: RemoteEvent) => void;
   onCompleteTask: (task: RemoteTask) => void;
+  /**
+   * Open a task for editing.
+   *
+   * The row and its tick box do different things: the box completes, the rest
+   * opens. Before this the whole row completed, so reading a task you had
+   * tapped by mistake meant undoing a write to the server.
+   */
+  onEditTask: (task: RemoteTask) => void;
   onDailyNote: (iso: string, exists: boolean) => void;
   onPickDate: () => void;
   eventNotes: Set<string>;
@@ -85,6 +93,7 @@ function DayViewImpl(props: {
     onShiftDay,
     onEditEvent,
     onCompleteTask,
+    onEditTask,
     onDailyNote,
     onPickDate,
     eventNotes,
@@ -368,9 +377,15 @@ function DayViewImpl(props: {
               )}
               <Pressable
                 onPress={() => onCompleteTask(task)}
+                style={styles.paneCheckHit}
+                hitSlop={8}>
+                <Text style={[styles.paneTaskText, over && styles.pastText]}>☐</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => onEditTask(task)}
                 style={[styles.grow, row.depth > 0 && styles.paneTaskStep]}>
                 <Text style={[styles.paneTaskText, over && styles.pastText]}>
-                  ☐ {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} ` : ''}
+                  {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} ` : ''}
                   {task.summary}
                 </Text>
                 <Text style={styles.slotMeta}>
@@ -421,16 +436,21 @@ function DayViewImpl(props: {
           <View key={group.iso}>
             <Text style={styles.paneDate}>{formatDate(group.iso, dateFormat)}</Text>
             {group.items.map(task => (
-              <Pressable
-                key={task.uid}
-                onPress={() => onCompleteTask(task)}
-                style={styles.paneTask}>
-                <Text style={styles.paneTaskText}>
-                  ☐ {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} ` : ''}
-                  {task.summary}
-                </Text>
-                <Text style={styles.slotMeta}>{task.collectionLabel}</Text>
-              </Pressable>
+              <View key={task.uid} style={styles.paneTaskRow}>
+                <Pressable
+                  onPress={() => onCompleteTask(task)}
+                  style={styles.paneCheckHit}
+                  hitSlop={8}>
+                  <Text style={styles.paneTaskText}>☐</Text>
+                </Pressable>
+                <Pressable onPress={() => onEditTask(task)} style={[styles.paneTask, styles.grow]}>
+                  <Text style={styles.paneTaskText}>
+                    {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} ` : ''}
+                    {task.summary}
+                  </Text>
+                  <Text style={styles.slotMeta}>{task.collectionLabel}</Text>
+                </Pressable>
+              </View>
             ))}
           </View>
         ))}

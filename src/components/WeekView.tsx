@@ -59,6 +59,9 @@ function WeekViewImpl(props: {
   onShiftWeek: (weeks: number) => void;
   onSelectDay: (iso: string) => void;
   onEditEvent: (event: RemoteEvent) => void;
+  /** Same split as the day view: the tick completes, the rest opens. */
+  onEditTask: (task: RemoteTask) => void;
+  onCompleteTask: (task: RemoteTask) => void;
   onDailyNote: (iso: string, exists: boolean) => void;
   /** Jump to the note page a task was captured from, when it has one. */
   onOpenSource: (task: RemoteTask) => void;
@@ -79,6 +82,8 @@ function WeekViewImpl(props: {
     onShiftWeek,
     onSelectDay,
     onEditEvent,
+    onEditTask,
+    onCompleteTask,
     onDailyNote,
     onOpenSource,
     eventNotes,
@@ -216,15 +221,24 @@ function WeekViewImpl(props: {
                 )}
                 {dayTasks.map(task => (
                   <View key={task.uid} style={[styles.dayPanelRow, styles.eventRow]}>
-                    <View style={styles.grow}>
-                      <Text style={[styles.dayPanelTitleText, muted]}>
-                        ☐ {task.summary}
-                      </Text>
+                    {/*
+                      Tapping a task here used to do nothing at all — the row
+                      was a plain View. The tick completes it and the rest opens
+                      it, matching the day and month views.
+                    */}
+                    <Pressable
+                      onPress={() => onCompleteTask(task)}
+                      style={styles.paneCheckHit}
+                      hitSlop={8}>
+                      <Text style={[styles.dayPanelTitleText, muted]}>☐</Text>
+                    </Pressable>
+                    <Pressable style={styles.grow} onPress={() => onEditTask(task)}>
+                      <Text style={[styles.dayPanelTitleText, muted]}>{task.summary}</Text>
                       <Text style={[styles.dayPanelWhere, muted]}>
                         {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} · ` : ''}
                         {task.collectionLabel}
                       </Text>
-                    </View>
+                    </Pressable>
                     {/* Back to the page this was lassoed from, when it was. */}
                     {!!task.sourcePath && (
                       <Pressable

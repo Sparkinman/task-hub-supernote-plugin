@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 **489 tests across 30 suites**; `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.67.0** (versionCode 83). 0.66.0 was the first of these actually
+Current build **0.68.0** (versionCode 84). 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,52 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.68.0
+
+### A task row opens; only its tick box completes
+
+All three calendar views disagreed with each other, and none of them was right:
+
+- **Day** made the *whole row* complete the task, with the `☐` merely drawn
+  inside that one Pressable. Tapping a task to read it wrote to the server.
+- **Week** made none of it tappable at all — the row was a plain `View`.
+- **Month** opened the editor from the whole row, but its box was also just
+  text, so that panel could open a task and never complete one.
+
+All three now split the row: a `paneCheckHit` Pressable around the box calls
+`onCompleteTask`, and the rest calls `onEditTask`. The box target is padded well
+beyond the glyph and given `hitSlop` on top — it is the one control there that
+writes to the server, so a pen landing near it should miss rather than complete
+the wrong thing.
+
+### The task and event editors fit one panel
+
+Both were single columns about two panels tall with the actions at the bottom,
+so saving an edit meant scrolling past every field to reach Save. Both now use
+the capture screen's arrangement, which is the house style for forms here:
+essentials first, everything else behind **More…** which *swaps* the body rather
+than lengthening it, and the actions in a `pinnedBar` at the foot. The header's
+own Save action is gone from both, since it would be a second one.
+
+`taskMore` is reset in `openTaskEditor` and `eventMore` when an event form is
+opened: an editor that opened onto whichever page it was last left showing would
+hide the title of the thing just tapped.
+
+The event editor was not asked for, but leaving one of two identical forms
+scrolling would have been an inconsistency worth nobody's time.
+
+### "Done & Exit" is now "↩ Back to note"
+
+It described the act but not the destination. The plugin is always opened from
+inside a note, so where you land is the part worth stating — nobody doubts they
+are finishing, only whether they are about to leave the note app entirely. The
+↩ is the same arrow the source-page chip uses, so the two read as the same kind
+of move.
+
+The string is now a single `EXIT_LABEL` constant in `common.tsx`: the two header
+shapes each carried their own literal, and they must never disagree about the
+way out.
 
 ## What changed in 0.67.0 — all four from screenshots of 0.66.0
 

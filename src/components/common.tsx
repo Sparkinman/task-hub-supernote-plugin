@@ -29,6 +29,20 @@ export type Status =
  * wordmark) instead of the compact mark — there is room for it there, and it is
  * the screen a new user meets first.
  */
+/**
+ * What the button that closes the plugin says.
+ *
+ * "Done & Exit" described the act but not the destination, and on a device
+ * where the plugin is always opened from inside a note, where you land is the
+ * part worth stating — nobody is in doubt that they are finishing, only about
+ * whether they are about to leave the note app too. The ↩ is the same arrow the
+ * source-page chip uses, so the two read as the same kind of move.
+ *
+ * One constant rather than two literals: the two header shapes below had the
+ * string separately, and they must never disagree about the way out.
+ */
+const EXIT_LABEL = '↩ Back to note';
+
 export function Header(props: {
   title: string;
   onClose: () => void;
@@ -78,7 +92,7 @@ export function Header(props: {
             onPress={props.onClose}
             hitSlop={10}>
             <Text style={[styles.closeText, props.closeDisabled && styles.buttonTextDisabled]}>
-              {props.closeDisabled ? 'Saving…' : 'Done & Exit'}
+              {props.closeDisabled ? 'Saving…' : EXIT_LABEL}
             </Text>
           </Pressable>
         )}
@@ -122,7 +136,7 @@ export function Header(props: {
           onPress={props.onClose}
           hitSlop={10}>
           <Text style={[styles.closeText, props.closeDisabled && styles.buttonTextDisabled]}>
-            {props.closeDisabled ? 'Saving…' : 'Done & Exit'}
+            {props.closeDisabled ? 'Saving…' : EXIT_LABEL}
           </Text>
         </Pressable>
       )}
@@ -615,7 +629,7 @@ export function Button(props: {
   primary?: boolean;
   /**
    * Greys the button out and stops it responding. Used while a write is in
-   * flight, so Save cannot be pressed twice and Done & Exit cannot leave with
+   * flight, so Save cannot be pressed twice and ↩ Back to note cannot leave with
    * the write half done.
    */
   disabled?: boolean;
@@ -1400,6 +1414,14 @@ export const styles = StyleSheet.create({
   paneTitle: {fontSize: fs(21), fontWeight: '700', color: '#000', marginBottom: sp(6)},
   paneDate: {fontSize: fs(17), color: '#555', marginTop: sp(8)},
   paneTask: {paddingVertical: sp(6), borderBottomWidth: 1, borderBottomColor: '#ddd'},
+  /**
+   * The tick box's own target, beside the part of the row that opens the task.
+   *
+   * Sized well beyond the glyph and given hitSlop on top: it is the one control
+   * here that writes to the server, and on an e-ink panel a pen landing a few
+   * pixels wide of it should miss rather than complete the wrong thing.
+   */
+  paneCheckHit: {paddingRight: sp(10), paddingVertical: sp(6), minWidth: sp(36)},
   paneTaskText: {fontSize: fs(20), color: '#000', lineHeight: fs(26)},
   paneRunning: {fontSize: fs(18), fontWeight: '700', color: '#555', marginTop: sp(10), marginBottom: sp(2)},
   paneSeparator: {borderTopWidth: 3, borderTopColor: '#000', marginVertical: sp(14)},

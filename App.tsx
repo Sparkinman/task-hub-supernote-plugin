@@ -512,6 +512,9 @@ export default function App(): React.JSX.Element {
    * and it swaps what is on the panel rather than extending it.
    */
   const [captureMore, setCaptureMore] = useState(false);
+  /** The same fold for the task and event editors, which are the same shape. */
+  const [taskMore, setTaskMore] = useState(false);
+  const [eventMore, setEventMore] = useState(false);
   const [editingEvent, setEditingEvent] = useState<RemoteEvent | null>(null);
   const [eventTarget, setEventTarget] = useState('');
 
@@ -955,7 +958,7 @@ export default function App(): React.JSX.Element {
   /**
    * Pending auto-close, so it can be cancelled.
    *
-   * If it fires after the user has already tapped Done & Exit, closePluginView
+   * If it fires after the user has already tapped ↩ Back to note, closePluginView
    * runs against a view the host has stopped showing; the host's idea of the
    * view then disagrees with reality and the next button press is spent
    * resyncing rather than opening — the double-tap.
@@ -1008,7 +1011,7 @@ export default function App(): React.JSX.Element {
   /**
    * Leave the plugin, asking first when a form has unsaved work in it.
    *
-   * Every Done & Exit goes through here rather than straight to `close`.
+   * Every ↩ Back to note goes through here rather than straight to `close`.
    */
   const closeGuarded = useCallback(() => {
     if (!formUnsaved) {
@@ -1041,7 +1044,7 @@ export default function App(): React.JSX.Element {
   /**
    * True while a confirmed write is in flight.
    *
-   * Every Save and every Done & Exit is held back until it clears, so a write
+   * Every Save and every ↩ Back to note is held back until it clears, so a write
    * cannot be started twice by an impatient second tap and the plugin cannot be
    * closed with one half done. On a panel that takes a moment to redraw, a
    * button that looks unresponsive invites exactly that second tap.
@@ -2431,6 +2434,7 @@ export default function App(): React.JSX.Element {
   const openEventEditor = (event: RemoteEvent) => {
     setEditingEvent(event);
     setEventTarget(event.calendarUrl);
+    setEventMore(false);
     setEventForm({
       summary: event.summary,
       description: event.description ?? '',
@@ -2452,6 +2456,9 @@ export default function App(): React.JSX.Element {
   };
 
   const openTaskEditor = (task: RemoteTask | null) => {
+    // Always on the first page: an editor that opened onto the fold it was last
+    // left showing would hide the title of the task you just tapped.
+    setTaskMore(false);
     // The mirror of the New event button: clear the other form so neither can
     // shadow the one being opened.
     setEventForm(null);
@@ -2790,17 +2797,20 @@ export default function App(): React.JSX.Element {
         </>
       )}
 
+      {/*
+        The task editor, built to fit one panel like the capture screen.
+
+        It was a single column two panels tall and the actions were at the
+        bottom of it, so saving an edit meant scrolling past every field to
+        reach Save. Same treatment: essentials first, the rest behind More,
+        actions pinned at the foot.
+      */}
       {screen === 'hub' && taskForm && (
         <>
           <Header
             title={editingTask ? 'Edit task' : 'New task'}
             onClose={closeGuarded}
             closeDisabled={writing}
-            action={{
-              label: writing ? 'Saving…' : editingTask ? 'Save' : 'Create',
-              onPress: askSaveTaskForm,
-              disabled: writing,
-            }}
           />
           <Field
             scrollHandle={scrollHandle}
@@ -2810,119 +2820,124 @@ export default function App(): React.JSX.Element {
             multiline
             onChange={v => setTaskForm(d => (d ? {...d, summary: v} : d))}
           />
-          {!editingTask && config.collectionUrls.length > 0 && (
+
+          {!taskMore && (
             <>
-              <Text style={styles.label}>Save to</Text>
-              {config.collectionUrls.map(url => (
-                <CheckRow
-                  key={url}
-                  label={collectionName(url)}
-                  hint={collectionHint(url, config.collectionUrls)}
-                  checked={taskTargets.includes(url)}
-                  onToggle={() =>
-                    setTaskTargets(prev =>
-                      prev.includes(url) ? prev.filter(u => u !== url) : [...prev, url],
-                    )
-                  }
-                />
-              ))}
+              {!editingTask && config.collectionUrls.length > 0 && (
+                <>
+                  <Text style={styles.label}>Save to</Text>
+                  {config.collectionUrls.map(url => (
+                    <CheckRow
+                      compact
+                      key={url}
+                      label={collectionName(url)}
+                      hint={collectionHint(url, config.collectionUrls)}
+                      checked={taskTargets.includes(url)}
+                      onToggle={() =>
+                        setTaskTargets(prev =>
+                          prev.includes(url) ? prev.filter(u => u !== url) : [...prev, url],
+                        )
+                      }
+                    />
+                  ))}
+                </>
+              )}
+              <Text style={styles.label}>Due</Text>
+              <DateTimePicker
+                date={taskForm.dueDate}
+                time={taskForm.dueTime}
+                timeFormat={timeFormat}
+                onChange={(date, time) =>
+                  setTaskForm(d => (d ? {...d, dueDate: date, dueTime: time} : d))
+                }
+              />
             </>
           )}
-          <Text style={styles.label}>Due</Text>
-          <DateTimePicker
-            date={taskForm.dueDate}
-            time={taskForm.dueTime}
-            timeFormat={timeFormat}
-            onChange={(date, time) =>
-              setTaskForm(d => (d ? {...d, dueDate: date, dueTime: time} : d))
-            }
-          />
-          <Text style={styles.label}>Priority</Text>
-          <Choice
-            options={PRIORITY_BANDS.map(p => ({key: p.key, label: p.label}))}
-            value={taskForm.priority}
-            onPick={k => setTaskForm(d => (d ? {...d, priority: k as PriorityBand} : d))}
-          />
-          <Text style={styles.label}>Repeats</Text>
-          {taskForm.repeat === 'custom' && (
-            <Text style={styles.noteCompact}>
-              {repeatLabel('custom')} — a rule set in another app, which this menu cannot
-              describe. It is kept exactly as it is unless you choose one below.
-            </Text>
-          )}
-          <Choice
-            options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
-            value={taskForm.repeat}
-            onPick={k => setTaskForm(d => (d ? {...d, repeat: k as RepeatKey} : d))}
-          />
-          <Field
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
-            label="Description"
-            value={taskForm.description}
-            multiline
-            onChange={v => setTaskForm(d => (d ? {...d, description: v} : d))}
-          />
-          <Field
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
-            label="Add sub tasks (one per line)"
-            value={taskForm.steps}
-            multiline
-            placeholder={'Draft the notes\nBump the version'}
-            onChange={v => setTaskForm(d => (d ? {...d, steps: v} : d))}
-          />
-          <View style={styles.stepsDateRow}>
-            <Pressable
-              style={styles.stepsDateButton}
-              onPress={() => setStepsDateOpen(stepsDateOpen === 'task' ? null : 'task')}>
-              <CalendarIcon />
-              <Text style={styles.stepsDateLabel}>
-                {taskForm.stepsDate
-                  ? `Steps due ${formatDate(taskForm.stepsDate, dateFormat)}${
-                      taskForm.stepsTime ? ` at ${formatTime(taskForm.stepsTime, timeFormat)}` : ''
-                    }`
-                  : 'Steps due: same day as the task'}
-              </Text>
-            </Pressable>
-            {!!taskForm.stepsDate && (
-              <Pressable onPress={() => setTaskForm(d => (d ? {...d, stepsDate: '', stepsTime: ''} : d))} hitSlop={8}>
-                <Text style={styles.clearLink}>Clear</Text>
-              </Pressable>
-            )}
-          </View>
-          {stepsDateOpen === 'task' && (
-            <DateTimePicker
-              date={taskForm.stepsDate}
-              time={taskForm.stepsTime}
-              timeFormat={timeFormat}
-              onChange={(date, time) => {
-                setTaskForm(d => (d ? {...d, stepsDate: date, stepsTime: time} : d));
-              }}
-            />
-          )}
-          <Text style={styles.noteCompact}>
-            {`Each line becomes a step of this task, due the same day as the task itself. End a
-line with @2026-09-10 to give that step its own date instead.
+
+          {taskMore && (
+            <>
+              <Text style={styles.label}>Priority</Text>
+              <Choice
+                options={PRIORITY_BANDS.map(p => ({key: p.key, label: p.label}))}
+                value={taskForm.priority}
+                onPick={k => setTaskForm(d => (d ? {...d, priority: k as PriorityBand} : d))}
+              />
+              <Text style={styles.label}>Repeats</Text>
+              {taskForm.repeat === 'custom' && (
+                <Text style={styles.noteCompact}>
+                  {repeatLabel('custom')} — a rule set in another app, which this menu cannot
+                  describe. It is kept exactly as it is unless you choose one below.
+                </Text>
+              )}
+              <Choice
+                options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
+                value={taskForm.repeat}
+                onPick={k => setTaskForm(d => (d ? {...d, repeat: k as RepeatKey} : d))}
+              />
+              <Field
+                compact
+                scrollHandle={scrollHandle}
+                onScrollTo={scrollFieldIntoView}
+                label="Description"
+                value={taskForm.description}
+                multiline
+                onChange={v => setTaskForm(d => (d ? {...d, description: v} : d))}
+              />
+              <Field
+                compact
+                scrollHandle={scrollHandle}
+                onScrollTo={scrollFieldIntoView}
+                label="Add sub tasks (one per line)"
+                value={taskForm.steps}
+                multiline
+                placeholder={'Draft the notes\nBump the version'}
+                onChange={v => setTaskForm(d => (d ? {...d, steps: v} : d))}
+              />
+              <View style={styles.stepsDateRow}>
+                <Pressable
+                  style={styles.stepsDateButton}
+                  onPress={() => setStepsDateOpen(stepsDateOpen === 'task' ? null : 'task')}>
+                  <CalendarIcon />
+                  <Text style={styles.stepsDateLabel}>
+                    {taskForm.stepsDate
+                      ? `Steps due ${formatDate(taskForm.stepsDate, dateFormat)}${
+                          taskForm.stepsTime
+                            ? ` at ${formatTime(taskForm.stepsTime, timeFormat)}`
+                            : ''
+                        }`
+                      : 'Steps due: same day as the task'}
+                  </Text>
+                </Pressable>
+                {!!taskForm.stepsDate && (
+                  <Pressable
+                    onPress={() =>
+                      setTaskForm(d => (d ? {...d, stepsDate: '', stepsTime: ''} : d))
+                    }
+                    hitSlop={8}>
+                    <Text style={styles.clearLink}>Clear</Text>
+                  </Pressable>
+                )}
+              </View>
+              {stepsDateOpen === 'task' && (
+                <DateTimePicker
+                  date={taskForm.stepsDate}
+                  time={taskForm.stepsTime}
+                  timeFormat={timeFormat}
+                  onChange={(date, time) => {
+                    setTaskForm(d => (d ? {...d, stepsDate: date, stepsTime: time} : d));
+                  }}
+                />
+              )}
+              <Text style={styles.noteCompact}>
+                {`Each line becomes a step of this task, due the same day as the task itself.
+End a line with @2026-09-10 to give that step its own date instead.
 
 This box only adds — it never lists or removes the steps a task already has, so saving twice
 will not duplicate them.`}
-          </Text>
-          <View style={styles.actions}>
-            <Button
-              label={writing ? 'Saving…' : editingTask ? 'Save changes' : 'Create task'}
-              primary
-              disabled={writing}
-              onPress={askSaveTaskForm}
-            />
-            <Button
-              label="Cancel"
-              onPress={() => {
-                setTaskForm(null);
-                setEditingTask(null);
-              }}
-            />
-          </View>
+              </Text>
+            </>
+          )}
+
           <StatusLine status={status} />
         </>
       )}
@@ -2933,11 +2948,6 @@ will not duplicate them.`}
             title={editingEvent ? 'Edit event' : 'New event'}
             onClose={closeGuarded}
             closeDisabled={writing}
-            action={{
-              label: writing ? 'Saving…' : editingEvent ? 'Save' : 'Create',
-              onPress: askSaveEvent,
-              disabled: writing,
-            }}
           />
           {/*
             Said before anything is typed, because the consequence is invisible
@@ -2968,6 +2978,8 @@ will not duplicate them.`}
               />
             </>
           )}
+          {!eventMore && (
+            <>
           <Text style={styles.labelCompact}>Date and start time</Text>
           <DateTimePicker
             date={eventForm.date}
@@ -3002,50 +3014,43 @@ will not duplicate them.`}
               setEventForm(d => (d ? {...d, endTime: time} : d))
             }
           />
-          <Text style={styles.label}>Repeats</Text>
-          {eventForm.repeat === 'custom' && (
-            <Text style={styles.noteCompact}>
-              {repeatLabel('custom')} — a rule set in another app, which this menu cannot
-              describe. It is kept exactly as it is unless you choose one below.
-            </Text>
+            </>
           )}
-          <Choice
-            options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
-            value={eventForm.repeat}
-            onPick={k => setEventForm(d => (d ? {...d, repeat: k as RepeatKey} : d))}
-          />
-          <Field
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
-            compact
-            label="Location"
-            value={eventForm.location}
-            onChange={v => setEventForm(d => (d ? {...d, location: v} : d))}
-          />
-          <Field
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
-            compact
-            label="Description"
-            value={eventForm.description}
-            multiline
-            onChange={v => setEventForm(d => (d ? {...d, description: v} : d))}
-          />
-          <View style={styles.actionsTight}>
-            <Button
-              label={writing ? 'Saving…' : editingEvent ? 'Save changes' : 'Create event'}
-              primary
-              disabled={writing}
-              onPress={askSaveEvent}
-            />
-            <Button
-              label="Cancel"
-              onPress={() => {
-                setEventForm(null);
-                setEditingEvent(null);
-              }}
-            />
-          </View>
+
+          {eventMore && (
+            <>
+              <Text style={styles.label}>Repeats</Text>
+              {eventForm.repeat === 'custom' && (
+                <Text style={styles.noteCompact}>
+                  {repeatLabel('custom')} — a rule set in another app, which this menu cannot
+                  describe. It is kept exactly as it is unless you choose one below.
+                </Text>
+              )}
+              <Choice
+                options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
+                value={eventForm.repeat}
+                onPick={k => setEventForm(d => (d ? {...d, repeat: k as RepeatKey} : d))}
+              />
+              <Field
+                scrollHandle={scrollHandle}
+                onScrollTo={scrollFieldIntoView}
+                compact
+                label="Location"
+                value={eventForm.location}
+                onChange={v => setEventForm(d => (d ? {...d, location: v} : d))}
+              />
+              <Field
+                scrollHandle={scrollHandle}
+                onScrollTo={scrollFieldIntoView}
+                compact
+                label="Description"
+                value={eventForm.description}
+                multiline
+                onChange={v => setEventForm(d => (d ? {...d, description: v} : d))}
+              />
+            </>
+          )}
+
           <StatusLine status={status} />
         </>
       )}
@@ -3411,23 +3416,31 @@ will not duplicate them.`}
                         <Text style={styles.dayPanelEmpty}>Nothing due.</Text>
                       )}
                       {dayTasks.map(task => (
-                        <Pressable
-                          key={task.uid}
-                          style={styles.dayPanelRow}
-                          onPress={() => openTaskEditor(task)}>
+                        <View key={task.uid} style={styles.dayPanelRow}>
                           <View style={styles.dayPanelTaskRow}>
-                            <Text style={styles.dayPanelCheck}>
-                              {task.completed ? '☑' : '☐'}
-                            </Text>
-                            <View style={styles.grow}>
+                            {/*
+                              The box was drawn but not tappable, so this panel
+                              could open a task and never complete one.
+                            */}
+                            <Pressable
+                              onPress={() => askComplete(task)}
+                              style={styles.paneCheckHit}
+                              hitSlop={8}>
+                              <Text style={styles.dayPanelCheck}>
+                                {task.completed ? '☑' : '☐'}
+                              </Text>
+                            </Pressable>
+                            <Pressable
+                              style={styles.grow}
+                              onPress={() => openTaskEditor(task)}>
                               <Text style={styles.dayPanelTitleText}>{task.summary}</Text>
                               <Text style={styles.dayPanelWhere}>
                                 {task.dueTime ? `${formatTime(task.dueTime, timeFormat)} · ` : ''}
                                 {task.collectionLabel}
                               </Text>
-                            </View>
+                            </Pressable>
                           </View>
-                        </Pressable>
+                        </View>
                       ))}
                     </View>
                   </View>
@@ -3448,6 +3461,8 @@ will not duplicate them.`}
 
               {calView === 'week' && (
                 <WeekView
+                  onEditTask={openTaskEditor}
+                  onCompleteTask={askComplete}
                   anchor={day}
                   events={shownEvents}
                   tasks={tasks}
@@ -3501,6 +3516,7 @@ will not duplicate them.`}
                   onShiftDay={days => setDay(prev => shiftDays(prev, days))}
                   onEditEvent={openEventEditor}
                   onCompleteTask={askComplete}
+                  onEditTask={openTaskEditor}
                 />
               )}
             </>
@@ -3570,6 +3586,55 @@ will not duplicate them.`}
           label={settingsDirty ? 'Save and exit •' : 'Save and exit'}
           primary
           onPress={saveSettingsAndExit}
+        />
+      </View>
+    )}
+
+    {screen === 'hub' && eventForm && (
+      <View style={styles.pinnedBar}>
+        <Button
+          label={eventMore ? '‹ Back' : 'More…'}
+          onPress={() => setEventMore(v => !v)}
+        />
+        <Button
+          label="Cancel"
+          onPress={() => {
+            setEventForm(null);
+            setEditingEvent(null);
+          }}
+        />
+        <Button
+          label={writing ? 'Saving…' : editingEvent ? 'Save changes' : 'Create event'}
+          primary
+          disabled={writing}
+          onPress={askSaveEvent}
+        />
+      </View>
+    )}
+
+    {/*
+      The task editor's bar. Same arrangement as the capture screen: More swaps
+      the body between the essentials and the rest, so it belongs beside Save
+      rather than inside the thing it is paging.
+    */}
+    {screen === 'hub' && taskForm && (
+      <View style={styles.pinnedBar}>
+        <Button
+          label={taskMore ? '‹ Back' : 'More…'}
+          onPress={() => setTaskMore(v => !v)}
+        />
+        <Button
+          label="Cancel"
+          onPress={() => {
+            setTaskForm(null);
+            setEditingTask(null);
+          }}
+        />
+        <Button
+          label={writing ? 'Saving…' : editingTask ? 'Save changes' : 'Create task'}
+          primary
+          disabled={writing}
+          onPress={askSaveTaskForm}
         />
       </View>
     )}
