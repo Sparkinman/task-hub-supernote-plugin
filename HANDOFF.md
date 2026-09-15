@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.71.1** (versionCode 91). **563 tests across 35 suites.** 0.66.0 was the first of these actually
+Current build **0.71.2** (versionCode 92). **563 tests across 35 suites.** 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,35 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.71.2 — completing a task did not clear its mark
+
+Reported on device: a task captured from handwriting was completed in the
+plugin, and the box, the caption and the link were still on the page.
+
+The cleanup was running and reporting success. `removePageMark` flushes, reads
+the page, finds every link pointing at our image plus the caption and wash
+inside their rectangles, and deletes them — all correct, and it returned `null`
+meaning "nothing went wrong".
+
+**It never repainted.** `deleteElements` writes to the *file*; the host goes on
+showing the page it holds in memory, which still has the marks. So the page
+looked untouched. Worse than cosmetic: when the note app next saves that page it
+writes its own copy back over the file and the deletion is undone entirely.
+
+`markPage` has always done save → insert → save → **reload** for the mirror of
+this reason, and the comment there explains it. `removePageMark` did save →
+delete and stopped. It now reloads too, guarded on the changed file actually
+being the one open — `reloadFile` acts on whatever the host has current, and
+repainting an unrelated note because a task from another page was ticked is a
+repaint nobody asked for. The flush at the top is what makes the reload safe:
+anything unsaved is already committed, so re-reading cannot lose a stroke drawn
+since.
+
+**The rule, since this is the third time the two halves have been confused:** a
+file-level write needs a `reloadFile` to become visible, and an in-memory write
+needs a `saveCurrentNote` to become permanent. Getting either backwards fails
+silently, with a success from every call involved.
 
 ## What changed in 0.71.1 — a to-do carries a date, and only a date
 

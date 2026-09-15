@@ -296,6 +296,36 @@ export async function removePageMark(source: SourceRef): Promise<string | null> 
     if (!removed?.success) {
       return removed?.error?.message ?? 'the device refused to remove it';
     }
+
+    // Repaint, if this is the page the user is looking at.
+    //
+    // `deleteElements` writes to the **file**. The host is still showing the
+    // page it holds in memory, which still has the box, the caption and the
+    // wash on it — so completing a task appeared to do nothing to the page it
+    // came from. Worse than cosmetic: when the note app next saves that page it
+    // writes its own copy back over the file, undoing the deletion entirely.
+    //
+    // `markPage` reloads after its inserts for the mirror of this reason. The
+    // flush at the top of this function is what makes the reload safe: anything
+    // unsaved has already been committed, so re-reading the file cannot lose a
+    // stroke drawn since.
+    //
+    // Guarded on the file actually being open, because `reloadFile` acts on
+    // whatever the host has current — reloading a different note because a task
+    // from an unrelated page was ticked is a repaint nobody asked for.
+    try {
+      const current = (await PluginCommAPI.getCurrentFilePath()) as
+        | LooseResponse<string>
+        | null
+        | undefined;
+      const open = current?.success ? String(current.result ?? '').trim() : '';
+      if (open && open === source.path.trim()) {
+        await PluginCommAPI.reloadFile();
+      }
+    } catch {
+      // The page keeps the marks until it is next opened, by which time the
+      // file no longer has them. Not worth failing a completed task over.
+    }
     return null;
   } catch (err) {
     return err instanceof Error ? err.message : 'an unknown error';
