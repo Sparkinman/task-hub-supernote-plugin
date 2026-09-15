@@ -19,6 +19,8 @@ import {caldavStamp, type DateRange} from './eventwindow';
 import {collectionName, type ServerConfig} from './settings';
 import {listFeedEvents} from './feedfetch';
 import {isSnTask, snIdOf} from './sntasks';
+import {DEMO} from './demoflag';
+import {demoEvents, demoTasks} from './demodata';
 import {updateSnTask} from './snclient';
 
 /**
@@ -371,6 +373,9 @@ async function listOne(config: ServerConfig, collection: string): Promise<Remote
  * look identical to "those tasks were completed elsewhere".
  */
 export async function listTasks(config: ServerConfig): Promise<ListResult<RemoteTask>> {
+  if (DEMO) {
+    return {items: demoTasks(), missing: []};
+  }
   await ensureInternet();
 
   const settled = await Promise.allSettled(
@@ -471,6 +476,11 @@ export async function listEvents(
   config: ServerConfig,
   range: DateRange,
 ): Promise<ListResult<RemoteEvent>> {
+  // The demo build invents its calendar and asks the network for nothing, so it
+  // never prompts for permission and never fails in front of an audience.
+  if (DEMO) {
+    return {items: demoEvents().sort((a, b) => a.startAt - b.startAt), missing: []};
+  }
   await ensureInternet();
   const settled = await Promise.allSettled(
     config.calendarUrls.map(url => listEventsOne(config, url, range)),
