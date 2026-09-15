@@ -29,6 +29,23 @@
 
 ---
 
+## At a glance
+
+| | |
+|---|---|
+| **Tasks** | Any CalDAV server, with priorities, repeats, sub tasks and due dates. Grouped Overdue / Today / Next 7 days / Later / No date |
+| **Calendars** | Year, quarter, month, week and day views over as many calendars as you watch |
+| **Google, Outlook &amp; Apple calendars** | Subscribe to the `.ics` address they publish — **no account and no server**. Read-only; see [why](docs/connections.md#why-a-subscription-is-read-only-and-slower) |
+| **The Supernote's own To-Do app** | Optional **two-way** connection through Supernote Cloud, off until you switch it on |
+| **Handwriting → task or event** | Lasso writing on a page and it becomes either, with a link back to the page |
+| **Notes for every scale** | Daily, weekly, monthly, quarterly, yearly and meeting notes, each with its own folder, layout and template |
+| **Find** | Search the keywords and starred pages across all of those notes |
+| **No server needed** | Every note feature, the calendar views, templates, page marks and Find work with nothing configured |
+
+📖 **[Full documentation](docs/README.md)** — every setting, every view, every feature.
+
+---
+
 ## Why
 
 Ratta's own calendar subscribes to **exactly one** calendar. A work calendar, a family one
