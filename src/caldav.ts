@@ -113,10 +113,22 @@ export async function resolveHome(config: ServerConfig): Promise<string> {
   return fallback;
 }
 
+/**
+ * What a discovery walk found, and where it looked.
+ *
+ * The home comes back as well as the collections because the caller needs it:
+ * the home is now excluded from the results, but a copy of its URL may already
+ * be sitting in the user's saved settings from before it was, and only the
+ * caller can prune that.
+ */
+export interface Discovery {
+  collections: TaskCollection[];
+  /** The calendar home the enumeration was run against. */
+  home: string;
+}
+
 /** Enumerate the user's VTODO-capable collections. */
-export async function discoverCollections(
-  config: ServerConfig,
-): Promise<TaskCollection[]> {
+export async function discoverCollections(config: ServerConfig): Promise<Discovery> {
   await ensureInternet();
 
   const home = await resolveHome(config);
@@ -131,7 +143,7 @@ export async function discoverCollections(
       'No task lists found. If the server keeps them somewhere unusual, paste a collection URL instead.',
     );
   }
-  return collections;
+  return {collections, home};
 }
 
 /** Writes into `collectionUrl`, or the configured default when omitted. */

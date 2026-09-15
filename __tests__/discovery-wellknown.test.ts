@@ -170,6 +170,30 @@ describe('resolveHome', () => {
 });
 
 describe('discoverCollections', () => {
+  it('reports the home it enumerated, so a stale tick on it can be pruned', async () => {
+    // The home is excluded from the results, but a user whose settings already
+    // carry a tick on it from an earlier build needs it removing, and discovery
+    // is the only moment its URL is known.
+    serve({
+      'https://cloud.example/.well-known/caldav': {
+        status: 207,
+        body: principalXml('/remote.php/dav/principals/users/user/'),
+      },
+      'https://cloud.example/remote.php/dav/principals/users/user': {
+        status: 207,
+        body: homeXml('/remote.php/dav/calendars/user/'),
+      },
+      'https://cloud.example/remote.php/dav/calendars/user': {
+        status: 207,
+        body: collectionsXml('/remote.php/dav/calendars/user/personal/', 'Personal'),
+      },
+    });
+    const {collections, home} = await discoverCollections(config());
+    expect(home).toContain('/remote.php/dav/calendars/user');
+    const tidy = (u: string) => u.replace(/\/+$/, '');
+    expect(collections.every(c => tidy(c.url) !== tidy(home))).toBe(true);
+  });
+
   it('lists collections found under the discovered home', async () => {
     serve({
       'https://cloud.example/.well-known/caldav': {
@@ -185,7 +209,7 @@ describe('discoverCollections', () => {
         body: collectionsXml('/remote.php/dav/calendars/user/personal/', 'Personal'),
       },
     });
-    const found = await discoverCollections(config());
+    const {collections: found} = await discoverCollections(config());
     expect(found).toHaveLength(1);
     expect(found[0].displayName).toBe('Personal');
     expect(found[0].url).toBe('https://cloud.example/remote.php/dav/calendars/user/personal/');
@@ -199,7 +223,7 @@ describe('discoverCollections', () => {
         body: collectionsXml('/user/tasks/', 'Tasks'),
       },
     });
-    const found = await discoverCollections(config());
+    const {collections: found} = await discoverCollections(config());
     expect(found.map(c => c.url)).toEqual(['https://cloud.example/user/tasks/']);
   });
 

@@ -1558,6 +1558,38 @@ export const styles = StyleSheet.create({
   // pushing it off the row: "Daily · p.12" is the half that says where to go.
   findRowName: {fontSize: fs(22), color: '#000', flexShrink: 1},
   findRowMeta: {fontSize: fs(19), color: '#444'},
+  /**
+   * Starred pages as rendered thumbnails, two to a row.
+   *
+   * Two columns, not three or four: a page shrunk to a quarter of the panel's
+   * width is no longer handwriting, it is texture, and a preview you cannot
+   * read is worse than the one-line row it replaced. Two gives about six tiles
+   * per screen — fewer than the list, which is the trade the Previews button
+   * exists to let the reader make.
+   */
+  previewGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(10), paddingVertical: sp(8)},
+  previewCell: {width: '47%'},
+  /**
+   * The frame is what holds the row's height steady.
+   *
+   * A fixed 3:4 box, drawn before its image arrives, so tiles do not jump
+   * around the grid as each page finishes rendering — on a panel that repaints
+   * in ~300ms a reflowing grid is genuinely disorienting.
+   */
+  previewFrame: {
+    aspectRatio: 0.75,
+    borderWidth: 1,
+    borderColor: '#000',
+    borderRadius: R.sm,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  previewImage: {width: '100%', height: '100%'},
+  previewWaiting: {fontSize: fs(26), color: '#999'},
+  previewCaption: {fontSize: fs(19), color: '#000', marginTop: sp(4)},
+  previewMeta: {fontSize: fs(16), color: '#555'},
   statusRow: {flexDirection: 'row', alignItems: 'center', gap: sp(8), marginVertical: sp(8)},
   busyMark: {fontSize: fs(24), color: '#000'},
   loadingPanel: {borderRadius: R.lg,

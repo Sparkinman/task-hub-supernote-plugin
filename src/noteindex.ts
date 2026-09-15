@@ -1,6 +1,13 @@
 import {PluginFileAPI} from 'sn-plugin-lib';
 
-import {externalRoot, listNotesWithMeta, readNamed, writeNamed} from './storage';
+import {
+  ensureDir,
+  externalRoot,
+  listFiles,
+  listNotesWithMeta,
+  readNamed,
+  writeNamed,
+} from './storage';
 import {
   INDEX_FILE,
   configuredRoots,
@@ -193,4 +200,100 @@ export async function buildIndex(
  */
 export async function clearIndex(): Promise<void> {
   await writeNamed(INDEX_FILE, encodeIndex([]));
+}
+
+/* ------------------------------------------------------------------ *
+ * Page previews
+ * ------------------------------------------------------------------ */
+
+/** Where rendered pages are kept, relative to shared storage. */
+const PREVIEW_DIR = 'Document/TaskHub/previews';
+
+/**
+ * Names already in the preview folder, listed once per session.
+ *
+ * There is no stat call available, and `generateNotePng` re-renders whatever it
+ * is pointed at rather than reporting that the file is already there — so
+ * without this the cache would not be a cache. One directory listing answers
+ * for every thumbnail on the tab.
+ */
+let rendered: Set<string> | null = null;
+
+/**
+ * A stable filename for one page at one version of its note.
+ *
+ * The modification time is part of the name rather than something to compare
+ * against, so a page redrawn after the note changed simply lands under a new
+ * name and the old one is ignored. A note path can be any length and contain
+ * anything, so it is hashed rather than escaped.
+ */
+function previewName(relPath: string, page: number, modified: number): string {
+  const key = `${relPath}:${page}:${modified}`;
+  // Bitwise on purpose: djb2 needs the xor and the 32-bit truncation to be the
+  // hash it is, and a stable filename is the whole point of using one.
+  /* eslint-disable no-bitwise */
+  let hash = 5381;
+  for (let i = 0; i < key.length; i += 1) {
+    // djb2. Not a security hash — it only has to separate a few hundred pages,
+    // and `| 0` keeps it in 32 bits so the result is stable across runs.
+    hash = ((hash * 33) ^ key.charCodeAt(i)) | 0;
+  }
+  return `p${(hash >>> 0).toString(36)}-${page}.png`;
+  /* eslint-enable no-bitwise */
+}
+
+/**
+ * Render one page to a PNG and return a URI an `<Image>` can show.
+ *
+ * Returns null rather than throwing: a thumbnail that cannot be produced should
+ * leave a blank tile on a working tab, not break the tab. `type: 1` gives a
+ * white background — a transparent one would show as a black square wherever
+ * the page is blank.
+ */
+export async function ensurePreview(
+  relPath: string,
+  page: number,
+  modified: number,
+): Promise<string | null> {
+  const root = (await externalRoot())?.replace(/\/+$/, '');
+  if (!root) {
+    return null;
+  }
+  const name = previewName(relPath, page, modified);
+  const absolute = `${root}/${PREVIEW_DIR}/${name}`;
+
+  if (rendered === null) {
+    await ensureDir(PREVIEW_DIR);
+    rendered = new Set(
+      (await listFiles(PREVIEW_DIR, ['.png'])).map(p => p.split('/').pop() ?? p),
+    );
+  }
+  if (rendered.has(name)) {
+    return `file://${absolute}`;
+  }
+
+  try {
+    const res = (await PluginFileAPI.generateNotePng({
+      // `notePath`, despite the published signature saying `NOTEPath` — the
+      // shipped typings and that page's own parameter table both say
+      // `notePath`, and the typings are what the call is checked against.
+      notePath: `${root}/${relPath}`,
+      page,
+      // 1, not 2: this is shown at about a third of a panel's width, and a
+      // double-resolution page is four times the bytes for no visible gain.
+      times: 1,
+      pngPath: absolute,
+      type: 1,
+    })) as Loose<boolean> | null;
+    if (!res?.success || res.result === false) {
+      console.log(`${TAG} generateNotePng refused ${relPath} p${page}: ${JSON.stringify(res)}`);
+      return null;
+    }
+  } catch (err) {
+    console.log(`${TAG} generateNotePng threw for ${relPath} p${page}: ${String(err)}`);
+    return null;
+  }
+
+  rendered.add(name);
+  return `file://${absolute}`;
 }

@@ -75,11 +75,11 @@ import {WeekView, shiftWeek} from './src/components/WeekView';
 import {acceptsEvents, acceptsTasks, type TaskCollection} from './src/discovery';
 import {
   DATE_FORMATS,
-  TIME_FORMATS,
-  addMinutes,
+  endForStart,
+  endsBeforeStart,
   formatDate,
   formatTime,
-  minutesBetween,
+  TIME_FORMATS,
   type DateFormat,
   type TimeFormat,
 } from './src/format';
@@ -182,7 +182,7 @@ import {
   type NoteTemplate,
 } from './src/notes';
 import {eventsWithNotes} from './src/meetingnote';
-import {buildIndex, clearIndex} from './src/noteindex';
+import {buildIndex, clearIndex, ensurePreview} from './src/noteindex';
 import {
   countStarredPages,
   keywordHits,
@@ -787,6 +787,9 @@ export default function App(): React.JSX.Element {
   const [findProgress, setFindProgress] = useState<{done: number; total: number} | null>(
     null,
   );
+  const [previewMode, setPreviewMode] = useState(false);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [previewsPending, setPreviewsPending] = useState(0);
 
   /**
    * Read the note folders and index what is in them.
@@ -853,6 +856,57 @@ export default function App(): React.JSX.Element {
     () => keywordHits(findNotes, findRoots, findQuery),
     [findNotes, findRoots, findQuery],
   );
+
+  /**
+   * Render the starred pages that are on screen, one at a time.
+   *
+   * Sequential on purpose. Each page is a full render by the host, and firing
+   * a few dozen at once would compete with the panel's own repainting for the
+   * same hardware — the tiles would all arrive at the end rather than filling
+   * in as they finish. Each one is published as it lands, so the grid becomes
+   * useful before it is complete.
+   *
+   * Cancelled by the `live` flag rather than left to finish: leaving Previews,
+   * or typing into the filter, should stop work on pages nobody is looking at.
+   */
+  useEffect(() => {
+    if (!previewMode || screen !== 'hub' || tab !== 'find') {
+      return;
+    }
+    const wanted = foundStars.flatMap(hit =>
+      hit.pages.map(page => ({key: `${hit.path}:${page}`, hit, page})),
+    );
+    const undrawn = wanted.filter(item => !previews[item.key]);
+    if (undrawn.length === 0) {
+      setPreviewsPending(0);
+      return;
+    }
+
+    let live = true;
+    setPreviewsPending(undrawn.length);
+    void (async () => {
+      for (const item of undrawn) {
+        if (!live) {
+          return;
+        }
+        const uri = await ensurePreview(item.hit.path, item.page, item.hit.modified);
+        if (!live) {
+          return;
+        }
+        if (uri) {
+          setPreviews(prev => ({...prev, [item.key]: uri}));
+        }
+        setPreviewsPending(n => Math.max(0, n - 1));
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // `previews` is deliberately not a dependency: it is written by this effect,
+    // and depending on it would restart the loop after every tile.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewMode, screen, tab, foundStars]);
+
 
   /**
    * Fetch more calendar when the view moves outside what has been fetched.
@@ -2012,17 +2066,35 @@ export default function App(): React.JSX.Element {
     }
     setStatus({kind: 'working', message: 'Looking for collections…'});
     try {
-      const found = await discoverCollections(config);
+      const {collections: found, home} = await discoverCollections(config);
       setCollections(found);
       setLocalCollections(found);
+      // The calendar home is not a collection, but earlier builds listed it as
+      // one — a Depth:1 enumeration always describes the collection it was sent
+      // to — so a tick on it may already be saved. Discovery is the only moment
+      // the home's URL is known, and so the only chance to prune it.
+      let dropped = 0;
+      changeConfig(c => {
+        const pruned = forgetCollections(c, [home]);
+        dropped =
+          c.collectionUrls.length +
+          c.calendarUrls.length -
+          (pruned.collectionUrls.length + pruned.calendarUrls.length);
+        return pruned;
+      });
       setStatus({
         kind: 'done',
-        message: `Found ${found.length} collection(s). Tick what to use, then Save settings.`,
+        message:
+          `Found ${found.length} collection(s). Tick what to use, then Save settings.` +
+          (dropped > 0
+            ? ' Your account folder was removed from the list — it is where your'
+              + ' collections live, not one of them.'
+            : ''),
       });
     } catch (err) {
       setStatus({kind: 'error', message: describe(err)});
     }
-  }, [config]);
+  }, [config, changeConfig]);
 
   /**
    * Write the settings, reporting whether they were stored.
@@ -2600,7 +2672,7 @@ export default function App(): React.JSX.Element {
                     </Text>
                   )}
 
-                  <Text style={styles.label}>When</Text>
+                  <Text style={styles.label}>Date and start time</Text>
                   <DateTimePicker
                     scrollHandle={scrollHandle}
                     onScrollTo={scrollFieldIntoView}
@@ -2608,12 +2680,22 @@ export default function App(): React.JSX.Element {
                     time={captureEvent.startTime}
                     timeFormat={timeFormat}
                     onChange={(date, time) =>
-                      setCaptureEvent(d => ({...d, date, startTime: time}))
+                      setCaptureEvent(d => ({
+                        ...d,
+                        date,
+                        startTime: time,
+                        // The same rule the event editor uses: hold the
+                        // duration, default to an hour, drop it entirely when
+                        // the event becomes all-day.
+                        endTime: endForStart(d.startTime, d.endTime, time),
+                      }))
                     }
                   />
                   {/*
-                    Leaving the start time empty makes it an all-day event, so
-                    an end time is only meaningful once there is a start.
+                    Leaving the start empty makes it an all-day event, which has
+                    no end to set. `hideCalendar` keeps this to a time: the end
+                    is always on the event's own day, and a second calendar here
+                    would invite an end date the format cannot store.
                   */}
                   {!!captureEvent.startTime && (
                     <>
@@ -2624,10 +2706,17 @@ export default function App(): React.JSX.Element {
                         date={captureEvent.date}
                         time={captureEvent.endTime}
                         timeFormat={timeFormat}
+                        hideCalendar
                         onChange={(_date, time) =>
                           setCaptureEvent(d => ({...d, endTime: time}))
                         }
                       />
+                      {endsBeforeStart(captureEvent.startTime, captureEvent.endTime) && (
+                        <Text style={styles.noteCompact}>
+                          This ends before it starts. An event carries one date, so it
+                          will be stored that way rather than as running overnight.
+                        </Text>
+                      )}
                     </>
                   )}
                 </>
@@ -2864,26 +2953,16 @@ will not duplicate them.`}
             time={eventForm.startTime}
             timeFormat={timeFormat}
             onChange={(date, time) =>
-              setEventForm(d => {
-                if (!d) {
-                  return d;
-                }
-                const next = {...d, date, startTime: time};
-                if (time) {
-                  // The end follows the start on every change, keeping whatever
-                  // duration the event already had — 90 minutes stays 90
-                  // minutes when the start is nudged — and defaulting to an
-                  // hour when there is nothing to keep.
-                  const held =
-                    d.startTime && d.endTime ? minutesBetween(d.startTime, d.endTime) : null;
-                  next.endTime = addMinutes(time, held && held > 0 ? held : 60);
-                } else {
-                  // No start means an all-day event, which cannot carry an end
-                  // time.
-                  next.endTime = '';
-                }
-                return next;
-              })
+              setEventForm(d =>
+                d
+                  ? {
+                      ...d,
+                      date,
+                      startTime: time,
+                      endTime: endForStart(d.startTime, d.endTime, time),
+                    }
+                  : d,
+              )
             }
           />
           {/*
@@ -3413,6 +3492,10 @@ will not duplicate them.`}
               query={findQuery}
               onQuery={setFindQuery}
               stars={foundStars}
+              previewMode={previewMode}
+              onTogglePreviews={() => setPreviewMode(v => !v)}
+              previews={previews}
+              previewsPending={previewsPending}
               keywords={foundKeywords}
               starredPages={countStarredPages(foundStars)}
               scanning={findScanning}

@@ -1,8 +1,9 @@
 # Task Hub — state as of 2026-09-15
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-**475 tests across 28 suites**; `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.65.0** (versionCode 81), built but **not yet tested on device**.
+**483 tests across 29 suites**; `tsc` and eslint clean, all verified 2026-09-15.
+Current build **0.66.0** (versionCode 82), built but **not yet tested on device**.
+0.65.0 was superseded before it was installed; nothing in either is device-verified.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
 **licensed GPLv3**, with v0.64.1 released and `TaskHub.snplg` attached to it.
@@ -16,6 +17,79 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.66.0
+
+### The time picker offers values instead of stepping to them
+
+See *Panel sizing* below for the general rule; this is the concrete case. The
+old picker was four arrows around a readout — a pair for hours, a pair for
+minutes stepping by five — so reaching 3:45 pm from the noon they began at was
+about a dozen taps, each a full e-ink repaint. Hour and minute now each open a
+grid of values; AM/PM is a pair of chips, because a menu that opens to reveal
+one alternative is a tap spent on nothing.
+
+**The grids expand inline, never as an overlay.** An absolutely-positioned
+overlay inside a ScrollView is positioned against the row that opened it,
+scrolls away with the page, and refuses touches outside its parent's bounds —
+the template picker was broken that way twice. Expanding in place has none of
+those failure modes and matches `Choice`, which the forms already use
+everywhere. The typed field stays: a five-minute grid cannot reach 3:47.
+
+The `Arrow` component and its styles are gone. The earlier request that the
+arrows be inverted is **superseded**; do not reinstate steppers on its
+authority.
+
+### One rule for an event's end time
+
+The event editor held it inline; the capture screen needed the same thing. It is
+now `endForStart` in `src/format.ts`, tested. It keeps the **duration**, not the
+end — a ninety-minute meeting dragged from 09:00 to 14:00 is still ninety
+minutes — and falls back to an hour when there is nothing to keep. An empty
+start means all-day, which carries no end.
+
+Worth knowing: `minutesBetween` reads an end earlier than its start as crossing
+midnight, so 14:00–10:00 is a twenty-hour event rather than an error. But
+`buildVEvent` writes DTEND against the event's **single** date, so such a pair
+is actually stored as finishing before it began. The capture screen now warns
+about it (`endsBeforeStart`); properly supporting overnight events needs a
+second date on the draft, which the format does not carry.
+
+### `paul` again — the first fix was only half of it
+
+0.65.0 stopped the calendar home being *discovered*. It did not remove the copy
+already sitting in the user's saved `collectionUrls`, which is why the row
+survived the fix. Settings are durable and independent of discovery; that is the
+whole point of them.
+
+`discoverCollections` now returns `{collections, home}`, and **Discover** prunes
+any saved tick matching the home and says that it did. Discovery is the only
+moment the home's URL is known, so it is the only place this can happen.
+
+### Page previews on the Find tab
+
+A **Previews** button on the Starred section swaps the list for a two-column
+grid of rendered pages. Off by default: every tile is a real render.
+
+- `PluginFileAPI.generateNotePng` takes **`notePath`**, not the `NOTEPath` its
+  published signature shows — the shipped typings and that same page's own
+  parameter table both say `notePath`. `type: 1` for a white background; a
+  transparent one shows as black wherever the page is blank.
+- Rendered once and kept in `Document/TaskHub/previews`, named by a djb2 hash of
+  path, page and modification time — so a page redrawn after its note changed
+  lands under a new name rather than needing invalidation. There is no stat
+  call, and `generateNotePng` re-renders whatever it is pointed at, so one
+  directory listing per session is what makes the cache a cache.
+- Rendered **one at a time**, published as each lands, and cancelled when the
+  reader leaves. Firing a few dozen at once competes with the panel's own
+  repainting and they all arrive at the end instead of filling in.
+- Two columns, not four: a page shrunk to a quarter of the panel is texture, not
+  handwriting, and a preview you cannot read is worse than the row it replaced.
+
+Recognised text beside each star was considered and rejected — there is no API
+for it, it means `getElements` plus `recognizeElements` per page, and a
+thumbnail of the actual handwriting is more informative than a recognition
+guess for similar cost.
 
 ## What changed in 0.65.0 — none of it device-verified yet
 
@@ -381,7 +455,16 @@ TurboModule at import time that only exists on-device and breaks jest.
 - **Local `YYYY-MM-DD` keys, never epoch comparison**, for day bucketing.
 - **Every write is confirm → push → success → full reload**, one code path
   (`ask()` in `App.tsx`). Completion deliberately does not update optimistically.
-- **Time picker arrows are inverted** (up decrements) by request.
+- **The time picker offers values, it does not step to them.** Hour and minute
+  each open a grid of choices in place; AM/PM is a pair of chips. This replaced
+  four inverted arrows (up decremented, by an earlier request that is now
+  **superseded** — do not reinstate steppers on its authority), which took about
+  a dozen taps to reach 3:45 pm from the noon they started at, each one a full
+  e-ink repaint. The grids expand **inline, never as an overlay**: an
+  absolutely-positioned overlay inside a ScrollView is positioned against the
+  row that opened it and refuses touches outside its parent's bounds, which is
+  how the template picker broke twice. The typed field stays, because a
+  five-minute grid cannot reach 3:47.
 - **No `@react-native-community/datetimepicker`** — native module, animated
   spinners, poor fit for e-ink. The picker is plain Views.
 

@@ -14,7 +14,7 @@
  */
 
 import React, {useState} from 'react';
-import {Pressable, Text, View} from 'react-native';
+import {Image, Pressable, Text, View} from 'react-native';
 
 import type {KeywordHit, StarHit} from '../notesearch';
 import {Button, Field, LoadingLine, Section, styles} from './common';
@@ -54,6 +54,12 @@ export function FindView(props: {
   query: string;
   onQuery: (value: string) => void;
   stars: StarHit[];
+  /** Whether starred pages are drawn as thumbnails instead of rows. */
+  previewMode: boolean;
+  onTogglePreviews: () => void;
+  /** Rendered page images by `path:page`, filled in as each finishes. */
+  previews: Record<string, string>;
+  previewsPending: number;
   keywords: KeywordHit[];
   starredPages: number;
   scanning: boolean;
@@ -84,6 +90,16 @@ export function FindView(props: {
     <>
       <View style={styles.actions}>
         <Button label="Rescan" onPress={props.onRescan} disabled={scanning} />
+        {/*
+          Off by default. A page has to be rendered to be shown, so previews
+          cost real work per starred page — worth it when browsing, wasteful
+          when you already know which note you want.
+        */}
+        <Button
+          label={props.previewMode ? 'List' : 'Previews'}
+          onPress={props.onTogglePreviews}
+          disabled={scanning}
+        />
       </View>
 
       <Field
@@ -146,6 +162,48 @@ export function FindView(props: {
             onToggle={() => setStarsOpen(v => !v)}>
             {props.stars.length === 0 ? (
               <Text style={styles.note}>Nothing starred matches that.</Text>
+            ) : props.previewMode ? (
+              <>
+                {props.previewsPending > 0 && (
+                  <Text style={styles.note}>
+                    Drawing {props.previewsPending} more page
+                    {props.previewsPending === 1 ? '' : 's'}…
+                  </Text>
+                )}
+                <View style={styles.previewGrid}>
+                  {props.stars.flatMap(hit =>
+                    hit.pages.map(page => {
+                      const key = `${hit.path}:${page}`;
+                      const uri = props.previews[key];
+                      return (
+                        <Pressable
+                          key={key}
+                          style={styles.previewCell}
+                          onPress={() => props.onOpen(hit.path, page)}>
+                          <View style={styles.previewFrame}>
+                            {uri ? (
+                              <Image
+                                style={styles.previewImage}
+                                source={{uri}}
+                                resizeMode="contain"
+                              />
+                            ) : (
+                              // A tile that keeps its place while the page is
+                              // being drawn, so the grid does not reflow under
+                              // the reader as each one lands.
+                              <Text style={styles.previewWaiting}>…</Text>
+                            )}
+                          </View>
+                          <Text style={styles.previewCaption} numberOfLines={1}>
+                            {hit.name}
+                          </Text>
+                          <Text style={styles.previewMeta}>{pageLabel(hit.label, page)}</Text>
+                        </Pressable>
+                      );
+                    }),
+                  )}
+                </View>
+              </>
             ) : (
               props.stars.map(hit =>
                 hit.pages.map(page => (

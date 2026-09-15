@@ -124,3 +124,64 @@ export function addMinutes(time: string, minutes: number): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
 }
+
+/**
+ * The end time an event should keep when its start moves.
+ *
+ * Extracted from the event editor, which had the rule inline, so that the
+ * capture screen uses the same one rather than a second approximation of it.
+ * A rule about what an event means belongs in one place or it will drift.
+ *
+ * The duration is what is held on to, not the end: a ninety-minute meeting
+ * dragged from 09:00 to 14:00 should still be ninety minutes. With nothing to
+ * hold on to — a new event, or one that had no end — it falls back to an hour,
+ * which is what a scheduled thing usually is.
+ *
+ * An empty `nextStart` means the event has become all-day, and an all-day
+ * event carries no end time.
+ *
+ * Note `addMinutes` wraps at midnight rather than clamping. That is deliberate
+ * here: an event starting at 23:30 genuinely does end the next day, and the
+ * wrapped 00:30 is the honest time even though the single stored date cannot
+ * yet express which day it falls on. Clamping would invent a 23:59 end that
+ * the user never asked for.
+ */
+export function endForStart(
+  previousStart: string,
+  previousEnd: string,
+  nextStart: string,
+): string {
+  if (!nextStart) {
+    return '';
+  }
+  const held =
+    previousStart && previousEnd ? minutesBetween(previousStart, previousEnd) : null;
+  return addMinutes(nextStart, held !== null && held > 0 ? held : 60);
+}
+
+/**
+ * Whether an end time reads as earlier in the day than its start.
+ *
+ * For warning, never for correcting: silently moving a time somebody typed is
+ * how a form stops being trusted. Equal times are not backwards — a zero-length
+ * marker in a calendar is a legitimate thing to want.
+ *
+ * Worth surfacing because `buildVEvent` writes DTEND against the event's own
+ * single date, so such a pair is stored as finishing before it began rather
+ * than as running overnight. Supporting genuine overnight events needs a second
+ * date on the draft, which the format does not yet carry.
+ */
+export function endsBeforeStart(startTime: string, endTime: string): boolean {
+  const parse = (value: string) => {
+    const match = /^(\d{1,2}):(\d{2})$/.exec((value ?? '').trim());
+    if (!match) {
+      return null;
+    }
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : null;
+  };
+  const start = parse(startTime);
+  const end = parse(endTime);
+  return start !== null && end !== null && end < start;
+}

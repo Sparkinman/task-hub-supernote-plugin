@@ -132,6 +132,8 @@ export function DateTimePicker(props: Props): React.JSX.Element {
    * than collapsing it back to the button that opened it.
    */
   const [timeOpen, setTimeOpen] = useState(false);
+  /** Which value grid is expanded, if any. Only ever one at a time. */
+  const [openPart, setOpenPart] = useState<'hour' | 'minute' | null>(null);
   /** What is in the box while it is being typed and does not yet parse. */
   const [typed, setTyped] = useState<string | null>(null);
   // A time arriving from outside — editing an item that has one — opens the row.
@@ -158,43 +160,172 @@ export function DateTimePicker(props: Props): React.JSX.Element {
     onChange(toDateInput(target), time);
   };
 
-  // Where the steppers start from when no time has been typed yet. Noon is
-  // unambiguous in both 12- and 24-hour display, unlike 00:00 which reads as
-  // "no time set". It is only a starting point for the arrows now — opening the
-  // time row no longer sets it, because a time chosen for you is one you have
-  // to notice and correct.
-  const STEPPER_START = '12:00';
+  /**
+   * The time row: pick the hour, pick the minute, pick AM or PM.
+   *
+   * It used to be four arrows around a readout — a pair for hours and a pair
+   * for minutes stepping by five — so setting 3:45 pm from the noon the
+   * steppers began at was a dozen taps, and every one of them a full e-ink
+   * repaint. Choosing the value directly is one tap to open and one to pick,
+   * whatever the value is.
+   *
+   * The grids expand **in place** rather than floating over the form. That is
+   * not a styling preference: an absolutely-positioned overlay inside a
+   * ScrollView is positioned against the row that opened it, scrolls away with
+   * the page, and has its out-of-bounds half refuse touches — which is exactly
+   * how the template picker broke twice. Expanding inline has none of those
+   * problems and matches `Choice`, which the rest of the forms already use.
+   *
+   * The typed field stays. A five-minute grid cannot reach 3:47, and losing
+   * that would be a step backwards from the steppers it replaces.
+   */
+  const {hours: liveHours, minutes: liveMinutes} = parseHM(time || '12:00');
+  const isPm = liveHours >= 12;
 
-  const bumpTime = (deltaHours: number, deltaMinutes: number) => {
-    // Setting a time only makes sense against a date; default to today.
-    const base = time || STEPPER_START;
-    const {hours, minutes} = parseHM(base);
-    onChange(date || today, toHM(hours + deltaHours, minutes + deltaMinutes));
+  /** Set the hour, keeping the minutes and the half of the day. */
+  const pickHour = (hour24: number) => {
+    setOpenPart(null);
+    onChange(date || today, toHM(hour24, time ? liveMinutes : 0));
   };
 
-  /**
-   * The time row: steppers, the typed field, and the remove/add control.
-   *
-   * Built once and used by both shapes below, so the time-only picker cannot
-   * drift from the full one.
-   */
+  const pickMinute = (minute: number) => {
+    setOpenPart(null);
+    onChange(date || today, toHM(liveHours, minute));
+  };
+
+  /** 12 for midnight and noon, so the grid reads as a clock face does. */
+  const hourLabel = (hour24: number): string => {
+    if (timeFormat !== '12') {
+      return String(hour24).padStart(2, '0');
+    }
+    const twelve = hour24 % 12;
+    return String(twelve === 0 ? 12 : twelve);
+  };
+
+  // In 12-hour mode the grid offers the twelve clock positions and AM/PM says
+  // which half; in 24-hour mode it offers all twenty-four and there is no
+  // second control to reconcile it with.
+  const hourChoices =
+    timeFormat === '12'
+      ? [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(h => {
+          const base = h === 12 ? 0 : h;
+          return {value: isPm ? base + 12 : base, label: String(h)};
+        })
+      : Array.from({length: 24}, (_, h) => ({value: h, label: hourLabel(h)}));
+
+  const minuteChoices = Array.from({length: 12}, (_, i) => ({
+    value: i * 5,
+    label: String(i * 5).padStart(2, '0'),
+  }));
+
   const timeControls = (
     <>
+      {showTime ? (
+        <View style={styles.timeBlockInner}>
+          <View style={styles.timePickRow}>
+            <Pressable
+              style={[styles.timePart, openPart === 'hour' && styles.timePartOpen]}
+              onPress={() => setOpenPart(openPart === 'hour' ? null : 'hour')}>
+              <Text style={styles.timePartValue}>
+                {time ? hourLabel(liveHours) : '--'}
+              </Text>
+              <Text style={styles.timePartCaption}>hour ▾</Text>
+            </Pressable>
 
-        {showTime ? (
-          <View style={styles.timeControls}>
-            <View style={styles.spinner}>
-              <Arrow label="▲" onPress={() => bumpTime(-1, 0)} />
-              <Text style={styles.spinnerCaption}>hour</Text>
-              <Arrow label="▼" onPress={() => bumpTime(1, 0)} />
-            </View>
+            <Text style={styles.timeColon}>:</Text>
+
+            <Pressable
+              style={[styles.timePart, openPart === 'minute' && styles.timePartOpen]}
+              onPress={() => setOpenPart(openPart === 'minute' ? null : 'minute')}>
+              <Text style={styles.timePartValue}>
+                {time ? String(liveMinutes).padStart(2, '0') : '--'}
+              </Text>
+              <Text style={styles.timePartCaption}>min ▾</Text>
+            </Pressable>
 
             {/*
-              Typed and displayed in whichever clock the user reads elsewhere.
-              The value handed back is always 24-hour HH:MM — that is what the
-              calendar format needs — but showing 14:00 to somebody whose
-              settings say 2pm is asking them to convert in their head.
+              Two chips rather than a two-item sheet: a menu that opens to show
+              one alternative is a tap spent on nothing.
             */}
+            {timeFormat === '12' && (
+              <View style={styles.meridiemPair}>
+                {(['AM', 'PM'] as const).map(half => {
+                  const on = (half === 'PM') === isPm && !!time;
+                  return (
+                    <Pressable
+                      key={half}
+                      style={[styles.meridiem, on && styles.meridiemOn]}
+                      onPress={() => {
+                        const base = liveHours % 12;
+                        onChange(
+                          date || today,
+                          toHM(half === 'PM' ? base + 12 : base, liveMinutes),
+                        );
+                      }}>
+                      <Text style={[styles.meridiemText, on && styles.meridiemTextOn]}>
+                        {half}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            <Pressable
+              onPress={() => {
+                setTimeOpen(false);
+                setOpenPart(null);
+                onChange(date, '');
+              }}
+              hitSlop={8}>
+              <Text style={styles.clearLink}>Remove time</Text>
+            </Pressable>
+          </View>
+
+          {openPart === 'hour' && (
+            <View style={styles.timeGrid}>
+              {hourChoices.map(choice => {
+                const on = !!time && choice.value === liveHours;
+                return (
+                  <Pressable
+                    key={choice.value}
+                    style={[styles.timeCell, on && styles.timeCellOn]}
+                    onPress={() => pickHour(choice.value)}>
+                    <Text style={[styles.timeCellText, on && styles.timeCellTextOn]}>
+                      {choice.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+
+          {openPart === 'minute' && (
+            <View style={styles.timeGrid}>
+              {minuteChoices.map(choice => {
+                const on = !!time && choice.value === liveMinutes;
+                return (
+                  <Pressable
+                    key={choice.value}
+                    style={[styles.timeCell, on && styles.timeCellOn]}
+                    onPress={() => pickMinute(choice.value)}>
+                    <Text style={[styles.timeCellText, on && styles.timeCellTextOn]}>
+                      {choice.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+
+          {/*
+            Typed and displayed in whichever clock the user reads elsewhere.
+            The value handed back is always 24-hour HH:MM — that is what the
+            calendar format needs — but showing 14:00 to somebody whose
+            settings say 2pm is asking them to convert in their head.
+          */}
+          <View style={styles.timeTypeRow}>
+            <Text style={styles.timeTypeLabel}>or type</Text>
             <TextInput
               ref={timeInputRef}
               onFocus={handleTimeFocus}
@@ -210,55 +341,24 @@ export function DateTimePicker(props: Props): React.JSX.Element {
                 }
               }}
               onBlur={() => setTyped(null)}
-              // Noon, matching STEPPER_START. A placeholder reading "2:00 pm"
-              // over a stepper that starts at noon looks like the default, and
-              // a default nobody chose is one everybody has to check.
-              placeholder={timeFormat === '12' ? '12:00 pm' : '12:00'}
+              placeholder={timeFormat === '12' ? '3:47 pm' : '15:47'}
               placeholderTextColor="#999"
               keyboardType="numbers-and-punctuation"
             />
-            {timeFormat === '12' && (
-              <View style={styles.spinner}>
-                <Arrow
-                  label={parseHM(time || '12:00').hours < 12 ? 'AM' : 'PM'}
-                  onPress={() => bumpTime(parseHM(time || '12:00').hours < 12 ? 12 : -12, 0)}
-                />
-                <Text style={styles.spinnerCaption}>tap</Text>
-              </View>
-            )}
-
-            <View style={styles.spinner}>
-              <Arrow label="▲" onPress={() => bumpTime(0, -5)} />
-              <Text style={styles.spinnerCaption}>min</Text>
-              <Arrow label="▼" onPress={() => bumpTime(0, 5)} />
-            </View>
-
-            <View style={styles.timeAside}>
-              <Text style={styles.timePreview}>
-                {time ? formatTime(time, timeFormat) : 'No time set'}
-              </Text>
-              <Pressable
-                onPress={() => {
-                  setTimeOpen(false);
-                  onChange(date, '');
-                }}
-                hitSlop={8}>
-                <Text style={styles.clearLink}>Remove time</Text>
-              </Pressable>
-            </View>
           </View>
-        ) : (
-          <Pressable
-            style={styles.addTime}
-            onPress={() => {
-              setTimeOpen(true);
-              // Opens the row without choosing a time. Only the date is passed
-              // through, so nothing is set until the user types or steps.
-              onChange(date || today, '');
-            }}>
-            <Text style={styles.addTimeText}>+ Add a time</Text>
-          </Pressable>
-        )}
+        </View>
+      ) : (
+        <Pressable
+          style={styles.addTime}
+          onPress={() => {
+            setTimeOpen(true);
+            // Opens the row without choosing a time. Only the date is passed
+            // through, so nothing is set until the user picks or types.
+            onChange(date || today, '');
+          }}>
+          <Text style={styles.addTimeText}>+ Add a time</Text>
+        </Pressable>
+      )}
     </>
   );
 
@@ -331,16 +431,6 @@ export function DateTimePicker(props: Props): React.JSX.Element {
         </View>
       ))}
 
-      {/*
-        Four arrows around one large readout rather than a row of labelled
-        buttons: hours and minutes each get an up/down pair, minutes step by 5.
-        Typing into the readout covers any odd minute the steppers cannot reach,
-        so a finer grain costs no extra chrome.
-
-        The arrows are deliberately inverted — up decrements, down increments —
-        so they read as scrolling a wheel of values past a window rather than
-        nudging the number itself.
-      */}
       <View style={styles.timeBlock}>
         <Text style={styles.timeLabel}>Time</Text>
         {timeControls}
@@ -357,13 +447,6 @@ function Chip(props: {label: string; onPress: () => void}): React.JSX.Element {
   );
 }
 
-function Arrow(props: {label: string; onPress: () => void}): React.JSX.Element {
-  return (
-    <Pressable style={styles.arrow} onPress={props.onPress} hitSlop={6}>
-      <Text style={styles.arrowText}>{props.label}</Text>
-    </Pressable>
-  );
-}
 
 const styles = StyleSheet.create({
   wrap: {borderRadius: R.lg, borderWidth: 1, borderColor: '#ccc', padding: sp(12), marginBottom: sp(12)},
@@ -385,20 +468,8 @@ const styles = StyleSheet.create({
   cellTextToday: {fontWeight: '700', textDecorationLine: 'underline'},
   timeBlock: {marginTop: sp(14), borderTopWidth: 1, borderTopColor: '#ddd', paddingTop: sp(10)},
   timeLabel: {fontSize: fs(21), color: '#000', marginBottom: sp(6)},
-  timeControls: {flexDirection: 'row', alignItems: 'center', gap: sp(10)},
-  spinner: {alignItems: 'center'},
-  spinnerCaption: {fontSize: fs(15), color: '#777', marginVertical: sp(1)},
   // Round, and big enough to hit without aiming: these are the controls most
   // used in the picker and they were the smallest things in it.
-  arrow: {
-    borderRadius: R.pill,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    paddingHorizontal: sp(12),
-    paddingVertical: sp(3),
-    marginVertical: sp(1),
-  },
-  arrowText: {fontSize: fs(22), color: '#000', lineHeight: fs(26)},
   timeInput: {
     borderRadius: R.md,
     borderWidth: 2,
@@ -411,8 +482,6 @@ const styles = StyleSheet.create({
     minWidth: 156,
     textAlign: 'center',
   },
-  timeAside: {flex: 1},
-  timePreview: {fontSize: fs(21), color: '#000', fontWeight: '700'},
   clearLink: {fontSize: fs(18), color: '#555', textDecorationLine: 'underline', marginTop: sp(3)},
   addTime: {
     borderRadius: R.md,
@@ -423,5 +492,61 @@ const styles = StyleSheet.create({
     paddingVertical: sp(11),
     alignSelf: 'flex-start',
   },
+  timeBlockInner: {gap: sp(8)},
+  timePickRow: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: sp(8)},
+  /**
+   * One part of the time, big enough to hit with a pen.
+   *
+   * The value is set large and the caption small beneath it: the row is read
+   * as a clock, and the word "hour" is only there to say what opens when it is
+   * pressed.
+   */
+  timePart: {
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: '#000',
+    paddingHorizontal: sp(16),
+    paddingVertical: sp(6),
+    alignItems: 'center',
+    minWidth: sp(64),
+  },
+  /** Thickened, not filled: the grid below is already the strong signal. */
+  timePartOpen: {borderWidth: 3},
+  timePartValue: {fontSize: fs(30), fontWeight: '700', color: '#000'},
+  timePartCaption: {fontSize: fs(14), color: '#555'},
+  timeColon: {fontSize: fs(30), fontWeight: '700', color: '#000'},
+  meridiemPair: {flexDirection: 'row', gap: sp(6)},
+  meridiem: {
+    borderRadius: R.md,
+    borderWidth: 1,
+    borderColor: '#000',
+    paddingHorizontal: sp(14),
+    paddingVertical: sp(12),
+  },
+  meridiemOn: {backgroundColor: '#000'},
+  meridiemText: {fontSize: fs(20), color: '#000'},
+  meridiemTextOn: {color: '#fff'},
+  /**
+   * The expanded values, wrapped rather than scrolled.
+   *
+   * Twenty-four hour cells is the widest this gets, and wrapping lets the same
+   * grid serve both clock formats and both panel sizes without a measured
+   * column count.
+   */
+  timeGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(6), paddingVertical: sp(4)},
+  timeCell: {
+    borderRadius: R.sm,
+    borderWidth: 1,
+    borderColor: '#000',
+    paddingHorizontal: sp(14),
+    paddingVertical: sp(10),
+    minWidth: sp(52),
+    alignItems: 'center',
+  },
+  timeCellOn: {backgroundColor: '#000'},
+  timeCellText: {fontSize: fs(22), color: '#000'},
+  timeCellTextOn: {color: '#fff'},
+  timeTypeRow: {flexDirection: 'row', alignItems: 'center', gap: sp(8)},
+  timeTypeLabel: {fontSize: fs(16), color: '#555'},
   addTimeText: {fontSize: fs(21), color: '#000'},
 });
