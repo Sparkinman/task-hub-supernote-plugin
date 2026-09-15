@@ -2,21 +2,173 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.71.2** (versionCode 92). **563 tests across 35 suites.** 0.66.0 was the first of these actually
-installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
+Current build **0.71.2** (versionCode 92). **563 tests across 35 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
-**licensed GPLv3**, with v0.64.1 released and `TaskHub.snplg` attached to it.
+**licensed GPLv3**. **v0.71.2 is released and marked Latest**, with `TaskHub-0.71.2.snplg`
+attached. `main` is pushed and clean at `04973fe`.
 
-One plugin: **Task Hub** (`vfmnvjq0i1hxf8gu`).
+## READ THIS FIRST — where the work stopped
 
-The demo build was removed on 2026-09-06. It existed so somebody could try the
-plugin before setting up a CalDAV server; lifting the server requirement made it
-redundant — the real plugin now saves its settings and runs every note and
-calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
-`PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
-test suite are all gone, along with the `blockedInDemo` guard that sat on every
-write path.
+Two plugins are now built from this tree:
+
+| | pluginID | Built by |
+|---|---|---|
+| **Task Hub** | `vfmnvjq0i1hxf8gu` | `./buildPlugin.sh` |
+| **Task Hub Demo** | `dmo7k2q4x9hzt3vb` | `./buildDemo.sh` |
+
+**The demo build is broken and that is the live bug.** It installs, but the maintainer reports
+"nothing for events". Everything known about it is under *The demo build* below — read that
+before touching anything, because a fix was half-designed when the session ended.
+
+Two chores are outstanding and neither is code:
+
+1. **The GitHub About box is stale and I could not change it** — the token here answers
+   `HTTP 403: Resource not accessible by personal access token` for `gh repo edit`. It still
+   says "capture handwriting as CalDAV tasks…" with no mention of `.ics` subscriptions or the
+   Supernote To-Do app. The replacement text and the topics to add are in the session notes;
+   the maintainer has to paste them into the repo's *About* gear.
+2. Nothing else. The release is out, history is clean, docs are written.
+
+## The demo build — and the bug it currently has
+
+A **second** `.snplg` with its own `pluginID`, so it installs beside the real plugin rather
+than replacing it. It exists for screenshots and screen recordings: it invents a month of
+calendar events and a set of tasks, and must never touch anything real.
+
+An earlier demo build was deleted on 2026-09-06 (`src/mode.ts`, `src/demo.ts`, `buildDemo.ps1`,
+`scripts/set_demo_names.py` and a `blockedInDemo` guard on every write path). **This is not
+that.** It was rebuilt from scratch on 2026-09-15 on a different principle: the old one was a
+crippled copy of the real plugin, this one is the real plugin with its inputs replaced.
+
+### How it is put together
+
+| File | Holds |
+|---|---|
+| `src/demoflag.ts` | `export const DEMO = false;` — one line, swapped to `true` for the build |
+| `src/demodata.ts` | `demoConfig()`, `demoTasks()`, `demoEvents()`. Pure, no SDK |
+| `PluginConfig.demo.json` | pluginID `dmo7k2q4x9hzt3vb`, pluginKey `TaskHubDemo`, name "Task Hub Demo" |
+| `buildDemo.sh` | Swaps four files, builds, restores them with a `trap` |
+
+Three guards are all that make it a demo, and they are deliberately few:
+
+- `storage.ts loadSettings()` returns `demoConfig()` and `saveSettings()` discards.
+- `storage.ts readNamed()` returns null and `writeNamed()` is a no-op. **This is what keeps
+  the two installs apart**: they share `Document/TaskHub`, so reading the file there would put
+  the real server address on camera.
+- `tasks.ts listTasks()` / `listEvents()` return the invented data **before** `ensureInternet`,
+  so the demo makes no request and never asks for network permission.
+
+Dates in `demodata.ts` are computed when read, not baked in, so the demo always shows the
+month it is being recorded in.
+
+`buildDemo.sh` swaps `app.json` (the name `index.js` registers under), `package.json` (decides
+the output filename), `PluginConfig.json` and `src/demoflag.ts`. A `trap` restores all four
+however the script ends. **Verified after a build: the tree is restored, `DEMO` is back to
+`false`, and the real 0.71.2 rebuilds byte-identical in identity.**
+
+### The bug: "nothing for events"
+
+Reported on device after installing `TaskHubDemo.snplg`. Not yet diagnosed. What is already
+established, so it is not re-done:
+
+**Ruled out.**
+
+- The package is right: `pluginID dmo7k2q4x9hzt3vb`, `pluginKey TaskHubDemo`, name
+  "Task Hub Demo", permissions FILE:READ/WRITE only.
+- `buildDemo.sh` did set the flag — it `grep -q`s for `DEMO = true` after the `sed` and exits
+  if absent, and the build proceeded.
+- The startup order is *not* obviously wrong: `refresh('opening')` is called **after**
+  `setConfig(stored)` inside the restore effect, so `getConfig()` should already hold
+  `demoConfig()` by then.
+- `demoConfig()` sets `collectionUrls` and `calendarUrls` to non-empty `demo:` URLs, so
+  `hasCollections` / `hasCalendars` are both true and the listing calls should run.
+- `pruneContainers` does not eat them: no `demo:` URL is a path ancestor of another.
+
+**Not decisive, do not repeat it.** Grepping the two bundles for `Team stand-up` finds it in
+**both**, because nothing tree-shakes the unused branch. That test proves nothing either way
+about the flag's value in the shipped bundle.
+
+**Still unknown.** Whether `DEMO` is actually `true` in the bundled output. The source was
+correct at build time; the bundle was not independently verified.
+
+### The fix that was being written when the session ended
+
+Two changes, and the first is the important one:
+
+1. **Seed the demo state at mount, not through `refresh`.** When `DEMO` is true, set
+   `tasks`/`events` (and their refs) directly as the component comes up, independently of
+   config, scope or the restore effect. This removes every ordering and configuration
+   dependency at once instead of proving which of them is at fault.
+
+   *Why the demo is fragile here and the real plugin is not:* `readNamed` returns null in the
+   demo, so there is **no cache**. The real plugin draws cached content immediately and a
+   failure to refresh is invisible; the demo has nothing to fall back on, so the same failure
+   is a blank calendar.
+
+2. **Make the build say what it is.** A visible "Demo" marker in the header, and one ungated
+   `console.log` at startup carrying the flag's value. Both because a recording should be
+   identifiable as a demo, and because "nothing showed" then becomes a question with an
+   answer. Remember `buildPlugin.sh` always bundles `--dev false`, so a `__DEV__`-gated log is
+   invisible on any real install.
+
+Worth considering if those do not settle it: the demo currently relies on the whole normal
+startup path. A build whose only job is to show the UI could set its state and skip that path
+entirely.
+
+## What changed on 2026-09-15 — release, history and documentation
+
+None of this touched device behaviour.
+
+### v0.71.2 is released
+
+Tagged, pushed, marked Latest, with `TaskHub-0.71.2.snplg` attached. Release notes group the
+work since 0.64.1 under New / Changed / Fixed.
+
+### The personal email is finally out of the history
+
+Flagged twice before and left alone both times, because cleaning it meant rewriting public
+history. The maintainer authorised it, so it is done.
+
+What the survey actually found, which was not what the earlier note assumed:
+
+- **22 commits** carried `pauldmcneil@gmail.com` — but **21 existed only in local
+  `refs/original/*`**, left by the previous `filter-branch`. They had never been pushed.
+- Exactly **one** was public: `9bef976`, reachable from `main` and from `v0.53.0`, `v0.64.0`
+  and `v0.64.1`.
+- **No blob in any ref** contained the address or the name. It was only ever commit metadata.
+
+Done, in order: a full `git bundle --all` backup to
+`/home/paul/task-hub-backups/plugin-before-scrub.bundle`; `refs/original` deleted, reflog
+expired, `gc --prune=now`; `filter-branch --env-filter` over `--branches --tags` rewriting both
+author and committer; force-push of `main` and the three affected tags; and the stale
+`backup-before-author-rewrite` tag deleted from the remote, since its name advertised the
+rewrite.
+
+Verified afterwards across **every** ref, local and remote: one identity only.
+
+**Consequences to remember.** Every SHA from `9bef976` onward changed, so any existing clone
+must be re-cloned or hard-reset. GitHub keeps the pre-rewrite commits reachable by direct SHA
+until it garbage-collects; they appear nowhere in the UI or in a clone, and only GitHub Support
+can force that collection.
+
+### Documentation
+
+Ten pages under `docs/`, linked from the README: `getting-started`, `connections`, `views`,
+`capture`, `notes`, `find`, `settings` (every setting, default and layout token), `tasks`,
+`troubleshooting`, and an index.
+
+The README also gained an **At a glance** table above the fold. That was a correction: the
+`.ics` subscriptions and the Supernote To-Do connection had full sections, ninety lines down a
+README with fifteen of them, and the maintainer twice could not find them. **Written down is
+not the same as findable** — when a feature ships, it belongs on the README's first screen,
+not only in `docs/`.
+
+`docs/connections.md` is the page to keep honest. It states plainly that the Task Hub server is
+the recommended route and the only one giving two-way sync across Google and Outlook, with the
+reasons a plugin cannot (an OAuth secret inside a GPL plugin is extractable; a plugin that runs
+only while open cannot refresh a token), and it has a section on why a subscription is
+read-only and slower that frames both as properties of the format.
 
 ## What changed in 0.71.2 — completing a task did not clear its mark
 
@@ -1202,6 +1354,9 @@ Borders are deliberately not scaled, and positive spacing never rounds to zero.
 
 ## Open threads
 
+0. **Fix the demo build** — it shows no events. This is the live bug; see
+   *The demo build* near the top, which has what has been ruled out and the fix that was
+   being written. Do not restart the diagnosis from scratch.
 1. Two-way sync — nothing is read back beyond listing. No un-complete, no
    dedupe, no offline queue.
 2. Per-task identity in a page mark, so copies can be told apart (see *Page
@@ -1241,7 +1396,14 @@ Borders are deliberately not scaled, and positive spacing never rounds to zero.
    since every write path assumes a CalDAV `href`, and (b) the fact that a feed has no
    `time-range`, so the whole file arrives every refresh and needs conditional GET by ETag
    or the 0.54–0.64 opening-speed work is given straight back.
-11. **The keystore limit below is probably wrong.** "No keystore is available to a plugin"
+11. **Nothing in 0.65.0 – 0.71.2 has been verified on hardware beyond what the maintainer
+   reported in passing**, which was: the `.ics` import (working), a Supernote to-do landing
+   on the wrong day (fixed in 0.71.1), and a completed task not clearing its page mark (fixed
+   in 0.71.2). The Supernote Cloud sign-in in particular has never been seen to succeed — the
+   two things most likely to fail are whether `hashHex` is reachable (the native module
+   changed, so **Add Plugin**, never Reinstall) and whether `fetch` passes `x-access-token`
+   through unmolested.
+12. **The keystore limit below is probably wrong.** "No keystore is available to a plugin"
    is listed under Known limits, but SNFolio stores its credentials with Android
    Keystore-backed encryption, and Task Hub ships its own native module, so `AndroidKeyStore`
    should be reachable the same way. Unverified.

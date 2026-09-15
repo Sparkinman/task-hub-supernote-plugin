@@ -95,3 +95,9 @@ place rather than dropped.
 
 **Settings → Device → Wipe all save data** deletes `settings.json` and starts
 fresh. Your notes are not touched.
+
+## The demo build shows no events
+
+Known, and being worked on. `TaskHubDemo.snplg` is a separate plugin for screenshots and
+screen recordings; it currently installs but does not display its invented calendar. The
+real plugin is unaffected — the two share no data at all.
