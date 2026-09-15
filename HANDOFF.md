@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.69.0** (versionCode 85). **506 tests across 31 suites.** 0.66.0 was the first of these actually
+Current build **0.70.0** (versionCode 86). **513 tests across 32 suites.** 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,58 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.70.0 — making subscriptions cheap
+
+0.69.0 shipped feeds that worked and were slow in three separate ways. All three
+were found by reading the code back rather than on device, and all three are the
+same mistake: a feed is not a windowed query and every saving the CalDAV path
+has had to be rebuilt for it explicitly.
+
+### It fetched everything and kept everything
+
+`parseVEvents(body)` returned every event in the file and all of them went into
+React state. A calendar with ten years of history put ten years into the month
+grid, which re-renders against that array. `withinWindow` now cuts it to the
+same **three months back, twelve forward** the CalDAV fetch uses, and widening
+the view widens this too because it runs on every fetch against the live window.
+
+**A repeating event is kept whatever its start date.** The master is what
+`expand.ts` derives occurrences from, so dropping a stand-up begun in 2019 for
+being old would silently empty the calendar of everything regular. That is the
+one rule in this file worth not breaking.
+
+### A 304 saved the download and then re-parsed anyway
+
+The raw `.ics` was cached and a `304` re-read it from disk and walked it line by
+line again. That is the expensive half: downloading is network time the user can
+wait through, parsing thousands of VEVENTs in JavaScript is CPU time that blocks
+the panel. **The parsed events are now what is cached**, as JSON, and a `304`
+loads that and never touches iCalendar. `JSON.parse` of an array is an order of
+magnitude cheaper than the line walk.
+
+### The first parse froze the panel
+
+`parseVEvents` is synchronous. `parseFeedBody` now cuts the body at
+`END:VEVENT` boundaries and parses 200 events at a time with a turn of the event
+loop between — `setTimeout`, not an awaited promise, because a resolved promise
+is a microtask and yields to nothing. This works because `parseVEvents` collects
+whatever lies between `BEGIN:VEVENT` and `END:VEVENT` and needs no `VCALENDAR`
+wrapper, which only the first chunk has.
+
+### Feeds blocked the collections
+
+`listEvents` awaited the feeds before returning, so nothing reached the screen
+until the slowest subscription answered. Split into `listFeeds`, run as its own
+errand with its own place in the loading count: the CalDAV collections draw as
+soon as they land and the subscriptions merge in behind them, by the same key
+the widening fetch uses.
+
+### And the instructions
+
+The settings fold now walks through the setup file in five numbered steps with
+the exact filename, the exact folder and a worked two-line example, instead of
+one paragraph that assumed the reader already knew the format.
 
 ## What changed in 0.69.0 — `.ics` subscriptions
 
@@ -51,12 +103,12 @@ exposes over CalDAV. Feeds exist for the person who does not run that server.
   refused because the address *is* the credential), the `Name|URL` setup-file
   format, and the stored list. Note the setup file splits on the **last** bar —
   a URL cannot hold an unescaped one but a calendar name readily can.
-- `src/feedfetch.ts` does the network. A feed is one file with every event the
-  calendar has ever held and no way to ask for less, which is exactly the cost
-  the 0.54–0.64 work removed — so it is bought back with a **conditional GET**
-  (stored `ETag` / `Last-Modified` → `If-None-Match` / `If-Modified-Since`, and
-  a `304` means no download *and no re-parse*), a body kept on disk so a cold
-  or offline open still draws, and a turn of the event loop between feeds.
+- `src/feedfetch.ts` does the network, with a **conditional GET** (stored
+  `ETag` / `Last-Modified` → `If-None-Match` / `If-Modified-Since`) and a copy
+  kept on disk so a cold or offline open still draws.
+  **As shipped in 0.69.0 this was not enough, and the note here originally
+  overclaimed it** — see 0.70.0 below, which is where the caching, the windowing
+  and the non-blocking fetch actually landed.
 - Feed events carry `readOnly: true` — stated, not inferred from the empty
   `href`, because the UI has to honour it everywhere an event can be tapped.
   `openEventEditor` refuses one with a notice naming the calendar.

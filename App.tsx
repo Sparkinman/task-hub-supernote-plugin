@@ -125,6 +125,7 @@ import {
   editEvent,
   editTask,
   listEvents,
+  listFeeds,
   listTasks,
   missingMessage,
   type MissingCollection,
@@ -610,6 +611,56 @@ export default function App(): React.JSX.Element {
   type Scope = 'all' | 'opening' | 'tasks' | 'events' | 'notes';
 
   /**
+   * Fetch the `.ics` subscriptions and merge them into the events on screen.
+   *
+   * Its own errand, with its own place in the loading count, so the panel says
+   * it is still working while the collections are already readable. Merged by
+   * the same key the widening fetch uses, so a feed refreshed twice replaces
+   * its own events rather than doubling them.
+   */
+  const refreshFeeds = useCallback(
+    async (cfg: ServerConfig) => {
+      startWork();
+      try {
+        const result = await listFeeds(cfg, eventWindowRef.current);
+        const merged = mergeFetched(
+          eventsRef.current,
+          result.items,
+          e => `${e.href}|${e.uid}|${e.startAt}`,
+          (a, b) => a.startAt - b.startAt,
+        );
+        eventsRef.current = merged;
+        setEvents(merged);
+        void writeNamed(CACHE_FILE, encodeCache(tasksRef.current, merged));
+
+        // A feed announces its own name in X-WR-CALNAME, the only place a
+        // calendar's real name appears in an .ics file. Held in state and never
+        // written back to settings: the events are already labelled with it by
+        // the fetcher, so this is purely what the Settings list shows — and
+        // writing it through `changeConfig` would mark the settings form edited
+        // behind the user's back, on a refresh they did not ask for.
+        if (result.feedNames && Object.keys(result.feedNames).length > 0) {
+          setFeedNames(prev => ({...prev, ...result.feedNames}));
+        }
+        // Said out loud. A subscription that cannot be reached shows whatever it
+        // last said, which is right — but silently serving stale events as if
+        // they were current is how somebody misses a meeting that moved.
+        if (result.feedsFailed && result.feedsFailed.length > 0) {
+          setStatus({
+            kind: 'error',
+            message: `Could not reach ${result.feedsFailed.join(', ')}. Showing what was last fetched.`,
+          });
+        }
+      } catch (err) {
+        console.log(`[TaskHub] feeds failed: ${String(err)}`);
+      } finally {
+        endWork();
+      }
+    },
+    [startWork, endWork],
+  );
+
+  /**
    * What a reload needs to fetch.
    *
    * A full refresh is eight operations: two CalDAV listings and six walks of
@@ -646,24 +697,14 @@ export default function App(): React.JSX.Element {
       if (e) {
         eventsRef.current = e.items;
         setEvents(e.items);
-        // A feed announces its own name in X-WR-CALNAME, the only place a
-        // calendar's real name appears in an .ics file. Held in state and never
-        // written back to settings: the events are already labelled with it by
-        // the fetcher, so this is purely what the Settings list shows — and
-        // writing it through `changeConfig` would mark the settings form edited
-        // behind the user's back, on a refresh they did not ask for.
-        if (e.feedNames && Object.keys(e.feedNames).length > 0) {
-          setFeedNames(prev => ({...prev, ...e.feedNames}));
-        }
-        // Said out loud. A subscription that cannot be reached shows whatever it
-        // last said, which is right — but silently serving stale events as if
-        // they were current is how somebody misses a meeting that moved.
-        if (e.feedsFailed && e.feedsFailed.length > 0) {
-          setStatus({
-            kind: 'error',
-            message: `Could not reach ${e.feedsFailed.join(', ')}. Showing what was last fetched.`,
-          });
-        }
+      }
+      // Subscriptions come in after the collections rather than with them, and
+      // are merged into whatever is already on screen. A feed is a whole file
+      // where a collection is a windowed query, so waiting for the slowest one
+      // before drawing any calendar at all would give back the opening speed
+      // the windowed fetch was built for.
+      if (wantEvents && (cfg.feeds?.length ?? 0) > 0) {
+        void refreshFeeds(cfg);
       }
       // Persisted so the next opening has something to draw before the server
       // answers. Deliberately not awaited and deliberately not on the closing
@@ -693,7 +734,7 @@ export default function App(): React.JSX.Element {
       endWork();
     }
     },
-    [startWork, endWork],
+    [startWork, endWork, refreshFeeds],
   );
 
   /**
@@ -4391,7 +4432,36 @@ Events from a subscription can be read and can have a note attached, but cannot 
 
         <Text style={styles.subheadingCompact}>Add one</Text>
         <Text style={styles.noteCompact}>
-          {`A private calendar address is around a hundred characters of random, which is miserable to type here. Put them in a plain text file instead: create ${FEED_LIST_FILE} in the Task Hub folder (the same place settings.json lives), one address per line, optionally "Name|https://...". Then press the button below and delete the file afterwards.`}
+          {'A private calendar address is around a hundred characters of random. Typing one on this keyboard is miserable, so the easier route is a plain text file you write on a computer and copy across.'}
+        </Text>
+        <Text style={styles.helpStepCompact}>
+          <Text style={styles.helpNum}>1. </Text>
+          On a computer, make a plain text file named exactly {FEED_LIST_FILE}.
+        </Text>
+        <Text style={styles.helpStepCompact}>
+          <Text style={styles.helpNum}>2. </Text>
+          Put one calendar address on each line. To name a calendar, put the name first and a
+          bar before the address — otherwise the name is read from the calendar itself:
+        </Text>
+        <Text selectable style={styles.codeBlock}>
+          {`Work|https://calendar.google.com/calendar/ical/.../basic.ics
+https://outlook.office365.com/owa/calendar/.../calendar.ics`}
+        </Text>
+        <Text style={styles.helpStepCompact}>
+          <Text style={styles.helpNum}>3. </Text>
+          Copy it onto the device over USB, into the same folder as settings.json:
+        </Text>
+        <Text selectable style={styles.codeBlock}>
+          {`Document/TaskHub/${FEED_LIST_FILE}`}
+        </Text>
+        <Text style={styles.helpStepCompact}>
+          <Text style={styles.helpNum}>4. </Text>
+          Press the button below, then Save settings.
+        </Text>
+        <Text style={styles.helpStepCompact}>
+          <Text style={styles.helpNum}>5. </Text>
+          Delete the file from the device. Those addresses are as good as passwords, and Task
+          Hub has already stored what it needs.
         </Text>
         <View style={styles.actions}>
           <Button label={`Import ${FEED_LIST_FILE}`} onPress={onImportFeeds} />

@@ -1638,6 +1638,23 @@ export const styles = StyleSheet.create({
   // read. A hundred characters of random wrapped over four lines would make a
   // list of three calendars taller than the panel.
   feedUrl: {fontSize: fs(15), color: '#666'},
+  /**
+   * A literal to be copied exactly — a path, or a line from a setup file.
+   *
+   * Boxed and selectable so it reads as "type this, character for character"
+   * rather than as prose. Monospace is deliberately not asked for: the device's
+   * font set is not guaranteed to have one, and a missing family renders as the
+   * default anyway.
+   */
+  codeBlock: {
+    fontSize: fs(16),
+    color: '#000',
+    backgroundColor: '#ededed',
+    borderRadius: R.sm,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
+    marginBottom: sp(10),
+  },
   statusRow: {flexDirection: 'row', alignItems: 'center', gap: sp(8), marginVertical: sp(8)},
   busyMark: {fontSize: fs(24), color: '#000'},
   loadingPanel: {borderRadius: R.lg,

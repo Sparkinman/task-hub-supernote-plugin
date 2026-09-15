@@ -474,16 +474,27 @@ export async function listEvents(
     config.calendarUrls.map(url => listEventsOne(config, url, range)),
   );
   const {items, missing} = collect(settled);
+  return {items: items.sort((a, b) => a.startAt - b.startAt), missing};
+}
 
-  // Subscriptions are fetched after the collections, not alongside them. A feed
-  // is a whole file rather than a windowed query, so it is the slow half; doing
-  // it second means a device with both draws its real calendars first.
-  const feeds = await listFeedEvents(config.feeds ?? []);
-  const all = [...items, ...feeds.events];
-
+/**
+ * Subscriptions only, fetched separately from the CalDAV collections.
+ *
+ * Deliberately not folded into `listEvents`. A feed is a whole file where a
+ * collection is a windowed query, so it is much the slower half — and awaiting
+ * it before anything reached the screen meant a device with both sat on its
+ * cached events until the slowest calendar in the list answered. Fetched on its
+ * own, the collections draw as soon as they land and the subscriptions join
+ * them a moment later.
+ */
+export async function listFeeds(
+  config: ServerConfig,
+  range: DateRange,
+): Promise<ListResult<RemoteEvent>> {
+  const feeds = await listFeedEvents(config.feeds ?? [], range);
   return {
-    items: all.sort((a, b) => a.startAt - b.startAt),
-    missing,
+    items: feeds.events.sort((a, b) => a.startAt - b.startAt),
+    missing: [],
     feedsFailed: feeds.failed,
     feedNames: feeds.names,
   };

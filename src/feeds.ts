@@ -26,6 +26,9 @@
  * format are unit-tested off-device.
  */
 
+import {parseVEvents, type VEvent} from './ical';
+import type {DateRange} from './eventwindow';
+
 /** One subscription, as the settings hold it. */
 export interface CalendarFeed {
   /** Always https:// by the time it is stored. */
@@ -187,4 +190,77 @@ export function mergeFeeds(
     }
   }
   return {feeds, added};
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading a feed's body
+ * ------------------------------------------------------------------ */
+
+/** VEVENTs parsed between yields. Big enough to be worth it, small enough to yield. */
+const PARSE_CHUNK = 200;
+
+/** Give the event loop a turn. A microtask would not. */
+function breathe(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+/**
+ * Parse a whole `.ics` body without blocking the panel.
+ *
+ * `parseVEvents` is synchronous, so a calendar holding thousands of events
+ * parsed in one call freezes the panel outright — and unlike a CalDAV REPORT
+ * there is no way to have asked for less. The body is therefore cut at
+ * `END:VEVENT` boundaries and parsed a few hundred events at a time, with a
+ * turn of the event loop between. `setTimeout`, not an awaited promise: a
+ * resolved promise is a microtask and yields to nothing.
+ *
+ * This works because `parseVEvents` collects whatever lies between
+ * `BEGIN:VEVENT` and `END:VEVENT` and ignores everything else — it does not
+ * need the `VCALENDAR` wrapper, which only the first chunk has.
+ */
+export async function parseFeedBody(body: string): Promise<VEvent[]> {
+  const events: VEvent[] = [];
+  let chunk: string[] = [];
+  let seen = 0;
+
+  for (const line of (body ?? '').split(/\r?\n/)) {
+    chunk.push(line);
+    if (line.startsWith('END:VEVENT')) {
+      seen += 1;
+      if (seen >= PARSE_CHUNK) {
+        events.push(...parseVEvents(chunk.join('\r\n')));
+        chunk = [];
+        seen = 0;
+        await breathe();
+      }
+    }
+  }
+  if (chunk.length > 0) {
+    events.push(...parseVEvents(chunk.join('\r\n')));
+  }
+  return events;
+}
+
+/**
+ * Cut parsed events down to the window being looked at.
+ *
+ * The file holds every event the calendar has ever had; the views show three
+ * months back and twelve forward. Only that much should reach React state,
+ * which is what the month and year grids re-render against.
+ *
+ * A repeating event is kept whatever its start date, because the master is what
+ * `expand.ts` derives the visible occurrences from — a weekly stand-up begun in
+ * 2019 still happens this week, and dropping it for being old would silently
+ * empty the calendar of everything regular.
+ *
+ * An unparseable range keeps everything rather than guessing: showing too much
+ * is slow, showing nothing looks broken.
+ */
+export function withinWindow<T extends VEvent>(events: T[], range: DateRange): T[] {
+  const from = Date.parse(`${range.start}T00:00:00`);
+  const to = Date.parse(`${range.end}T00:00:00`);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    return events;
+  }
+  return events.filter(e => e.recurring || (e.startAt >= from && e.startAt < to));
 }
