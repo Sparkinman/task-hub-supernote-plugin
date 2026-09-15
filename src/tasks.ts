@@ -18,6 +18,8 @@ import {ensureInternet} from './permissions';
 import {caldavStamp, type DateRange} from './eventwindow';
 import {collectionName, type ServerConfig} from './settings';
 import {listFeedEvents} from './feedfetch';
+import {isSnTask, snIdOf} from './sntasks';
+import {updateSnTask} from './snclient';
 
 /**
  * Reading and writing tasks across the watched collections.
@@ -527,7 +529,25 @@ async function putCalendarObject(
   }
 }
 
+/**
+ * Mark a task complete, wherever it lives.
+ *
+ * Routed here rather than at every call site: the Tasks tab, the day view, the
+ * week view and the month panel all complete tasks, and each of them deciding
+ * for itself which service a task belongs to is four chances to get it wrong.
+ * A task knows where it came from; this asks it.
+ */
 export async function completeTask(config: ServerConfig, task: RemoteTask): Promise<void> {
+  if (isSnTask(task)) {
+    await updateSnTask(config.supernote.token, snIdOf(task), {
+      title: task.summary,
+      notes: task.description,
+      dueDate: task.dueDate ?? '',
+      completed: true,
+      completedAt: Date.now(),
+    });
+    return;
+  }
   await putCalendarObject(config, task, markCompleted(task.raw));
 }
 
@@ -536,6 +556,20 @@ export async function editTask(
   task: RemoteTask,
   edit: TaskEdit,
 ): Promise<void> {
+  if (isSnTask(task)) {
+    // The tablet's To-Do app shows a title and a date and nothing else, so
+    // priority and repeat rules have nowhere to go. They are not silently
+    // dropped — the editor hides them for a Supernote task rather than
+    // offering a control that would do nothing.
+    await updateSnTask(config.supernote.token, snIdOf(task), {
+      title: edit.summary,
+      notes: edit.description,
+      dueDate: edit.dueDate ?? '',
+      completed: task.completed,
+      completedAt: task.completed ? Date.now() : undefined,
+    });
+    return;
+  }
   await putCalendarObject(config, task, updateVTodo(task.raw, edit));
 }
 

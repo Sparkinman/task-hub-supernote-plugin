@@ -230,6 +230,35 @@ class SettingsStoreModule(reactContext: ReactApplicationContext) :
     promise.resolve(storeFile().absolutePath)
   }
 
+  /**
+   * Hex digest of a string, for the Supernote Cloud sign-in.
+   *
+   * React Native ships no crypto at all, and that sign-in needs both MD5 and
+   * SHA-256: the password is sent as SHA-256 of (hex MD5 of the password plus a
+   * nonce the server hands out), so the plain password never crosses the wire.
+   * Doing it here uses the JDK's own MessageDigest rather than adding a
+   * JavaScript crypto dependency to a bundle that is already the slow part of
+   * starting the plugin.
+   *
+   * Algorithm names are the JDK's: "MD5", "SHA-256".
+   */
+  @ReactMethod
+  fun hashHex(algorithm: String, text: String, promise: Promise) {
+    try {
+      val digest = java.security.MessageDigest.getInstance(algorithm)
+      val bytes = digest.digest(text.toByteArray(Charsets.UTF_8))
+      val out = StringBuilder(bytes.size * 2)
+      for (b in bytes) {
+        val value = b.toInt() and 0xff
+        if (value < 16) out.append('0')
+        out.append(Integer.toHexString(value))
+      }
+      promise.resolve(out.toString())
+    } catch (e: Exception) {
+      promise.reject("HASH_FAILED", e.message ?: "Could not hash with " + algorithm, e)
+    }
+  }
+
   /** Absolute path of shared storage, so JS can build note paths. */
   @ReactMethod
   fun externalRoot(promise: Promise) {

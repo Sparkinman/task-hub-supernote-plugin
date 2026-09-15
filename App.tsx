@@ -195,6 +195,14 @@ import {
   removeFeed,
 } from './src/feeds';
 import {forgetFeed} from './src/feedfetch';
+import {
+  DEFAULT_SN_CONFIG,
+  snDaysLeft,
+  snReady,
+  type SnList,
+} from './src/sncloud';
+import {SN_EXPIRED, beginSignIn, finishSignIn, listSnLists, listSnTasks} from './src/snclient';
+import {asRemoteTasks, snCollectionUrl} from './src/sntasks';
 import {buildIndex, clearIndex, ensurePreview} from './src/noteindex';
 import {
   countStarredPages,
@@ -613,6 +621,56 @@ export default function App(): React.JSX.Element {
   type Scope = 'all' | 'opening' | 'tasks' | 'events' | 'notes';
 
   /**
+   * Fetch the Supernote Cloud to-dos and merge them into the tasks on screen.
+   *
+   * Its own errand for the same reason the subscriptions are: it talks to a
+   * different service over a slower path, and making the CalDAV lists wait on
+   * it would give back the opening speed the windowed fetch was built for.
+   *
+   * An expired session is reported once and then left alone. It cannot be
+   * renewed in the background — there is no refresh endpoint at all — so
+   * retrying on every refresh would only produce the same failure repeatedly.
+   */
+  const refreshSupernote = useCallback(
+    async (cfg: ServerConfig) => {
+      startWork();
+      try {
+        const [lists, cloudTasks] = await Promise.all([
+          listSnLists(cfg.supernote.token),
+          listSnTasks(cfg.supernote.token),
+        ]);
+        const mapped = asRemoteTasks(cloudTasks, lists, cfg.supernote.lists);
+        const merged = mergeFetched(
+          tasksRef.current,
+          mapped,
+          t => `${t.collectionUrl}|${t.uid}`,
+          (a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity),
+        );
+        tasksRef.current = merged;
+        setTasks(merged);
+        void writeNamed(CACHE_FILE, encodeCache(merged, eventsRef.current));
+
+        const left = snDaysLeft(cfg.supernote.token);
+        if (left !== null && left <= 7) {
+          setStatus({
+            kind: 'error',
+            message:
+              left <= 0
+                ? SN_EXPIRED
+                : `Your Supernote sign-in runs out in ${left} day(s). It cannot renew itself — sign in again in Settings before it does.`,
+          });
+        }
+      } catch (err) {
+        console.log(`[TaskHub] Supernote failed: ${String(err)}`);
+        setStatus({kind: 'error', message: `Supernote — ${describe(err)}`});
+      } finally {
+        endWork();
+      }
+    },
+    [startWork, endWork],
+  );
+
+  /**
    * Fetch the `.ics` subscriptions and merge them into the events on screen.
    *
    * Its own errand, with its own place in the loading count, so the panel says
@@ -708,6 +766,9 @@ export default function App(): React.JSX.Element {
       if (wantEvents && (cfg.feeds?.length ?? 0) > 0) {
         void refreshFeeds(cfg);
       }
+      if (wantTasks && snReady(cfg.supernote)) {
+        void refreshSupernote(cfg);
+      }
       // Persisted so the next opening has something to draw before the server
       // answers. Deliberately not awaited and deliberately not on the closing
       // path: leaving the plugin to open a daily note must not wait on a file
@@ -736,7 +797,7 @@ export default function App(): React.JSX.Element {
       endWork();
     }
     },
-    [startWork, endWork, refreshFeeds],
+    [startWork, endWork, refreshFeeds, refreshSupernote],
   );
 
   /**
@@ -886,6 +947,59 @@ export default function App(): React.JSX.Element {
    */
   const [feedMessage, setFeedMessage] = useState<string>('');
   const [feedBusy, setFeedBusy] = useState(false);
+  /** The Supernote sign-in, which is two steps with an email in between. */
+  const [snEmail, setSnEmail] = useState('');
+  const [snPassword, setSnPassword] = useState('');
+  const [snCode, setSnCode] = useState('');
+  const [snPending, setSnPending] = useState<{validCodeKey: string; timestamp: unknown} | null>(
+    null,
+  );
+  const [snLists, setSnLists] = useState<SnList[]>([]);
+  const [snMessage, setSnMessage] = useState('');
+  const [snBusy, setSnBusy] = useState(false);
+  /**
+   * How long the session has left, in words.
+   *
+   * Shown always rather than only when it is nearly out: the thirty-day expiry
+   * is the most surprising thing about this connection, and somebody who reads
+   * it once in Settings is not caught out by it later.
+   */
+  const snDaysLeftLabel = useMemo(() => {
+    const left = snDaysLeft(config.supernote.token);
+    if (left === null) {
+      return '';
+    }
+    if (left <= 0) {
+      return 'This session has run out — sign in again.';
+    }
+    return `This session lasts ${left} more day(s); Supernote cannot renew it.`;
+  }, [config.supernote.token]);
+
+  /**
+   * Every list a new task can be saved into, CalDAV and Supernote alike.
+   *
+   * One list rather than two sections: from the user's side these are all
+   * "places a task can go", and the pickers already handle several targets at
+   * once. Where each one actually lives is decided by `writeTask`, which reads
+   * the scheme off the URL.
+   */
+  const saveTargets = useMemo(() => {
+    const places = config.collectionUrls.map(url => ({
+      url,
+      label: collectionName(url),
+      hint: collectionHint(url, config.collectionUrls),
+    }));
+    if (snReady(config.supernote)) {
+      for (const list of config.supernote.lists) {
+        places.push({
+          url: snCollectionUrl(list.id),
+          label: list.name,
+          hint: 'Supernote To-Do',
+        });
+      }
+    }
+    return places;
+  }, [config.collectionUrls, config.supernote]);
   /** Names the feeds announced for themselves, for the Settings list only. */
   const [feedNames, setFeedNames] = useState<Record<string, string>>({});
 
@@ -2283,6 +2397,108 @@ export default function App(): React.JSX.Element {
     })();
   }, [changeConfig]);
 
+  /**
+   * Fetch the account's to-do lists, so there is something to tick.
+   *
+   * Separate from signing in: a session saved on a previous visit is still
+   * good, and the lists have to be fetched again to show it.
+   */
+  const loadSnLists = useCallback(
+    async (token: string) => {
+      try {
+        const lists = await listSnLists(token);
+        setSnLists(lists);
+        setSnMessage(
+          lists.length === 0
+            ? 'Signed in, but this account has no to-do lists.'
+            : 'Signed in. Tick the lists to show, then Save settings.',
+        );
+      } catch (err) {
+        setSnMessage(describe(err));
+      }
+    },
+    [],
+  );
+
+  /** Step one: offer the password and ask for the emailed code. */
+  const snSignIn = useCallback(() => {
+    setSnBusy(true);
+    setSnMessage('Signing in…');
+    void (async () => {
+      try {
+        const started = await beginSignIn(snEmail, snPassword);
+        // The password has done its job. It is not kept for a moment longer
+        // than the request that used it: settings.json is plain text on shared
+        // storage, and a token that expires in thirty days is a far smaller
+        // thing to leak than an account password that does not.
+        setSnPassword('');
+        if (started.token) {
+          changeConfig(c => ({
+            ...c,
+            supernote: {...c.supernote, enabled: true, email: snEmail.trim(), token: started.token as string},
+          }));
+          await loadSnLists(started.token);
+          return;
+        }
+        setSnPending({
+          validCodeKey: started.validCodeKey ?? '',
+          timestamp: started.timestamp,
+        });
+        setSnMessage(
+          `A verification code has been emailed to ${snEmail.trim()}. Type it below — they expire quickly.`,
+        );
+      } catch (err) {
+        setSnMessage(describe(err));
+      } finally {
+        setSnBusy(false);
+      }
+    })();
+  }, [snEmail, snPassword, changeConfig, loadSnLists]);
+
+  /** Step two: exchange the emailed code for the thirty-day session. */
+  const snVerify = useCallback(() => {
+    if (!snPending) {
+      return;
+    }
+    setSnBusy(true);
+    setSnMessage('Checking the code…');
+    void (async () => {
+      try {
+        const token = await finishSignIn(
+          snEmail,
+          snCode,
+          snPending.validCodeKey,
+          snPending.timestamp,
+        );
+        changeConfig(c => ({
+          ...c,
+          supernote: {...c.supernote, enabled: true, email: snEmail.trim(), token},
+        }));
+        setSnPending(null);
+        setSnCode('');
+        await loadSnLists(token);
+      } catch (err) {
+        setSnMessage(describe(err));
+      } finally {
+        setSnBusy(false);
+      }
+    })();
+  }, [snEmail, snCode, snPending, changeConfig, loadSnLists]);
+
+  /**
+   * Forget the session.
+   *
+   * Only this device forgets it. Nothing is changed on the Supernote account,
+   * no to-do is touched, and signing in again restores exactly what was here.
+   */
+  const snSignOut = useCallback(() => {
+    changeConfig(c => ({...c, supernote: {...DEFAULT_SN_CONFIG}}));
+    setSnLists([]);
+    setSnPending(null);
+    setSnCode('');
+    setSnMessage('Signed out on this device. Nothing on your Supernote account was changed.');
+  }, [changeConfig]);
+
   /** Unsubscribe, and throw away the copy of the feed kept on disk. */
   const removeFeedByUrl = useCallback(
     (url: string) => {
@@ -2778,21 +2994,21 @@ export default function App(): React.JSX.Element {
                       use the note features, which work without one.
                     </Text>
                   )}
-                  {config.collectionUrls.length > 0 && (
+                  {saveTargets.length > 0 && (
                     <>
                       <Text style={styles.label}>Save to</Text>
-                      {config.collectionUrls.map(url => (
+                      {saveTargets.map(target => (
                         <CheckRow
                           compact
-                          key={url}
-                          label={collectionName(url)}
-                          hint={collectionHint(url, config.collectionUrls)}
-                          checked={targets.includes(url)}
+                          key={target.url}
+                          label={target.label}
+                          hint={target.hint}
+                          checked={targets.includes(target.url)}
                           onToggle={() =>
                             setTargets(prev =>
-                              prev.includes(url)
-                                ? prev.filter(u => u !== url)
-                                : [...prev, url],
+                              prev.includes(target.url)
+                                ? prev.filter(u => u !== target.url)
+                                : [...prev, target.url],
                             )
                           }
                         />
@@ -3038,19 +3254,21 @@ export default function App(): React.JSX.Element {
 
           {!taskMore && (
             <>
-              {!editingTask && config.collectionUrls.length > 0 && (
+              {!editingTask && saveTargets.length > 0 && (
                 <>
                   <Text style={styles.label}>Save to</Text>
-                  {config.collectionUrls.map(url => (
+                  {saveTargets.map(target => (
                     <CheckRow
                       compact
-                      key={url}
-                      label={collectionName(url)}
-                      hint={collectionHint(url, config.collectionUrls)}
-                      checked={taskTargets.includes(url)}
+                      key={target.url}
+                      label={target.label}
+                      hint={target.hint}
+                      checked={taskTargets.includes(target.url)}
                       onToggle={() =>
                         setTaskTargets(prev =>
-                          prev.includes(url) ? prev.filter(u => u !== url) : [...prev, url],
+                          prev.includes(target.url)
+                            ? prev.filter(u => u !== target.url)
+                            : [...prev, target.url],
                         )
                       }
                     />
@@ -3770,6 +3988,21 @@ will not duplicate them.`}
           onImportFeeds={importFeedFile}
           feedMessage={feedMessage}
           feedBusy={feedBusy}
+          snEmail={snEmail}
+          setSnEmail={setSnEmail}
+          snPassword={snPassword}
+          setSnPassword={setSnPassword}
+          snCode={snCode}
+          setSnCode={setSnCode}
+          snPending={snPending !== null}
+          snLists={snLists}
+          snMessage={snMessage}
+          snBusy={snBusy}
+          snDaysLeftLabel={snDaysLeftLabel}
+          onSnSignIn={snSignIn}
+          onSnVerify={snVerify}
+          onSnSignOut={snSignOut}
+          onSnRefreshLists={() => void loadSnLists(config.supernote.token)}
           feedNames={feedNames}
           config={config}
           collections={collections}
@@ -4124,6 +4357,22 @@ function SettingsScreen(props: {
   onImportFeeds: () => void;
   feedMessage: string;
   feedBusy: boolean;
+  /** The Supernote sign-in, which is two steps with an email in between. */
+  snEmail: string;
+  setSnEmail: (v: string) => void;
+  snPassword: string;
+  setSnPassword: (v: string) => void;
+  snCode: string;
+  setSnCode: (v: string) => void;
+  snPending: boolean;
+  snLists: SnList[];
+  snMessage: string;
+  snBusy: boolean;
+  snDaysLeftLabel: string;
+  onSnSignIn: () => void;
+  onSnVerify: () => void;
+  onSnSignOut: () => void;
+  onSnRefreshLists: () => void;
   feedNames: Record<string, string>;
   config: ServerConfig;
   collections: TaskCollection[];
@@ -4156,6 +4405,23 @@ function SettingsScreen(props: {
 }): React.JSX.Element {
   const {feedDraft, setFeedDraft, onAddFeed, onRemoveFeed, onImportFeeds, feedNames} = props;
   const {feedMessage, feedBusy} = props;
+  const {
+    snEmail,
+    setSnEmail,
+    snPassword,
+    setSnPassword,
+    snCode,
+    setSnCode,
+    snPending,
+    snLists,
+    snMessage,
+    snBusy,
+    snDaysLeftLabel,
+    onSnSignIn,
+    onSnVerify,
+    onSnSignOut,
+    onSnRefreshLists,
+  } = props;
   /**
    * Which settings groups are open.
    *
@@ -4449,9 +4715,9 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         the two would have forbidden that combination for no reason.
       */}
       <Fold
-        title="Subscribed calendars (.ics)"
+        title="ICS Calendars and Supernote To-Dos"
         hint={
-          'Read-only. The way to see a Google or Outlook calendar, neither of which any CalDAV client can reach any more. Needs no server and no account — just the address the calendar publishes.'
+          'Two ways to see things without running a server of your own: subscribe to a calendar any service publishes, and connect the tablet’s own To-Do app.'
         }
         open={openFolds.has('feeds')}
         onToggle={() => toggleFold('feeds')}>
@@ -4459,6 +4725,13 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
           {`Google withdrew password access to its CalDAV service in March 2025 and Microsoft retired CalDAV for Outlook altogether, so neither can be connected the way a CalDAV server is. Both still publish a private web address for each calendar, and so do Apple, Fastmail and Proton. Subscribing to one shows its events here.
 
 Events from a subscription can be read and can have a note attached, but cannot be edited or deleted — change them in the calendar they belong to. For two-way sync with Google or Outlook, run the Task Hub server and let it do the syncing.`}
+        </Text>
+
+        <Text style={styles.subheadingCompact}>Subscribed calendars (.ics)</Text>
+        <Text style={styles.noteCompact}>
+          Read-only. The way to see a Google or Outlook calendar, neither of which any CalDAV
+          client can reach any more. Needs no account — just the address the calendar
+          publishes.
         </Text>
 
         <Text style={styles.subheadingCompact}>Where to find the address</Text>
@@ -4561,6 +4834,136 @@ https://outlook.office365.com/owa/calendar/.../calendar.ics`}
               <Button label="Remove" onPress={() => onRemoveFeed(feed.url)} />
             </View>
           ))
+        )}
+
+        {/*
+          The tablet's own To-Do app, in the same fold as the subscriptions
+          because both answer the same question: what can this plugin reach
+          without a server of your own.
+        */}
+        <Text style={styles.subheadingCompact}>Supernote To-Dos</Text>
+        <Text style={styles.noteCompact}>
+          {`The to-do list built into your Supernote, read and written through Supernote Cloud. Off until you switch it on.
+
+This is the one thing here built on an API Ratta never published. It was worked out against a live account and it works, but nothing about it is promised: a Partner app update could change it, and the first sign would be this failing. Everything else in ${APP_NAME} uses an open standard.
+
+If you run the Task Hub server, you do not want this — it already syncs these to-dos into your task lists, both ways, and keeps working when this cannot.`}
+        </Text>
+
+        <CheckRow
+          compact
+          label="Connect the Supernote To-Do app"
+          checked={config.supernote.enabled}
+          onToggle={() =>
+            onChange(c => ({...c, supernote: {...c.supernote, enabled: !c.supernote.enabled}}))
+          }
+        />
+
+        {config.supernote.enabled && (
+          <>
+            {!config.supernote.token ? (
+              <>
+                <Text style={styles.noteCompact}>
+                  {`Sign in with the account your tablet uses. ${APP_NAME} stores only the session it gets back, never your password — and that session lasts thirty days, after which Supernote requires a fresh sign-in with a code emailed to you. There is no way around that; their service offers nothing to renew it.`}
+                </Text>
+                <Field
+                  compact
+                  scrollHandle={scrollHandle}
+                  onScrollTo={onScrollTo}
+                  label="Supernote account email"
+                  value={snEmail}
+                  onChange={setSnEmail}
+                />
+                {!snPending ? (
+                  <>
+                    <Field
+                      compact
+                      secure
+                      scrollHandle={scrollHandle}
+                      onScrollTo={onScrollTo}
+                      label="Password"
+                      value={snPassword}
+                      onChange={setSnPassword}
+                    />
+                    <View style={styles.actions}>
+                      <Button
+                        label={snBusy ? 'Signing in…' : 'Sign in'}
+                        primary
+                        disabled={snBusy}
+                        onPress={onSnSignIn}
+                      />
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Field
+                      compact
+                      scrollHandle={scrollHandle}
+                      onScrollTo={onScrollTo}
+                      label="Verification code from your email"
+                      value={snCode}
+                      onChange={setSnCode}
+                    />
+                    <View style={styles.actions}>
+                      <Button
+                        label={snBusy ? 'Checking…' : 'Verify and finish'}
+                        primary
+                        disabled={snBusy}
+                        onPress={onSnVerify}
+                      />
+                      <Button label="Start again" onPress={onSnSignOut} />
+                    </View>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Text style={styles.noteCompact}>
+                  {`Signed in as ${config.supernote.email || 'your Supernote account'}.${
+                    snDaysLeftLabel ? ` ${snDaysLeftLabel}` : ''
+                  }`}
+                </Text>
+                <View style={styles.actions}>
+                  <Button label="Refresh lists" onPress={onSnRefreshLists} />
+                  <Button label="Sign out" onPress={onSnSignOut} />
+                </View>
+
+                <Text style={styles.label}>To-do lists to show</Text>
+                {snLists.length === 0 ? (
+                  <Text style={styles.noteCompact}>
+                    No lists loaded yet — press Refresh lists.
+                  </Text>
+                ) : (
+                  snLists.map(list => (
+                    <CheckRow
+                      compact
+                      key={list.id}
+                      label={list.name}
+                      checked={config.supernote.lists.some(l => l.id === list.id)}
+                      onToggle={() =>
+                        onChange(c => ({
+                          ...c,
+                          supernote: {
+                            ...c.supernote,
+                            lists: c.supernote.lists.some(l => l.id === list.id)
+                              ? c.supernote.lists.filter(l => l.id !== list.id)
+                              : [...c.supernote.lists, list],
+                          },
+                        }))
+                      }
+                    />
+                  ))
+                )}
+                <Text style={styles.noteCompact}>
+                  Ticked lists appear beside your other task lists, and can be completed,
+                  edited and added to from here. Priority and repeats are not offered for
+                  them: the tablet's To-Do app stores a title and a date and nothing else.
+                </Text>
+              </>
+            )}
+
+            {!!snMessage && <Text style={styles.feedMessage}>{snMessage}</Text>}
+          </>
         )}
       </Fold>
 

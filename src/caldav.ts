@@ -7,6 +7,8 @@ import {
   type TaskCollection,
 } from './discovery';
 import {ensureInternet} from './permissions';
+import {isSnCollection, snListId} from './sntasks';
+import {createSnTask} from './snclient';
 import {collectionsOwner, type ServerConfig} from './settings';
 
 export {newUid} from './ical';
@@ -175,6 +177,20 @@ async function writeTask(
   const collection = (collectionUrl ?? config.defaultCollectionUrl).trim().replace(/\/+$/, '');
   if (!collection) {
     throw new Error('No task list selected.');
+  }
+
+  // A Supernote list is not a CalDAV collection and has no address to PUT to.
+  // Caught here rather than at every call site: the capture screen, the task
+  // editor and the step writer all reach this one function, and each of them
+  // deciding for itself would be three chances to PUT at "supernote:abc123".
+  if (isSnCollection(collection)) {
+    await createSnTask(config.supernote.token, snListId(collection), {
+      title: task.summary,
+      notes: task.description,
+      dueDate: task.dueDate ?? '',
+      completed: false,
+    });
+    return;
   }
   const url = `${collection}/${encodeURIComponent(task.uid)}.ics`;
 

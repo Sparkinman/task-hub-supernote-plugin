@@ -14,6 +14,7 @@ import {
 import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from './meetingnote';
 import type {NoteFile} from './notesearch';
 import type {CalendarFeed} from './feeds';
+import {DEFAULT_SN_CONFIG, type SnConfig, type SnList} from './sncloud';
 
 /**
  * Durable settings, stored as JSON in Document/TaskHub/settings.json.
@@ -40,6 +41,8 @@ interface SettingsStore {
   listFilesHere?(relativePath: string, suffixes: string): Promise<string[]>;
   listDirs(relativePath: string): Promise<string[]>;
   writeLinkImage(relativePath: string, base64: string, caption: string): Promise<string>;
+  /** Optional: absent from a build whose native module predates Supernote Cloud. */
+  hashHex?(algorithm: string, text: string): Promise<string>;
 }
 
 // Absent when running against a build without the native module compiled in.
@@ -104,6 +107,7 @@ export function sanitise(raw: unknown): Partial<ServerConfig> {
           )
           .map(f => ({url: f.url.trim(), name: String(f.name ?? '').trim() || f.url.trim()}))
       : undefined,
+    supernote: sanitiseSupernote(value.supernote),
     defaultCollectionUrl:
       typeof value.defaultCollectionUrl === 'string' ? value.defaultCollectionUrl : undefined,
     dateFormat:
@@ -138,6 +142,35 @@ export function sanitise(raw: unknown): Partial<ServerConfig> {
 }
 
 /** Same rules as a daily note, against whichever period's defaults apply. */
+/**
+ * The Supernote connection, field by field.
+ *
+ * Absent in a file written before this existed, which must mean off — nobody
+ * gets connected to an account by updating the plugin.
+ */
+function sanitiseSupernote(raw: unknown): SnConfig {
+  if (typeof raw !== 'object' || raw === null) {
+    return {...DEFAULT_SN_CONFIG};
+  }
+  const value = raw as Partial<SnConfig>;
+  return {
+    enabled: value.enabled === true,
+    email: typeof value.email === 'string' ? value.email : '',
+    token: typeof value.token === 'string' ? value.token : '',
+    lists: Array.isArray(value.lists)
+      ? (value.lists as unknown[])
+          .filter(
+            (l): l is SnList =>
+              typeof l === 'object' &&
+              l !== null &&
+              typeof (l as SnList).id === 'string' &&
+              (l as SnList).id.trim() !== '',
+          )
+          .map(l => ({id: l.id.trim(), name: String(l.name ?? '').trim() || 'Supernote'}))
+      : [],
+  };
+}
+
 /** An hour of the day, or undefined so the default applies. */
 function asHour(raw: unknown): number | undefined {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) {
@@ -304,6 +337,21 @@ export async function listFilesHere(
  * `listFiles`: an older app.npk reports nothing, so the Find tab shows its
  * empty state rather than failing to render.
  */
+/**
+ * Hex digest of a string, using the JDK's MessageDigest.
+ *
+ * React Native has no crypto, and the Supernote Cloud sign-in needs MD5 and
+ * SHA-256. Throws rather than resolving to null: a sign-in that silently
+ * hashed nothing would send a wrong password and report "refused those
+ * details", which is the least useful thing it could say.
+ */
+export async function hashHex(algorithm: 'MD5' | 'SHA-256', text: string): Promise<string> {
+  if (!store?.hashHex) {
+    throw new Error('This build cannot sign in to Supernote Cloud — its native module is older than the feature.');
+  }
+  return store.hashHex(algorithm, text);
+}
+
 export async function listNotesWithMeta(relativeRoot: string): Promise<NoteFile[]> {
   if (!store?.listNotesWithMeta || !relativeRoot) {
     return [];

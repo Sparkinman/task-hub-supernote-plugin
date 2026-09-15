@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.70.3** (versionCode 89). **527 tests across 32 suites.** 0.66.0 was the first of these actually
+Current build **0.71.0** (versionCode 90). **557 tests across 34 suites.** 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,78 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.71.0 — the Supernote To-Do app, without a server
+
+Two-way sync with the tablet's own To-Do app, **off by default**, for somebody
+who does not run the Task Hub server. With the server this is unwanted: it
+already syncs those to-dos into CalDAV, both ways, and keeps working when this
+cannot.
+
+### It is a transcription, not a rediscovery
+
+**Everything here came from the server's `app/connectors/supernote.py`**, which
+worked it out against a live account with endpoints read from the Partner app's
+compiled Dart. Do not "tidy" any of the notes in `sncloud.ts` or `snclient.ts`
+on the assumption that the obvious thing works — the obvious thing is what they
+are warning about:
+
+- **`completedTime` is present on tasks that are not complete.** Every task on
+  the account this was built against carried one while reporting
+  `status: needsAction`. Reading completion from it marks everything done and,
+  two-way, pushes that everywhere. Completion comes from `status` alone. There
+  is a test named for this; do not delete it.
+- **`POST /file/schedule/task` inserts even when the body carries a `taskId`.**
+  So an update must never fall back to it: "update the task that is not there"
+  silently becomes "make a second one".
+- **`PUT` is refused without `lastModified`,** and complains about the *list*
+  rather than the task, which sends you looking in the wrong place.
+- **`DELETE` takes the id in the path**; as a body or query it answers 500.
+- Their listing routes are **POST**, not GET. Their booleans are `"Y"`/`"N"`.
+  Their generic failure is **HTTP 200 with `success: false`**.
+- `nextSyncToken` comes back but cannot be replayed, so always read the full
+  set — one request returns every task on the account, tagged by list.
+
+### How it fits the existing plugin
+
+A cloud task is converted into an ordinary `RemoteTask` on the way in
+(`sntasks.ts`), so the task list, buckets, sorting, search and day view needed
+no changes at all. It is recognised again on the way out by a `supernote:`
+scheme in `collectionUrl` that no CalDAV collection can have, and `href`/`raw`
+are deliberately left **empty** — a CalDAV write is a PUT to `href` against
+`raw`, so anything plausible in either would let a cloud task be written to the
+wrong place.
+
+Routing lives in `completeTask`, `editTask` and `writeTask` rather than at the
+call sites: four views complete tasks and three screens create them, and each
+deciding for itself would be seven chances to get it wrong.
+
+Priority and repeats are not offered for a cloud task. The tablet's To-Do app
+stores a title and a date and nothing else, so those controls would do nothing.
+
+### Sign-in, and the thing people will ask about
+
+React Native has no crypto, so `hashHex` was added to the native module: the
+password goes as SHA-256 of (hex MD5 of the password plus a server nonce), so
+the plain password never crosses the wire. **Only the session token is stored,
+never the password** — `settings.json` is plain text on shared storage and a
+plugin has no keystore, so a thirty-day token is a far smaller thing to leak.
+
+**The session lasts thirty days and cannot be renewed.** `/user/info`,
+`/quickLogin` and a `login/new2` were all tried against the live account and
+none exist. The expiry is legible inside the JWT, so Settings always says how
+long is left and a refresh warns from seven days out. `snTokenExpiry` decodes
+base64 by hand because **Hermes has no `atob`** — the same lesson as `new URL`.
+
+In Settings it shares the `.ics` fold, now **"ICS Calendars and Supernote
+To-Dos"**, because both answer one question: what can this reach without a
+server of your own.
+
+### Not device-verified
+
+Nothing here has touched hardware. The likeliest first failures: whether
+`hashHex` is reachable (the native module changed, so **Add Plugin, not
+Reinstall**), and whether `fetch` sends `x-access-token` unmolested.
 
 ## What changed in 0.70.3 — `new URL()` is a trap in React Native
 

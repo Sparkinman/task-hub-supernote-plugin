@@ -14,6 +14,7 @@ import type {DateFormat, TimeFormat} from './format';
 export type StartTab = 'tasks' | 'calendar';
 import type {MarkStyle} from './markstyle';
 import type {CalendarFeed} from './feeds';
+import {DEFAULT_SN_CONFIG, type SnConfig} from './sncloud';
 
 export interface ServerConfig {
   /** Server origin, e.g. https://host:5232 — not a collection URL. */
@@ -42,6 +43,13 @@ export interface ServerConfig {
    * point: somebody running Task Hub's own server does not need these.
    */
   feeds: CalendarFeed[];
+  /**
+   * The Supernote Cloud connection, for the tablet's own To-Do app.
+   *
+   * Off by default and only useful without the Task Hub server — with the
+   * server, those to-dos already arrive as ordinary CalDAV tasks.
+   */
+  supernote: SnConfig;
   dateFormat: DateFormat;
   timeFormat: TimeFormat;
   /**
@@ -113,6 +121,7 @@ export const EMPTY_CONFIG: ServerConfig = {
   defaultCollectionUrl: '',
   calendarUrls: [],
   feeds: [],
+  supernote: {...DEFAULT_SN_CONFIG},
   dateFormat: 'iso',
   startTab: 'tasks',
   timeFormat: '24',
@@ -289,6 +298,7 @@ export function getConfig(): ServerConfig {
     collectionUrls: [...current.collectionUrls],
     calendarUrls: [...current.calendarUrls],
     feeds: current.feeds.map(f => ({...f})),
+    supernote: {...current.supernote, lists: current.supernote.lists.map(l => ({...l}))},
     dailyNote: {...current.dailyNote},
     weekNote: {...current.weekNote},
     monthNote: {...current.monthNote},
@@ -305,6 +315,7 @@ export function setConfig(next: ServerConfig): void {
     collectionUrls: [...next.collectionUrls],
     calendarUrls: [...next.calendarUrls],
     feeds: next.feeds.map(f => ({...f})),
+    supernote: {...next.supernote, lists: next.supernote.lists.map(l => ({...l}))},
     dailyNote: {...next.dailyNote},
     weekNote: {...next.weekNote},
     monthNote: {...next.monthNote},
