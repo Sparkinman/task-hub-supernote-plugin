@@ -230,6 +230,39 @@ describe('collection discovery', () => {
     expect(found.map(c => c.displayName)).toEqual(['Chores', 'Agenda']);
   });
 
+  it('drops the calendar home itself, even when it advertises as a calendar', () => {
+    // A Depth:1 PROPFIND describes the collection it was sent to as well as its
+    // members, so the home is always in the multistatus. A server that marks it
+    // as a calendar put a spurious row named after the account — `user` here —
+    // beside the real lists, with nothing to say what it was.
+    const xml = XML.replace(
+      '<D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop>',
+      '<D:prop><D:resourcetype><D:collection/><C:calendar/></D:resourcetype></D:prop>',
+    );
+    expect(parseCollections('https://host:5232', xml).map(c => c.displayName)).toEqual([
+      'user',
+      'Chores',
+      'Agenda',
+    ]);
+    expect(
+      parseCollections('https://host:5232', xml, 'https://host:5232/user/').map(
+        c => c.displayName,
+      ),
+    ).toEqual(['Chores', 'Agenda']);
+  });
+
+  it('matches the home whether or not it carries a trailing slash', () => {
+    const xml = XML.replace(
+      '<D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop>',
+      '<D:prop><D:resourcetype><D:collection/><C:calendar/></D:resourcetype></D:prop>',
+    );
+    expect(
+      parseCollections('https://host:5232', xml, 'https://host:5232/user').map(
+        c => c.displayName,
+      ),
+    ).toEqual(['Chores', 'Agenda']);
+  });
+
   it('separates task lists from calendars by component type', () => {
     const found = parseCollections('https://host:5232', XML);
     expect(found.filter(acceptsTasks).map(c => c.displayName)).toEqual(['Chores']);

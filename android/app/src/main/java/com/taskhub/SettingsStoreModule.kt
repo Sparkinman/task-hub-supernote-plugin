@@ -392,6 +392,61 @@ class SettingsStoreModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  /**
+   * Every .note under `relativeRoot`, each with its modification time and size.
+   *
+   * Separate from `listNotes` rather than a change to it, because every
+   * existing caller wants the plain list of paths and nothing else.
+   *
+   * The two extra fields are what let the Find tab's index skip a file it has
+   * already read. Without them the only way to know whether a note changed is
+   * to open it and read its keywords and stars again, which is three native
+   * round trips per note and the whole cost the index exists to avoid.
+   *
+   * `lastModified` and `length` are both Doubles: React Native's bridge has no
+   * 64-bit integer, and a millisecond epoch is far inside what a Double holds
+   * exactly.
+   */
+  @ReactMethod
+  fun listNotesWithMeta(relativeRoot: String, promise: Promise) {
+    try {
+      val root = Environment.getExternalStorageDirectory()
+      val start = File(root, relativeRoot)
+      val out = Arguments.createArray()
+      if (!start.isDirectory) {
+        promise.resolve(out)
+        return
+      }
+
+      val prefix = root.absolutePath.trimEnd('/') + "/"
+      var seen = 0
+      // Same iterative walk and the same hard cap as listNotes: this is pointed
+      // at a folder the user chose, and an unbounded recursive walk would block
+      // the bridge.
+      val stack = ArrayDeque(listOf(start))
+      while (stack.isNotEmpty() && seen < MAX_NOTES) {
+        val dir = stack.removeLast()
+        val children = dir.listFiles() ?: continue
+        for (child in children) {
+          if (seen >= MAX_NOTES) break
+          if (child.isDirectory) {
+            stack.addLast(child)
+          } else if (child.name.endsWith(".note", ignoreCase = true)) {
+            val entry = Arguments.createMap()
+            entry.putString("path", child.absolutePath.removePrefix(prefix))
+            entry.putDouble("modified", child.lastModified().toDouble())
+            entry.putDouble("size", child.length().toDouble())
+            out.pushMap(entry)
+            seen++
+          }
+        }
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("LIST_META_FAILED", e.message ?: "Could not list notes", e)
+    }
+  }
+
   companion object {
     const val NAME = "TaskHubSettingsStore"
     private const val STORE_DIR = "Document/TaskHub"

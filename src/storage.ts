@@ -12,6 +12,7 @@ import {
   type PeriodNoteConfig,
 } from './periodnote';
 import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from './meetingnote';
+import type {NoteFile} from './notesearch';
 
 /**
  * Durable settings, stored as JSON in Document/TaskHub/settings.json.
@@ -32,6 +33,8 @@ interface SettingsStore {
   externalRoot(): Promise<string>;
   makeDirs(relativePath: string): Promise<boolean>;
   listNotes(relativeRoot: string): Promise<string[]>;
+  /** Optional: absent from a build whose native module predates the Find tab. */
+  listNotesWithMeta?(relativeRoot: string): Promise<NoteFile[]>;
   listFiles?(relativeRoot: string, suffixes: string): Promise<string[]>;
   listFilesHere?(relativePath: string, suffixes: string): Promise<string[]>;
   listDirs(relativePath: string): Promise<string[]>;
@@ -273,6 +276,32 @@ export async function listFilesHere(
   try {
     await ensureFileAccess();
     return await store.listFilesHere(relativePath, suffixes.join(','));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Every .note under a folder, with the modification time and size of each.
+ *
+ * What the Find tab's index compares against to decide whether a note still
+ * needs reading. Optional on the native side for the same reason as
+ * `listFiles`: an older app.npk reports nothing, so the Find tab shows its
+ * empty state rather than failing to render.
+ */
+export async function listNotesWithMeta(relativeRoot: string): Promise<NoteFile[]> {
+  if (!store?.listNotesWithMeta || !relativeRoot) {
+    return [];
+  }
+  try {
+    await ensureFileAccess();
+    const raw = await store.listNotesWithMeta(relativeRoot);
+    return (Array.isArray(raw) ? raw : []).filter(
+      (file): file is NoteFile =>
+        typeof file?.path === 'string' &&
+        typeof file?.modified === 'number' &&
+        typeof file?.size === 'number',
+    );
   } catch {
     return [];
   }

@@ -60,6 +60,19 @@ export function resolveHref(serverUrl: string, href: string): string {
   return `${base}${href.startsWith('/') ? '' : '/'}${href}`;
 }
 
+/**
+ * Two URLs naming the same collection, ignoring a trailing slash.
+ *
+ * Deliberately a local copy of `sameCollection` rather than an import from
+ * settings.ts, which already imports this module — taking a *value* from it
+ * here would close that into a real runtime cycle. Two lines is cheaper than
+ * the import graph it would cost.
+ */
+function sameCollection(a: string, b: string): boolean {
+  const tidy = (u: string) => u.trim().replace(/\/+$/, '');
+  return tidy(a) === tidy(b);
+}
+
 /** Last non-empty path segment, decoded — the fallback name when displayname is absent. */
 function nameFromHref(href: string): string {
   const segments = href.split('/').filter(Boolean);
@@ -71,7 +84,25 @@ function nameFromHref(href: string): string {
   }
 }
 
-export function parseCollections(serverUrl: string, xml: string): TaskCollection[] {
+/**
+ * Collections from a Depth:1 multistatus, excluding the home itself.
+ *
+ * RFC 4918 §9.1: a Depth:1 PROPFIND describes the collection it was sent to
+ * *and* its members, so the calendar home is always one of the responses. It is
+ * the container the calendars live in, not a calendar, and listing it produced
+ * a spurious row named after the last segment of its own URL — a bare account
+ * name like `paul` sitting beside the real lists, with no way to tell what it
+ * was or to get rid of it.
+ *
+ * Passing `homeUrl` is what lets it be dropped. It is optional so the parser
+ * stays usable on a multistatus from anywhere else; when it is absent nothing
+ * is excluded, exactly as before.
+ */
+export function parseCollections(
+  serverUrl: string,
+  xml: string,
+  homeUrl?: string,
+): TaskCollection[] {
   const doc = parser.parse(xml);
   const responses = asArray(doc?.multistatus?.response);
 
@@ -112,7 +143,12 @@ export function parseCollections(serverUrl: string, xml: string): TaskCollection
           ? prop.displayname.trim()
           : nameFromHref(href);
 
-      collections.push({url: resolveHref(serverUrl, href), displayName, components});
+      const url = resolveHref(serverUrl, href);
+      if (homeUrl && sameCollection(url, homeUrl)) {
+        continue;
+      }
+
+      collections.push({url, displayName, components});
     }
   }
 

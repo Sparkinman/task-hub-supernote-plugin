@@ -125,7 +125,7 @@ export async function discoverCollections(
     throw new Error(`Could not reach ${home}.`);
   }
 
-  const collections = parseCollections(config.serverUrl, xml);
+  const collections = parseCollections(config.serverUrl, xml, home);
   if (collections.length === 0) {
     throw new Error(
       'No task lists found. If the server keeps them somewhere unusual, paste a collection URL instead.',

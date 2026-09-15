@@ -104,6 +104,7 @@ import {
   EMPTY_CONFIG,
   canDiscover,
   collectionName,
+  collectionHint,
   getCollections,
   getConfig,
   hasCalendars,
@@ -177,9 +178,19 @@ import {
   openMeetingNote,
   openFileAt,
   openNote,
+  openNoteAt,
   type NoteTemplate,
 } from './src/notes';
 import {eventsWithNotes} from './src/meetingnote';
+import {buildIndex, clearIndex} from './src/noteindex';
+import {
+  countStarredPages,
+  keywordHits,
+  starHits,
+  type IndexedNote,
+  type SearchRoot,
+} from './src/notesearch';
+import {FindView, type FindSummary} from './src/components/FindView';
 import {groupRows} from './src/subtasks';
 import {TemplatePicker, TemplateSheet} from './src/components/TemplatePicker';
 import {FolderPicker} from './src/components/FolderPicker';
@@ -190,7 +201,7 @@ const LASSO_BUTTON_ID = 200;
 const TOOLBAR_BUTTON_ID = 100;
 
 type Screen = 'idle' | 'save' | 'hub' | 'settings';
-type Tab = 'tasks' | 'calendar';
+type Tab = 'tasks' | 'calendar' | 'find';
 
 /**
  * Which of the six notes a chooser is acting on.
@@ -479,6 +490,28 @@ export default function App(): React.JSX.Element {
   const [taskTargets, setTaskTargets] = useState<string[]>([]);
 
   const [eventForm, setEventForm] = useState<EventDraftState | null>(null);
+  /**
+   * Whether the lasso is being captured as a task or as an event.
+   *
+   * One lasso button, two things it can become — rather than a second button on
+   * the note app's lasso toolbar, which is shared real estate and already
+   * crowded. The recognised handwriting, the source page it came from and the
+   * page mark left behind are identical either way; only where it is saved and
+   * which fields are asked for differ.
+   */
+  const [captureKind, setCaptureKind] = useState<'task' | 'event'>('task');
+  const [captureEvent, setCaptureEvent] = useState<EventDraftState>(() =>
+    emptyEvent(toDateInput(new Date())),
+  );
+  const [captureCalendar, setCaptureCalendar] = useState('');
+  /**
+   * Whether the capture screen's second half is showing.
+   *
+   * The screen is built to fit one panel without scrolling, which means the
+   * fields beyond the essentials have to be somewhere. They are behind this,
+   * and it swaps what is on the panel rather than extending it.
+   */
+  const [captureMore, setCaptureMore] = useState(false);
   const [editingEvent, setEditingEvent] = useState<RemoteEvent | null>(null);
   const [eventTarget, setEventTarget] = useState('');
 
@@ -742,6 +775,85 @@ export default function App(): React.JSX.Element {
     }
   }, [screen, tab, openings, refresh]);
 
+  /* ---------------------------------------------------------------- *
+   * Find: keywords and starred pages across the note folders
+   * ---------------------------------------------------------------- */
+
+  const [findQuery, setFindQuery] = useState('');
+  const [findNotes, setFindNotes] = useState<IndexedNote[]>([]);
+  const [findRoots, setFindRoots] = useState<SearchRoot[]>([]);
+  const [findSummary, setFindSummary] = useState<FindSummary | null>(null);
+  const [findScanning, setFindScanning] = useState(false);
+  const [findProgress, setFindProgress] = useState<{done: number; total: number} | null>(
+    null,
+  );
+
+  /**
+   * Read the note folders and index what is in them.
+   *
+   * The saved index does the heavy lifting: only notes whose modification time
+   * or size has changed since last time are actually opened, so a second visit
+   * costs a directory walk and little else. The first one, on a large tree, is
+   * three native round trips per note and is why this is never done on opening.
+   */
+  const scanNotes = useCallback(async () => {
+    setFindScanning(true);
+    setFindProgress(null);
+    try {
+      const result = await buildIndex(getConfig(), setFindProgress);
+      setFindNotes(result.notes);
+      setFindRoots(result.roots);
+      setFindSummary({
+        found: result.found,
+        failed: result.failed,
+        walked: result.walked,
+      });
+    } catch (err) {
+      // Reported where the user is looking, not only to logcat. An index that
+      // silently produced nothing is indistinguishable from notes that have
+      // nothing in them, which is the exact confusion the date-heading feature
+      // shipped with the first time.
+      console.log(`[TaskHub] note index failed: ${String(err)}`);
+      setStatus({kind: 'error', message: `Could not read your notes — ${describe(err)}`});
+    } finally {
+      setFindScanning(false);
+      setFindProgress(null);
+    }
+  }, []);
+
+  /**
+   * Index the first time Find is opened, and not before.
+   *
+   * Same deferral as the calendar's folder walk above, and for a stronger
+   * reason: this one reads inside every note it finds.
+   */
+  const findLoaded = useRef(false);
+  useEffect(() => {
+    if (screen === 'hub' && tab === 'find' && !findLoaded.current) {
+      findLoaded.current = true;
+      void scanNotes();
+    }
+  }, [screen, tab, scanNotes]);
+
+  /** Throw the index away and read every note again. */
+  const rescanNotes = useCallback(() => {
+    void (async () => {
+      await clearIndex();
+      await scanNotes();
+    })();
+  }, [scanNotes]);
+
+  // Derived on every render from the index and the filter. Cheap enough to do
+  // plainly: the work is grouping a few hundred entries, not reading files.
+  const foundStars = useMemo(
+    () => starHits(findNotes, findRoots, findQuery),
+    [findNotes, findRoots, findQuery],
+  );
+  const foundKeywords = useMemo(
+    () => keywordHits(findNotes, findRoots, findQuery),
+    [findNotes, findRoots, findQuery],
+  );
+
   /**
    * Fetch more calendar when the view moves outside what has been fetched.
    *
@@ -938,6 +1050,12 @@ export default function App(): React.JSX.Element {
       // description — that space stays empty for the user to write in.
       setSource(await readSourceRef());
       setDraft({...EMPTY_TASK, summary});
+      // The same recognised text seeds both, so switching Task/Event after the
+      // fact does not lose what was just read off the page.
+      setCaptureEvent({...emptyEvent(toDateInput(new Date())), summary});
+      setCaptureKind('task');
+      setCaptureMore(false);
+      setCaptureCalendar(cfg.calendarUrls[0] ?? '');
       // Deliberately no refresh. This screen shows the title, the lists to save
       // into (from settings) and a due date — none of which come from the
       // server. Fetching both collections and scanning for notes here put
@@ -1392,6 +1510,89 @@ export default function App(): React.JSX.Element {
     });
   }, [draft, targets, source, config.markStyle, runNow]);
 
+  /**
+   * Save the lassoed handwriting as a calendar event.
+   *
+   * Deliberately a sibling of `askSaveCaptured` rather than a branch inside it.
+   * The two share the lasso, the source reference and the page mark, but they
+   * validate different fields, write through different APIs and confirm with
+   * different wording — folding them together would mean a function that is a
+   * conditional from top to bottom.
+   *
+   * The page mark is made exactly as it is for a task, last and never fatal:
+   * the event is already on the server by then, and losing the confirmation
+   * over a decoration would be the worse trade.
+   */
+  const askSaveCapturedEvent = useCallback(() => {
+    const summary = captureEvent.summary.trim();
+    if (!summary) {
+      setStatus({kind: 'error', message: 'Give the event a title.'});
+      return;
+    }
+    if (!captureEvent.date) {
+      setStatus({kind: 'error', message: 'Pick a date for the event.'});
+      return;
+    }
+    if (!captureCalendar) {
+      setStatus({kind: 'error', message: 'Choose a calendar to save into.'});
+      return;
+    }
+    const where = collectionName(captureCalendar);
+    const marking =
+      source && config.markStyle !== 'off'
+        ? ' The selected handwriting will be boxed on the page.'
+        : '';
+    void runNow({
+      title: 'Create event?',
+      reload: 'events',
+      body: `"${summary}" on ${formatDate(captureEvent.date, config.dateFormat)}, in ${where}.${marking}`,
+      label: 'Yes, create',
+      closeAfter: true,
+      run: async () => {
+        await createEvent(getConfig(), captureCalendar, {
+          uid: newUid(),
+          summary,
+          description: captureEvent.description.trim() || undefined,
+          location: captureEvent.location.trim() || undefined,
+          date: captureEvent.date,
+          startTime: captureEvent.startTime || undefined,
+          endTime: captureEvent.endTime || undefined,
+          rrule: ruleFor(captureEvent.repeat) ?? undefined,
+          // Same properties a captured task carries, so an event made from
+          // handwriting can offer the same way back to the page.
+          sourcePath: source?.path,
+          sourcePage: source?.page,
+        });
+
+        let note = '';
+        const style = getConfig().markStyle ?? 'dashed';
+        if (style !== 'off') {
+          if (!source) {
+            note = ' The page it came from could not be identified, so no mark was made.';
+          } else {
+            const cfg = getConfig();
+            note = await markPage(source, {
+              style,
+              shade: cfg.markShade,
+              label: cfg.markLabel,
+              shadeColor: cfg.markShadeColor,
+            });
+          }
+        }
+        setCaptureEvent(emptyEvent(toDateInput(new Date())));
+        setSource(undefined);
+        return `Saved successfully — "${summary}" added to ${where}.${note}`;
+      },
+    });
+  }, [
+    captureEvent,
+    captureCalendar,
+    source,
+    config.markStyle,
+    config.dateFormat,
+    runNow,
+  ]);
+
   const askSaveTaskForm = useCallback(() => {
     if (!taskForm) {
       return;
@@ -1635,6 +1836,27 @@ export default function App(): React.JSX.Element {
           // also leaving the plugin, and coming back should land where it was.
           leaveForNote();
           await openFileAt(task.sourcePath!, task.sourcePage ?? 0);
+        } catch (err) {
+          setStatus({kind: 'error', message: describe(err)});
+        }
+      })();
+    },
+    [leaveForNote],
+  );
+
+  /**
+   * Open the note a result points at, on that page.
+   *
+   * Not a write, so no confirmation — but the plugin view is dismissed first,
+   * for the same host-state reason as every other handover to the note app.
+   */
+  const openFound = useCallback(
+    (path: string, page: number) => {
+      setStatus({kind: 'working', message: 'Opening note…'});
+      void (async () => {
+        try {
+          leaveForNote();
+          await openNoteAt(path, page);
         } catch (err) {
           setStatus({kind: 'error', message: describe(err)});
         }
@@ -2176,138 +2398,279 @@ export default function App(): React.JSX.Element {
         keyboardUp && {paddingBottom: keyboardHeight + 24},
       ]}>
 
+      {/*
+        The capture screen, built to fit one panel rather than to scroll.
+
+        It used to be a single column roughly two panels tall: title, lists,
+        due, priority, repeats, description, sub tasks, their date, and only
+        then the buttons. Everything past the due date was below the fold, and
+        the lasso that opened it is a two-second gesture — so the screen it led
+        to asked for a scroll before it could be finished.
+
+        Now the essentials sit on the first panel and everything else is behind
+        More, which swaps the body rather than lengthening it. The action bar is
+        a sibling of the ScrollView pinned at the foot, the same arrangement the
+        settings screen uses, so Save is reachable whatever the body is showing.
+        The ScrollView itself stays as a safety net: a panel smaller than any
+        measured here, or a keyboard over a short screen, must not be able to
+        put a control out of reach entirely.
+      */}
       {screen === 'save' && (
         <>
           <Header
-            title="New task"
+            title={captureKind === 'event' ? 'New event' : 'New task'}
             onClose={closeGuarded}
             closeDisabled={writing}
-            action={{
-              label: writing ? 'Saving…' : 'Save task',
-              onPress: askSaveCaptured,
-              disabled: writing,
-            }}
-          />
-          <Field
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
-            label="Title"
-            value={draft.summary}
-            multiline
-            onChange={v => setDraft(d => ({...d, summary: v}))}
           />
 
-          {config.collectionUrls.length > 0 && (
+          {/*
+            What the handwriting becomes. First thing on the screen, because it
+            decides what every field under it means.
+          */}
+          <Choice
+            options={[
+              {key: 'task', label: 'Task'},
+              {key: 'event', label: 'Event'},
+            ]}
+            value={captureKind}
+            onPick={k => setCaptureKind(k as 'task' | 'event')}
+          />
+
+          {captureKind === 'task' ? (
             <>
-              <Text style={styles.label}>Save to</Text>
-              {config.collectionUrls.map(url => (
-                <CheckRow
-                  key={url}
-                  label={collectionName(url)}
-                  checked={targets.includes(url)}
-                  onToggle={() =>
-                    setTargets(prev =>
-                      prev.includes(url) ? prev.filter(u => u !== url) : [...prev, url],
-                    )
-                  }
-                />
-              ))}
+              <Field
+                scrollHandle={scrollHandle}
+                onScrollTo={scrollFieldIntoView}
+                label="Title"
+                value={draft.summary}
+                multiline
+                onChange={v => setDraft(d => ({...d, summary: v}))}
+              />
+
+              {!captureMore && (
+                <>
+                  {config.collectionUrls.length > 0 && (
+                    <>
+                      <Text style={styles.label}>Save to</Text>
+                      {config.collectionUrls.map(url => (
+                        <CheckRow
+                          compact
+                          key={url}
+                          label={collectionName(url)}
+                          hint={collectionHint(url, config.collectionUrls)}
+                          checked={targets.includes(url)}
+                          onToggle={() =>
+                            setTargets(prev =>
+                              prev.includes(url)
+                                ? prev.filter(u => u !== url)
+                                : [...prev, url],
+                            )
+                          }
+                        />
+                      ))}
+                    </>
+                  )}
+
+                  <Text style={styles.label}>Due</Text>
+                  <DateTimePicker
+                    scrollHandle={scrollHandle}
+                    onScrollTo={scrollFieldIntoView}
+                    date={draft.dueDate}
+                    time={draft.dueTime}
+                    timeFormat={timeFormat}
+                    onChange={(date, time) =>
+                      setDraft(d => ({...d, dueDate: date, dueTime: time}))
+                    }
+                  />
+                </>
+              )}
+
+              {captureMore && (
+                <>
+                  <Text style={styles.label}>Priority</Text>
+                  <Choice
+                    options={PRIORITY_BANDS.map(pr => ({key: pr.key, label: pr.label}))}
+                    value={draft.priority}
+                    onPick={k => setDraft(d => ({...d, priority: k as PriorityBand}))}
+                  />
+                  <Text style={styles.label}>Repeats</Text>
+                  {draft.repeat === 'custom' && (
+                    <Text style={styles.noteCompact}>
+                      {repeatLabel('custom')} — a rule set in another app, which this menu
+                      cannot describe. It is kept exactly as it is unless you choose one
+                      below.
+                    </Text>
+                  )}
+                  <Choice
+                    options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
+                    value={draft.repeat}
+                    onPick={k => setDraft(d => ({...d, repeat: k as RepeatKey}))}
+                  />
+                  <Field
+                    compact
+                    scrollHandle={scrollHandle}
+                    onScrollTo={scrollFieldIntoView}
+                    label="Description"
+                    value={draft.description}
+                    multiline
+                    onChange={v => setDraft(d => ({...d, description: v}))}
+                  />
+                  <Field
+                    compact
+                    scrollHandle={scrollHandle}
+                    onScrollTo={scrollFieldIntoView}
+                    label="Add sub tasks (one per line)"
+                    value={draft.steps}
+                    multiline
+                    onChange={v => setDraft(d => ({...d, steps: v}))}
+                  />
+                  <View style={styles.stepsDateRow}>
+                    <Pressable
+                      style={styles.stepsDateButton}
+                      onPress={() =>
+                        setStepsDateOpen(stepsDateOpen === 'capture' ? null : 'capture')
+                      }>
+                      <CalendarIcon />
+                      <Text style={styles.stepsDateLabel}>
+                        {draft.stepsDate
+                          ? `Steps due ${formatDate(draft.stepsDate, dateFormat)}${
+                              draft.stepsTime
+                                ? ` at ${formatTime(draft.stepsTime, timeFormat)}`
+                                : ''
+                            }`
+                          : 'Steps due: same day as the task'}
+                      </Text>
+                    </Pressable>
+                    {!!draft.stepsDate && (
+                      <Pressable
+                        onPress={() => setDraft(d => ({...d, stepsDate: '', stepsTime: ''}))}
+                        hitSlop={8}>
+                        <Text style={styles.clearLink}>Clear</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  {stepsDateOpen === 'capture' && (
+                    <DateTimePicker
+                      scrollHandle={scrollHandle}
+                      onScrollTo={scrollFieldIntoView}
+                      date={draft.stepsDate}
+                      time={draft.stepsTime}
+                      timeFormat={timeFormat}
+                      onChange={(date, time) => {
+                        setDraft(d => ({...d, stepsDate: date, stepsTime: time}));
+                      }}
+                    />
+                  )}
+                  <Text style={styles.noteCompact}>
+                    Each line becomes a step, due the same day as the task. End a line with
+                    @2026-09-10 to give that step its own date.
+                  </Text>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <Field
+                scrollHandle={scrollHandle}
+                onScrollTo={scrollFieldIntoView}
+                label="Title"
+                value={captureEvent.summary}
+                multiline
+                onChange={v => setCaptureEvent(d => ({...d, summary: v}))}
+              />
+
+              {!captureMore && (
+                <>
+                  {config.calendarUrls.length > 0 ? (
+                    <>
+                      <Text style={styles.label}>Calendar</Text>
+                      <Choice
+                        options={config.calendarUrls.map(url => ({
+                          key: url,
+                          label: collectionName(url),
+                        }))}
+                        value={captureCalendar}
+                        onPick={setCaptureCalendar}
+                      />
+                    </>
+                  ) : (
+                    <Text style={styles.noteCompact}>
+                      No calendars are ticked in Settings, so there is nowhere to save an
+                      event. Tick one under Task lists and calendars.
+                    </Text>
+                  )}
+
+                  <Text style={styles.label}>When</Text>
+                  <DateTimePicker
+                    scrollHandle={scrollHandle}
+                    onScrollTo={scrollFieldIntoView}
+                    date={captureEvent.date}
+                    time={captureEvent.startTime}
+                    timeFormat={timeFormat}
+                    onChange={(date, time) =>
+                      setCaptureEvent(d => ({...d, date, startTime: time}))
+                    }
+                  />
+                  {/*
+                    Leaving the start time empty makes it an all-day event, so
+                    an end time is only meaningful once there is a start.
+                  */}
+                  {!!captureEvent.startTime && (
+                    <>
+                      <Text style={styles.label}>Ends</Text>
+                      <DateTimePicker
+                        scrollHandle={scrollHandle}
+                        onScrollTo={scrollFieldIntoView}
+                        date={captureEvent.date}
+                        time={captureEvent.endTime}
+                        timeFormat={timeFormat}
+                        onChange={(_date, time) =>
+                          setCaptureEvent(d => ({...d, endTime: time}))
+                        }
+                      />
+                    </>
+                  )}
+                </>
+              )}
+
+              {captureMore && (
+                <>
+                  <Text style={styles.label}>Repeats</Text>
+                  {captureEvent.repeat === 'custom' && (
+                    <Text style={styles.noteCompact}>
+                      {repeatLabel('custom')} — a rule set in another app, which this menu
+                      cannot describe.
+                    </Text>
+                  )}
+                  <Choice
+                    options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
+                    value={captureEvent.repeat}
+                    onPick={k => setCaptureEvent(d => ({...d, repeat: k as RepeatKey}))}
+                  />
+                  <Field
+                    compact
+                    scrollHandle={scrollHandle}
+                    onScrollTo={scrollFieldIntoView}
+                    label="Location"
+                    value={captureEvent.location}
+                    onChange={v => setCaptureEvent(d => ({...d, location: v}))}
+                  />
+                  <Field
+                    compact
+                    scrollHandle={scrollHandle}
+                    onScrollTo={scrollFieldIntoView}
+                    label="Description"
+                    value={captureEvent.description}
+                    multiline
+                    onChange={v => setCaptureEvent(d => ({...d, description: v}))}
+                  />
+                </>
+              )}
             </>
           )}
 
-          <Text style={styles.label}>Due</Text>
-          <DateTimePicker
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
-            date={draft.dueDate}
-            time={draft.dueTime}
-            timeFormat={timeFormat}
-            onChange={(date, time) => setDraft(d => ({...d, dueDate: date, dueTime: time}))}
-          />
-          <Text style={styles.label}>Priority</Text>
-          <Choice
-            options={PRIORITY_BANDS.map(p => ({key: p.key, label: p.label}))}
-            value={draft.priority}
-            onPick={k => setDraft(d => ({...d, priority: k as PriorityBand}))}
-          />
-          <Text style={styles.label}>Repeats</Text>
-          {draft.repeat === 'custom' && (
-            <Text style={styles.noteCompact}>
-              {repeatLabel('custom')} — a rule set in another app, which this menu cannot
-              describe. It is kept exactly as it is unless you choose one below.
-            </Text>
-          )}
-          <Choice
-            options={REPEAT_OPTIONS.map(r => ({key: r.key, label: r.label}))}
-            value={draft.repeat}
-            onPick={k => setDraft(d => ({...d, repeat: k as RepeatKey}))}
-          />
-
-          <Field
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
-            label="Description"
-            value={draft.description}
-            multiline
-            onChange={v => setDraft(d => ({...d, description: v}))}
-          />
-          <Field
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
-            label="Add sub tasks (one per line)"
-            value={draft.steps}
-            multiline
-            onChange={v => setDraft(d => ({...d, steps: v}))}
-          />
-          <View style={styles.stepsDateRow}>
-            <Pressable
-              style={styles.stepsDateButton}
-              onPress={() => setStepsDateOpen(stepsDateOpen === 'capture' ? null : 'capture')}>
-              <CalendarIcon />
-              <Text style={styles.stepsDateLabel}>
-                {draft.stepsDate
-                  ? `Steps due ${formatDate(draft.stepsDate, dateFormat)}${
-                      draft.stepsTime ? ` at ${formatTime(draft.stepsTime, timeFormat)}` : ''
-                    }`
-                  : 'Steps due: same day as the task'}
-              </Text>
-            </Pressable>
-            {!!draft.stepsDate && (
-              <Pressable onPress={() => setDraft(d => ({...d, stepsDate: '', stepsTime: ''}))} hitSlop={8}>
-                <Text style={styles.clearLink}>Clear</Text>
-              </Pressable>
-            )}
-          </View>
-          {stepsDateOpen === 'capture' && (
-            <DateTimePicker
-              scrollHandle={scrollHandle}
-              onScrollTo={scrollFieldIntoView}
-              date={draft.stepsDate}
-              time={draft.stepsTime}
-              timeFormat={timeFormat}
-              onChange={(date, time) => {
-                setDraft(d => ({...d, stepsDate: date, stepsTime: time}));
-              }}
-            />
-          )}
-          <Text style={styles.noteCompact}>
-            Each line becomes a step, due the same day as the task. End a line with
-            @2026-09-10 to give that step its own date.
-          </Text>
-
-          <View style={styles.actions}>
-            <Button
-              label={writing ? 'Saving…' : 'Save task'}
-              primary
-              disabled={writing}
-              onPress={askSaveCaptured}
-            />
-            <Button label="All Tasks" onPress={openHub} />
-          </View>
-
           <StatusLine status={status} />
           <LoadingLine visible={loading} />
-
         </>
       )}
 
@@ -2338,6 +2701,7 @@ export default function App(): React.JSX.Element {
                 <CheckRow
                   key={url}
                   label={collectionName(url)}
+                  hint={collectionHint(url, config.collectionUrls)}
                   checked={taskTargets.includes(url)}
                   onToggle={() =>
                     setTaskTargets(prev =>
@@ -2595,6 +2959,7 @@ will not duplicate them.`}
             tabs={[
               {key: 'tasks', label: 'Tasks'},
               {key: 'calendar', label: 'Calendar'},
+              {key: 'find', label: 'Find'},
             ]}
             value={tab}
             onPick={k => setTab(k as Tab)}
@@ -3042,6 +3407,23 @@ will not duplicate them.`}
               )}
             </>
           )}
+
+          {tab === 'find' && (
+            <FindView
+              query={findQuery}
+              onQuery={setFindQuery}
+              stars={foundStars}
+              keywords={foundKeywords}
+              starredPages={countStarredPages(foundStars)}
+              scanning={findScanning}
+              progress={findProgress}
+              summary={findSummary}
+              onOpen={openFound}
+              onRescan={rescanNotes}
+              scrollHandle={scrollHandle}
+              onScrollTo={scrollFieldIntoView}
+            />
+          )}
         </>
       )}
 
@@ -3079,12 +3461,35 @@ will not duplicate them.`}
       cover the form's last row.
     */}
     {screen === 'settings' && (
-      <View style={styles.settingsBar}>
+      <View style={styles.pinnedBar}>
         <Button label="Cancel setup" onPress={cancelSettings} />
         <Button
           label={settingsDirty ? 'Save and exit •' : 'Save and exit'}
           primary
           onPress={saveSettingsAndExit}
+        />
+      </View>
+    )}
+
+    {/*
+      The capture screen's own pinned bar, the same arrangement settings uses.
+      More swaps the body between the essentials and the rest, so it belongs
+      beside Save rather than inside the thing it is paging.
+    */}
+    {screen === 'save' && (
+      <View style={styles.pinnedBar}>
+        <Button
+          label={captureMore ? '‹ Back' : 'More…'}
+          onPress={() => setCaptureMore(v => !v)}
+        />
+        <Button label="All Tasks" onPress={openHub} />
+        <Button
+          label={
+            writing ? 'Saving…' : captureKind === 'event' ? 'Save event' : 'Save task'
+          }
+          primary
+          disabled={writing}
+          onPress={captureKind === 'event' ? askSaveCapturedEvent : askSaveCaptured}
         />
       </View>
     )}

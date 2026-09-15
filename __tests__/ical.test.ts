@@ -1,4 +1,4 @@
-import {buildVTodo} from '../src/ical';
+import {buildVEvent, buildVTodo, parseVEvents} from '../src/ical';
 
 const AT = new Date(Date.UTC(2026, 8, 2, 7, 5, 3));
 
@@ -56,5 +56,42 @@ describe('buildVTodo', () => {
   it('omits DESCRIPTION entirely when there is no source reference', () => {
     const ics = buildVTodo({uid: 'abc', summary: 'x'}, AT);
     expect(ics).not.toContain('DESCRIPTION');
+  });
+});
+
+describe('an event captured from handwriting', () => {
+  it('carries the source page as its own properties, not in the description', () => {
+    const ics = buildVEvent({
+      uid: 'u1',
+      summary: 'Dentist',
+      date: '2026-09-20',
+      startTime: '09:30',
+      sourcePath: 'Note/Daily/2026-09-14.note',
+      sourcePage: 2,
+    });
+    expect(ics).toContain('X-TASKHUB-SOURCE:Note/Daily/2026-09-14.note');
+    expect(ics).toContain('X-TASKHUB-SOURCE-PAGE:2');
+    // The description stays the user's own space, exactly as it does for a
+    // captured task.
+    expect(ics).not.toContain('DESCRIPTION:');
+  });
+
+  it('reads them back off the server', () => {
+    const ics = buildVEvent({
+      uid: 'u1',
+      summary: 'Dentist',
+      date: '2026-09-20',
+      sourcePath: 'Note/Daily/a.note',
+      sourcePage: 0,
+    });
+    const [event] = parseVEvents(ics);
+    expect(event.sourcePath).toBe('Note/Daily/a.note');
+    expect(event.sourcePage).toBe(0);
+  });
+
+  it('writes no source properties when it did not come from a page', () => {
+    const ics = buildVEvent({uid: 'u1', summary: 'Dentist', date: '2026-09-20'});
+    expect(ics).not.toContain('X-TASKHUB-SOURCE');
+    expect(parseVEvents(ics)[0].sourcePath).toBeUndefined();
   });
 });

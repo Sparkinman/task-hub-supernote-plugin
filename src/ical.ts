@@ -407,6 +407,9 @@ export interface VEvent {
   exdates?: string[];
   origin?: string;
   originName?: string;
+  /** The note page this event was captured from, X-TASKHUB-SOURCE. */
+  sourcePath?: string;
+  sourcePage?: number;
   /**
    * Set on the copies `expandEvents` makes, never on anything read from the
    * server. It carries the date the series itself starts on, because an
@@ -486,6 +489,8 @@ export function parseVEvents(text: string): VEvent[] {
           exdates: current.exdates,
           origin: current.origin,
           originName: current.originName,
+          sourcePath: current.sourcePath,
+          sourcePage: current.sourcePage,
         });
       }
       current = null;
@@ -546,6 +551,14 @@ export function parseVEvents(text: string): VEvent[] {
       case 'X-TASKHUB-ORIGIN-NAME':
         current.originName = unescapeText(value);
         break;
+      case 'X-TASKHUB-SOURCE':
+        current.sourcePath = unescapeText(value);
+        break;
+      case 'X-TASKHUB-SOURCE-PAGE': {
+        const page = Number.parseInt(value.trim(), 10);
+        current.sourcePage = Number.isFinite(page) ? page : undefined;
+        break;
+      }
       case 'DTSTART': {
         const parsed = parseStamp(value, dateOnly);
         if (parsed) {
@@ -587,6 +600,16 @@ export interface EventDraft {
    * a value replaces it.
    */
   rrule?: string;
+  /**
+   * The note page this event was captured from, when it came from a lasso.
+   *
+   * Written the same way a captured task carries its source, and for the same
+   * reason: it is what lets the event offer a way back to the handwriting it
+   * was made from. Kept out of DESCRIPTION so another client editing the
+   * description cannot destroy it.
+   */
+  sourcePath?: string;
+  sourcePage?: number;
 }
 
 /** DTSTART/DTEND line, mirroring buildDue's date-vs-instant handling. */
@@ -638,6 +661,12 @@ export function buildVEvent(draft: EventDraft, now: Date = new Date()): string {
   }
   if (draft.rrule) {
     lines.push(`RRULE:${draft.rrule}`);
+  }
+  if (draft.sourcePath) {
+    lines.push(`${SOURCE_PROPERTY}:${escapeText(draft.sourcePath)}`);
+    if (typeof draft.sourcePage === 'number') {
+      lines.push(`${SOURCE_PAGE_PROPERTY}:${draft.sourcePage}`);
+    }
   }
 
   lines.push('END:VEVENT', 'END:VCALENDAR');

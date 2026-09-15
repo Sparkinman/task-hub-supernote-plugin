@@ -178,6 +178,19 @@ export async function openNote(relativePath: string): Promise<void> {
   unwrap(await PluginFileAPI.openFile(path, 0), 'openFile');
 }
 
+/**
+ * Open a note by its shared-storage-relative path, at a page.
+ *
+ * What the Find tab jumps with: the index stores relative paths, because that
+ * is what the native walk reports and what stays valid if the device ever
+ * mounts its storage somewhere else.
+ */
+export async function openNoteAt(relativePath: string, page: number): Promise<void> {
+  const path = await absolute(relativePath);
+  console.log(`${TAG} openFile ${path} page=${page}`);
+  unwrap(await PluginFileAPI.openFile(path, page), 'openFile');
+}
+
 /** The absolute path a relative note path resolves to, for the SDK's own calls. */
 export async function absoluteNotePath(relativePath: string): Promise<string> {
   return absolute(relativePath);

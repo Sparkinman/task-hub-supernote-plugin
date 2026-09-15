@@ -271,6 +271,43 @@ export function collectionName(url: string): string {
   if (match) {
     return match.displayName;
   }
+  return lastSegment(url);
+}
+
+function lastSegment(url: string): string {
   const segments = url.replace(/\/+$/, '').split('/');
-  return decodeURIComponent(segments[segments.length - 1] ?? url);
+  const last = segments[segments.length - 1] ?? url;
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return last;
+  }
+}
+
+/**
+ * The path to show beside a collection's name, or '' when the name is enough.
+ *
+ * A server that supplies no `displayname` leaves discovery naming the
+ * collection after the last segment of its own URL, which can be something as
+ * uninformative as an account name or a UUID — a row labelled `paul` says
+ * nothing about where saving to it would put anything. The same is true when
+ * two watched collections happen to share a name.
+ *
+ * Shown only in those two cases. A list the server has properly named needs no
+ * URL beside it, and putting one there on every row would turn a short pick
+ * list into a wall of addresses.
+ */
+export function collectionHint(url: string, among: string[]): string {
+  const name = collectionName(url);
+  const named = discovered.some(c => c.url === url && c.displayName !== lastSegment(c.url));
+  const duplicated =
+    among.filter(other => other !== url && collectionName(other) === name).length > 0;
+  if (named && !duplicated) {
+    return '';
+  }
+  try {
+    return decodeURIComponent(new URL(url).pathname);
+  } catch {
+    return url;
+  }
 }

@@ -1533,6 +1533,31 @@ export const styles = StyleSheet.create({
   description: {fontSize: fs(20), color: '#555', marginTop: sp(2)},
   empty: {fontSize: fs(22), color: '#555', marginVertical: sp(16)},
   note: {fontSize: fs(18), color: '#555', marginBottom: sp(10)},
+  /**
+   * One result in the Find tab: a note name on the left, where it lives on the
+   * right.
+   *
+   * Generously tall for its content — every one of these is a pen target that
+   * leaves the plugin, and a mis-tap costs the user a note opening at the wrong
+   * page. The hairline below matches the task list rather than the black rule
+   * used for section heads: these rows are dense and a heavy rule between each
+   * would fight the headings above them.
+   */
+  findRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: sp(12),
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
+    paddingVertical: sp(12),
+  },
+  /** A page under its keyword. Indented with a wash, as task steps are. */
+  findRowIndented: {paddingLeft: sp(28), backgroundColor: '#ededed'},
+  // flexShrink, so a long note name yields to the page label rather than
+  // pushing it off the row: "Daily · p.12" is the half that says where to go.
+  findRowName: {fontSize: fs(22), color: '#000', flexShrink: 1},
+  findRowMeta: {fontSize: fs(19), color: '#444'},
   statusRow: {flexDirection: 'row', alignItems: 'center', gap: sp(8), marginVertical: sp(8)},
   busyMark: {fontSize: fs(24), color: '#000'},
   loadingPanel: {borderRadius: R.lg,
@@ -1569,17 +1594,27 @@ export const styles = StyleSheet.create({
   /** Overdue, and only overdue: the one section worth spending emphasis on. */
   dueHeadUrgent: {textDecorationLine: 'underline'},
   /**
-   * The settings screen's foot, pinned below the scrolling form.
+   * A screen's foot, pinned below its scrolling body.
    *
    * A sibling of the ScrollView rather than an absolute overlay: it then takes
    * its own strip of the panel, so nothing underneath needs padding to clear it
-   * and it never covers the last row of the form. The window is adjustResize,
-   * so it rides above the keyboard instead of hiding behind it.
+   * and it never covers the last row. The window is adjustResize, so it rides
+   * above the keyboard instead of hiding behind it.
+   *
+   * Used by the settings form, where the actions were once stranded two thirds
+   * of the way down a page many screens long, and by the capture screen, which
+   * is built to fit one panel and pages its body behind More. Named for what it
+   * does rather than for the first screen to need it.
    */
-  settingsBar: {
+  pinnedBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    // Wraps rather than overflowing. The capture screen's bar carries three
+    // buttons, and on the narrowest panel at its smallest scale a row that
+    // cannot wrap would push Save off the edge — which is the exact failure
+    // this bar exists to prevent.
+    flexWrap: 'wrap',
     gap: sp(10),
     paddingHorizontal: sp(14),
     paddingVertical: sp(10),

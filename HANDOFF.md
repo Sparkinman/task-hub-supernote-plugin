@@ -1,8 +1,8 @@
-# Task Hub — state as of 2026-09-14
+# Task Hub — state as of 2026-09-15
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-**447 tests across 25 suites**; `tsc` and eslint clean, all verified 2026-09-14.
-Current build **0.64.1** (versionCode 80).
+**475 tests across 28 suites**; `tsc` and eslint clean, all verified 2026-09-15.
+Current build **0.65.0** (versionCode 81), built but **not yet tested on device**.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
 **licensed GPLv3**, with v0.64.1 released and `TaskHub.snplg` attached to it.
@@ -16,6 +16,105 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.65.0 — none of it device-verified yet
+
+Four things in one build, batched deliberately: there is no device on the build
+machine, and install cycles are the scarce resource.
+
+### Find: keywords and starred pages across the note folders
+
+A third tab beside Tasks and Calendar. It lists every **keyword** and every
+**starred page** in the daily, weekly, monthly, quarterly, yearly and meeting
+note folders, and tapping a result opens that note at that page.
+
+Named **Find** rather than Search, Notes or Marks, and every one of those was
+rejected for a reason worth keeping: *Search* is already the label on the Tasks
+tab's own filter field; *Notes* overpromises a notebook browser when this only
+indexes marks inside notes; *Marks* collides with Task Hub's own page marking
+(`markStyle` / `markLabel` / `markShade`).
+
+It opens **showing** results rather than waiting for a query — starred pages
+first, keywords underneath, filter above both. A Supernote keyboard is slow
+enough that a view which is blank until you type is a view nobody opens twice.
+
+What makes it affordable:
+
+- **Only two things are readable from a closed file, and both are exact.**
+  `PluginFileAPI.getKeyWords(path, pageList)` returns `{keyword, page, index}` —
+  real text, no recognition. `searchFiveStars(path)` returns page indices.
+- **Titles are deliberately not indexed.** `getTitles` returns geometry and
+  style and **no text at all** — a title is handwriting the device knows is a
+  heading. Searching one means `getElements` plus `recognizeElements` per page
+  per note. That is a different feature with a different cost; do not let
+  "search my notes" quietly grow into it.
+- **`getKeyWords` takes a page list, not just a path** — contrary to the
+  skill's own reference file. So it needs `getNoteTotalPageNum` first, which
+  makes three native round trips per note that has to be read.
+- **Hence the index.** `src/noteindex.ts` caches per note in
+  `Document/TaskHub/noteindex.json`, keyed by path and reused whenever
+  modification time *and* size both still match. A second visit reads only what
+  changed. `listNotesWithMeta` was added to the Kotlin module for those two
+  fields; the old `listNotes` is untouched because every other caller wants only
+  paths.
+- **The scan is lazy**, on first entry to the tab, like the calendar's folder
+  walk — none of the hard-won opening speed is spent on a tab you may not open.
+- `src/notesearch.ts` is pure and holds the labelling, matching and grouping;
+  `noteindex.ts` only makes the calls. Root handling has two traps: several
+  periods can share one folder (the "one folder for everything" button), so
+  such a root gets **no** period label rather than an arbitrary one; and a root
+  nested inside another is dropped from the walk while still being used for
+  labelling, by longest match.
+- A note that refused to be read is **counted and said out loud**, never
+  silently omitted, and is not cached as empty — otherwise a note that happened
+  to be locked once would stay invisible until it was next edited.
+
+### A spurious collection named after the account
+
+Reported on device: the save screen offered `paul-tasks` — a real list — and
+also just `paul`, which named nothing the user recognised.
+
+`Depth: 1` describes the collection it was sent to **as well as** its members
+(RFC 4918 §9.1), so the calendar home is always in the multistatus, and
+`parseCollections` had no filter for it. A server that advertises the home as
+calendar-ish therefore produced a row named from the last segment of its own
+URL — the account name. `parseCollections` now takes the home URL and drops it.
+
+Second half of the same fix: `collectionHint` shows a collection's path beside
+its name, but **only** when the name came from the URL fallback or when two
+watched collections share a name. Putting a URL on every row would turn a short
+pick list into a wall of addresses.
+
+### An event can now be captured from handwriting
+
+The lasso could only become a task. It can now become a calendar event, chosen
+with a Task / Event switch at the top of the capture screen rather than by a
+second button on the note app's shared lasso toolbar.
+
+`EventDraft` and `VEvent` gained `sourcePath` / `sourcePage`, written and read
+as `X-TASKHUB-SOURCE` and `X-TASKHUB-SOURCE-PAGE` exactly as a captured task
+carries them — deliberately not in DESCRIPTION, which stays the user's own
+space. Page marking runs identically and, as for a task, **last and never
+fatally**: the event is already on the server by then.
+
+### The capture screen fits one panel
+
+It was a single column about two panels tall — title, lists, due, priority,
+repeats, description, sub tasks, their date, and only then the buttons — so a
+two-second lasso led to a screen that needed scrolling before it could be
+finished.
+
+Now the essentials sit on the first panel and the rest is behind **More**,
+which *swaps* the body rather than lengthening it, and the actions are a bar
+pinned at the foot. The style is shared with the settings form and was renamed
+`settingsBar` → **`pinnedBar`** accordingly, with `flexWrap` added because the
+capture bar carries three buttons and the narrowest panel at its smallest scale
+would otherwise push Save off the edge.
+
+The ScrollView is kept underneath as a safety net rather than removed. A panel
+smaller than any measured here, or a keyboard over a short screen, must not be
+able to put a control out of reach — that is precisely how "Save and exit had
+gone missing" happened.
 
 ## What changed in 0.54.0 – 0.64.0
 
@@ -379,6 +478,16 @@ their own. The exception was the caption's font clamp, now expressed as a fracti
 
 ## Bugs worth not rediscovering
 
+- **A parser that names every field explicitly drops the next one you add.**
+  `parseVEvents` builds its result with a literal listing each property, so
+  `X-TASKHUB-SOURCE` was parsed into the accumulator and then silently thrown
+  away on the way out — the write worked, the read came back `undefined`. This
+  is the same shape as the `sanitise` bug below, and it was caught here only
+  because a test asserted the round trip rather than just the written text.
+  **Whenever you add a field to `VEvent` or `VTodo`, change three places: the
+  interface, the `case` in the switch, and the object literal at `END:`.**
+  Assert the round trip, not the output.
+
 - **`sanitise` clobbered defaults with `undefined`.** It names every config field
   explicitly, so a field a saved `settings.json` predates came back as
   `{key: undefined}` — and `{...EMPTY_CONFIG, ...sanitise(...)}` copies that over
@@ -562,7 +671,23 @@ Borders are deliberately not scaled, and positive spacing never rounds to zero.
    answer to the same want.
 8. **A `YYYYMMDD` search keyword on daily notes**, so they are findable by date in the
    device's own search whatever the visible format is set to. `sn-datetime` does exactly
-   this; not implemented here.
+   this; not implemented here. Now more attractive than it was: `PluginFileAPI.insertKeyWord`
+   is the write side of what the Find tab reads, so a keyword written at creation would show
+   up in Find as well as in the device's own search.
+10. **Feeds: read-only iCal subscription**, which is the only way to reach Google Calendar
+   and Outlook. Neither offers usable CalDAV — Google needs an OAuth application flow and
+   Microsoft retired its CalDAV endpoint — so both publish a secret `.ics` URL instead, and
+   that is exactly what taoist22's SNFolio does rather than integrating either service
+   properly. Task Hub is already ahead on the CalDAV half: the RFC 6764 walk should reach
+   iCloud, Fastmail, Nextcloud and Baikal today. The pieces exist — `parseVEvents` takes raw
+   iCal text and `expand.ts` handles RRULE — so the real work is (a) read-only semantics,
+   since every write path assumes a CalDAV `href`, and (b) the fact that a feed has no
+   `time-range`, so the whole file arrives every refresh and needs conditional GET by ETag
+   or the 0.54–0.64 opening-speed work is given straight back.
+11. **The keystore limit below is probably wrong.** "No keystore is available to a plugin"
+   is listed under Known limits, but SNFolio stores its credentials with Android
+   Keystore-backed encryption, and Task Hub ships its own native module, so `AndroidKeyStore`
+   should be reachable the same way. Unverified.
 9. `matchesFilter` / `DUE_FILTERS` now serve as a cross-check in `dueBucket`'s tests but still
    have no UI of their own. Either build the filter row or let the buckets be the only cut.
 
