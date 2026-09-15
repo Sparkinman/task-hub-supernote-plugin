@@ -7,7 +7,9 @@
 
 <p align="center">
   <strong>A planner for your Supernote. Every calendar, not just one.</strong><br>
-  Runs against your own server. Your data never leaves it.
+  Tasks, calendars, dated notes and handwriting capture — on the device, in one place.<br>
+  Subscribe to Google, Outlook and Apple calendars, or connect the Supernote's own To-Do app,
+  with no server at all.
 </p>
 
 <p align="center">
@@ -86,6 +88,41 @@ it goes into, set a repeat rule, and it is written straight to the server.
 readable size, instead of twenty-four cramped ones. Nothing is hidden by narrowing it:
 all-day items stay at the top, anything earlier sits just under them, anything later goes
 below the last hour — each with its time and its calendar.
+
+### Google, Outlook and Apple calendars — no account, no server
+
+Neither Google nor Microsoft can be reached by **any** CalDAV client any more. Google
+withdrew password access to CalDAV in March 2025; Microsoft retired it for Outlook.com and
+365 outright. Both still publish a private `.ics` address for each calendar, and so do
+Apple, Fastmail and Proton — so Task Hub subscribes to those.
+
+Paste an address, or drop a plain text file of them on the device and import the lot in one
+tap. A private calendar address is about a hundred characters of random text, and typing one
+on a tablet is nobody's idea of a good evening.
+
+**These are read-only, and slower to load, and both are properties of the format rather than
+things that can be fixed.** A published file has no address to write a change back to, and it
+holds every event the calendar has ever had with no way to ask for less. Task Hub does what
+can be done — conditional fetching, caching the *parsed* result rather than the file so an
+unchanged calendar is never re-parsed, parsing in pieces so the panel keeps drawing, and
+keeping only the months in view — and a subscribed event can still have a note attached,
+because that link lives on your device. For calendars you can **edit**, use CalDAV or
+[the server](#the-server-side).
+
+### The Supernote's own To-Do app
+
+Optional, off until you switch it on: a **two-way** connection to the to-do list built into
+the tablet, through Supernote Cloud. Its lists appear beside your others and can be ticked,
+edited and added to from here.
+
+It is the one thing in the plugin built on an API Ratta never published — worked out against
+a live account, and it works, but nothing about it is promised. Supernote's session lasts
+thirty days and cannot be renewed, so it wants signing in again each month; the plugin shows
+how long is left and warns a week ahead. **Your password is never stored** — only the session
+it is exchanged for, and it is hashed before it leaves the device.
+
+If you run [the server](#the-server-side), you do not want this: it already syncs the same
+to-dos, both ways, and keeps working when this cannot.
 
 ### Notes pinned to a date — including dates that have not happened
 
@@ -184,6 +221,17 @@ The page keeps a mark so the writing shows it became a task: a **box** around th
 **marker-pen wash** in a colour you choose. **Completing the task removes the mark again.**
 Every part is off-switchable, because it writes into your own note.
 
+### Find what you have already written
+
+A third tab that lists every **keyword** and every **starred page** across your daily,
+weekly, monthly, quarterly, yearly and meeting notes. Tap a result and the note opens at that
+page.
+
+It is not handwriting recognition and it does not guess: a keyword is text you added on the
+device, so a match is exact. Turn on previews and starred pages are drawn as thumbnails,
+cropped to the top of the page where the writing usually is, so you can flip through them by
+eye. It is indexed by modification time, so a second visit reads only the notes that changed.
+
 ### Jump straight back to the page a task came from
 
 A task captured from handwriting remembers **which note and which page** it was written on,
@@ -211,7 +259,24 @@ back through the years costs one small fetch per new stretch instead of re-downl
 everything. Only open tasks are fetched at all. Parsing yields to the interface every few
 objects, so taps still land while a large collection is being read.
 
-### Built for e-ink
+### An interface built for the panel it runs on
+
+Every screen has been rebuilt around the fact that this is e-ink, not a phone.
+
+**Forms fit one panel.** The capture screen and both editors used to be two panels tall with
+Save at the bottom, so a two-second lasso led to a screen you had to scroll before you could
+finish. Now the essentials are on the first page, everything else sits behind **More…**
+which swaps the body rather than lengthening it, and the actions are pinned at the foot where
+Save is always reachable.
+
+**Pick a value, don't step to it.** The time picker offers hours and minutes to choose from,
+with AM/PM as a pair of chips. It used to be four arrows around a readout — about a dozen
+taps to reach 3:45pm, each one a full-panel repaint.
+
+**Tap a task to open it, tap its box to complete it**, consistently across the task list and
+all three calendar views. Templates are chosen from a grid of thumbnails rather than a list
+of filenames. Rounded corners throughout, a hairline month grid with the days either side
+filled in, the selected day as a filled pill, and C / T / N as small filled discs.
 
 No animations, no spinners, no translucent overlays, no second Android window for a dialog —
 each of those is a full-panel repaint on a screen that cannot afford one. Views and rows are
@@ -223,9 +288,10 @@ together, calibrated against both devices. **Settings → This device** shows wh
 
 ### No server? Most of it still works
 
-Settings save with nothing configured. The calendar views, all five kinds of note, templates
-and page marks need no network at all. Only tasks, calendar events and capturing handwriting
-as a task need somewhere to put them.
+Settings save with nothing configured. The calendar views, all six kinds of note, templates,
+page marks and the Find tab need no network at all. Tasks and calendar events need somewhere
+to put them — and even that no longer means running a server, since a calendar can be
+subscribed to and the Supernote's own To-Do app can be connected directly.
 
 ### Where tasks come from
 
