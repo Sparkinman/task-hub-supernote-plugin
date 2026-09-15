@@ -1,8 +1,8 @@
 # Task Hub — state as of 2026-09-15
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-**489 tests across 30 suites**; `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.68.0** (versionCode 84). 0.66.0 was the first of these actually
+`tsc` and eslint clean, all verified 2026-09-15.
+Current build **0.69.0** (versionCode 85). **506 tests across 31 suites.** 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,81 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.69.0 — `.ics` subscriptions
+
+The answer to "what about Google, Outlook, Apple". Open thread 10, closed.
+
+### Why a feed and not an integration
+
+Re-checked against the live docs rather than assumed:
+
+- **Google** withdrew basic-auth CalDAV on 14 March 2025. Its CalDAV endpoint
+  requires a full OAuth application flow; no password, app-specific or
+  otherwise, reaches it.
+- **Microsoft** retired CalDAV for Outlook.com and 365 entirely. The
+  replacement is Graph, a REST API.
+
+So no CalDAV client can reach either, Task Hub included, and that is not a
+shortcoming to be fixed in the plugin. Both still publish a private `.ics`
+address per calendar, as do Apple, Fastmail and Proton — which needs no account,
+no token and no registered application.
+
+**Real two-way sync with Google or Outlook does not belong in the plugin**, and
+this is the reasoning, so it does not get re-litigated: an OAuth client secret
+inside a GPL `.snplg` is extractable by anyone who downloads it; Google's
+verification review for calendar scopes is a real non-code cost; and a plugin
+that only runs while it is open cannot refresh a token in the background. The
+Task Hub **server** can do all three, and the plugin already reads whatever it
+exposes over CalDAV. Feeds exist for the person who does not run that server.
+
+### How it is built
+
+- `src/feeds.ts` is pure and tested: URL rules (`webcal://` upgraded, `http://`
+  refused because the address *is* the credential), the `Name|URL` setup-file
+  format, and the stored list. Note the setup file splits on the **last** bar —
+  a URL cannot hold an unescaped one but a calendar name readily can.
+- `src/feedfetch.ts` does the network. A feed is one file with every event the
+  calendar has ever held and no way to ask for less, which is exactly the cost
+  the 0.54–0.64 work removed — so it is bought back with a **conditional GET**
+  (stored `ETag` / `Last-Modified` → `If-None-Match` / `If-Modified-Since`, and
+  a `304` means no download *and no re-parse*), a body kept on disk so a cold
+  or offline open still draws, and a turn of the event loop between feeds.
+- Feed events carry `readOnly: true` — stated, not inferred from the empty
+  `href`, because the UI has to honour it everywhere an event can be tapped.
+  `openEventEditor` refuses one with a notice naming the calendar.
+- **Meeting notes still work on them**, and this is worth knowing: that link is
+  `meetingLinks[uid] → path` in the device's own settings and touches the server
+  at no point, so it is the one "attach something to an event" feature that
+  never needed write access.
+- `hasCalendars` counts feeds. Without that, somebody whose only calendar is a
+  Google feed was told their calendar was unconfigured while their events sat
+  on screen.
+- A feed's announced `X-WR-CALNAME` is held in **component state, never written
+  back to settings**. The fetcher already labels the events with it, so the
+  stored name is cosmetic — and writing it through `changeConfig` would mark the
+  settings form edited behind the user's back on a refresh they did not ask for.
+
+### In Settings
+
+A **sibling** fold to the server one, not an alternative. Tasks (VTODO) only
+ever come from CalDAV, so somebody running Radicale for tasks may still want
+their work Outlook calendar beside it; making it a choice between the two would
+have forbidden that combination for no reason.
+
+Addresses can be pasted, but the intended route is a plain text file:
+`Document/TaskHub/calendars.txt`, one address per line, optionally
+`Name|https://…`. A private feed address is around a hundred characters of
+random and typing one on this keyboard is miserable enough that people give up.
+A fixed path rather than a file browser, because browsing for the file would put
+back the fiddling the file was meant to remove. The fold tells the user to
+delete it afterwards, since those addresses are as good as passwords.
+
+### Still open
+
+Nothing here is device-verified. The things most likely to need attention:
+whether Android's `fetch` surfaces `etag` through `response.headers.get`, and
+how long a first fetch of a large Google calendar actually takes on the panel.
 
 ## What changed in 0.68.0
 
@@ -866,7 +941,8 @@ Borders are deliberately not scaled, and positive spacing never rounds to zero.
    this; not implemented here. Now more attractive than it was: `PluginFileAPI.insertKeyWord`
    is the write side of what the Find tab reads, so a keyword written at creation would show
    up in Find as well as in the device's own search.
-10. **Feeds: read-only iCal subscription**, which is the only way to reach Google Calendar
+10. ~~**Feeds: read-only iCal subscription**~~ — shipped in 0.69.0, see above. The original note,
+   kept for the reasoning: read-only iCal subscription is the only way to reach Google Calendar
    and Outlook. Neither offers usable CalDAV — Google needs an OAuth application flow and
    Microsoft retired its CalDAV endpoint — so both publish a secret `.ics` URL instead, and
    that is exactly what taoist22's SNFolio does rather than integrating either service

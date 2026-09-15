@@ -13,6 +13,7 @@ import {
 } from './periodnote';
 import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from './meetingnote';
 import type {NoteFile} from './notesearch';
+import type {CalendarFeed} from './feeds';
 
 /**
  * Durable settings, stored as JSON in Document/TaskHub/settings.json.
@@ -89,6 +90,20 @@ export function sanitise(raw: unknown): Partial<ServerConfig> {
     owner: typeof value.owner === 'string' ? value.owner : undefined,
     collectionUrls: asStrings(value.collectionUrls),
     calendarUrls: asStrings(value.calendarUrls),
+    // Validated entry by entry rather than trusted: a hand-edited or truncated
+    // settings.json must not be able to put a feed with no URL into the fetch
+    // loop, and a name is what the calendar views label it with.
+    feeds: Array.isArray(value.feeds)
+      ? (value.feeds as unknown[])
+          .filter(
+            (f): f is CalendarFeed =>
+              typeof f === 'object' &&
+              f !== null &&
+              typeof (f as CalendarFeed).url === 'string' &&
+              (f as CalendarFeed).url.trim() !== '',
+          )
+          .map(f => ({url: f.url.trim(), name: String(f.name ?? '').trim() || f.url.trim()}))
+      : undefined,
     defaultCollectionUrl:
       typeof value.defaultCollectionUrl === 'string' ? value.defaultCollectionUrl : undefined,
     dateFormat:

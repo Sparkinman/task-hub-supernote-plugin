@@ -13,6 +13,7 @@ import type {DateFormat, TimeFormat} from './format';
 /** The hub's two tabs, named here because the stored settings carry the choice. */
 export type StartTab = 'tasks' | 'calendar';
 import type {MarkStyle} from './markstyle';
+import type {CalendarFeed} from './feeds';
 
 export interface ServerConfig {
   /** Server origin, e.g. https://host:5232 — not a collection URL. */
@@ -33,6 +34,14 @@ export interface ServerConfig {
   defaultCollectionUrl: string;
   /** VEVENT collections shown on the Calendar tab. */
   calendarUrls: string[];
+  /**
+   * Read-only `.ics` subscriptions shown alongside them.
+   *
+   * The route to Google and Outlook, neither of which a CalDAV client can reach
+   * any more — see `feeds.ts`. Needs no server of the user's own, which is the
+   * point: somebody running Task Hub's own server does not need these.
+   */
+  feeds: CalendarFeed[];
   dateFormat: DateFormat;
   timeFormat: TimeFormat;
   /**
@@ -103,6 +112,7 @@ export const EMPTY_CONFIG: ServerConfig = {
   collectionUrls: [],
   defaultCollectionUrl: '',
   calendarUrls: [],
+  feeds: [],
   dateFormat: 'iso',
   startTab: 'tasks',
   timeFormat: '24',
@@ -122,8 +132,15 @@ export const EMPTY_CONFIG: ServerConfig = {
   lastDay: '',
 };
 
+/**
+ * Anything at all to draw on the Calendar tab.
+ *
+ * Subscriptions count. Somebody whose only calendar is a Google `.ics` feed has
+ * no CalDAV collection ticked, and counting only those told them their calendar
+ * was unconfigured while their events were sitting right there.
+ */
 export function hasCalendars(config: ServerConfig): boolean {
-  return config.calendarUrls.length > 0;
+  return config.calendarUrls.length > 0 || (config.feeds?.length ?? 0) > 0;
 }
 
 /** Toggle a VEVENT collection in the watched calendar set. */
@@ -271,6 +288,7 @@ export function getConfig(): ServerConfig {
     ...current,
     collectionUrls: [...current.collectionUrls],
     calendarUrls: [...current.calendarUrls],
+    feeds: current.feeds.map(f => ({...f})),
     dailyNote: {...current.dailyNote},
     weekNote: {...current.weekNote},
     monthNote: {...current.monthNote},
@@ -286,6 +304,7 @@ export function setConfig(next: ServerConfig): void {
     ...next,
     collectionUrls: [...next.collectionUrls],
     calendarUrls: [...next.calendarUrls],
+    feeds: next.feeds.map(f => ({...f})),
     dailyNote: {...next.dailyNote},
     weekNote: {...next.weekNote},
     monthNote: {...next.monthNote},

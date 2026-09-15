@@ -182,6 +182,16 @@ import {
   type NoteTemplate,
 } from './src/notes';
 import {eventsWithNotes} from './src/meetingnote';
+import {
+  FEED_URL_MESSAGES,
+  addFeed,
+  defaultFeedName,
+  mergeFeeds,
+  normaliseFeedUrl,
+  parseFeedList,
+  removeFeed,
+} from './src/feeds';
+import {forgetFeed} from './src/feedfetch';
 import {buildIndex, clearIndex, ensurePreview} from './src/noteindex';
 import {
   countStarredPages,
@@ -196,6 +206,9 @@ import {TemplatePicker, TemplateSheet} from './src/components/TemplatePicker';
 import {FolderPicker} from './src/components/FolderPicker';
 import {MiniCalendar} from './src/components/MiniCalendar';
 import {weekOf} from './src/components/WeekView';
+
+/** Where a list of calendar subscriptions is read from, inside Document/TaskHub. */
+const FEED_LIST_FILE = 'calendars.txt';
 
 const LASSO_BUTTON_ID = 200;
 const TOOLBAR_BUTTON_ID = 100;
@@ -633,6 +646,24 @@ export default function App(): React.JSX.Element {
       if (e) {
         eventsRef.current = e.items;
         setEvents(e.items);
+        // A feed announces its own name in X-WR-CALNAME, the only place a
+        // calendar's real name appears in an .ics file. Held in state and never
+        // written back to settings: the events are already labelled with it by
+        // the fetcher, so this is purely what the Settings list shows — and
+        // writing it through `changeConfig` would mark the settings form edited
+        // behind the user's back, on a refresh they did not ask for.
+        if (e.feedNames && Object.keys(e.feedNames).length > 0) {
+          setFeedNames(prev => ({...prev, ...e.feedNames}));
+        }
+        // Said out loud. A subscription that cannot be reached shows whatever it
+        // last said, which is right — but silently serving stale events as if
+        // they were current is how somebody misses a meeting that moved.
+        if (e.feedsFailed && e.feedsFailed.length > 0) {
+          setStatus({
+            kind: 'error',
+            message: `Could not reach ${e.feedsFailed.join(', ')}. Showing what was last fetched.`,
+          });
+        }
       }
       // Persisted so the next opening has something to draw before the server
       // answers. Deliberately not awaited and deliberately not on the closing
@@ -793,6 +824,18 @@ export default function App(): React.JSX.Element {
   const [previewMode, setPreviewMode] = useState(false);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [previewsPending, setPreviewsPending] = useState(0);
+  /**
+   * A one-off message with nothing to confirm.
+   *
+   * Separate from `ask`, which is a question, and from `status`, which is a line
+   * about the last thing that happened. This is for telling somebody why the
+   * thing they just tapped did not open.
+   */
+  const [notice, setNotice] = useState<{title: string; body: string} | null>(null);
+  const [feedDraft, setFeedDraft] = useState('');
+  /** Names the feeds announced for themselves, for the Settings list only. */
+  const [feedNames, setFeedNames] = useState<Record<string, string>>({});
+
   /**
    * Keyword pages the reader has expanded, reported up from the Find view.
    *
@@ -1679,6 +1722,7 @@ export default function App(): React.JSX.Element {
     runNow,
   ]);
 
+
   const askSaveTaskForm = useCallback(() => {
     if (!taskForm) {
       return;
@@ -2088,6 +2132,79 @@ export default function App(): React.JSX.Element {
     [],
   );
 
+  /**
+   * Subscribe to the address in the box.
+   *
+   * The name is the host until the first fetch reads the calendar's own
+   * `X-WR-CALNAME`, at which point `refresh` renames it — so nobody has to type
+   * a name, and the list still ends up saying "Work" rather than
+   * "calendar.google.com".
+   */
+  const addFeedFromDraft = useCallback(() => {
+    const {url, error} = normaliseFeedUrl(feedDraft);
+    if (!url) {
+      setStatus({kind: 'error', message: FEED_URL_MESSAGES[error ?? 'malformed']});
+      return;
+    }
+    changeConfig(c => ({...c, feeds: addFeed(c.feeds, {url, name: defaultFeedName(url)})}));
+    setFeedDraft('');
+    setStatus({
+      kind: 'done',
+      message: 'Calendar added. Press Save settings, then Refresh on the Calendar tab.',
+    });
+  }, [feedDraft, changeConfig]);
+
+  /**
+   * Subscribe to every address in `Document/TaskHub/calendars.txt`.
+   *
+   * A fixed path rather than a file browser, deliberately. The file exists at
+   * all because a private calendar address is about a hundred characters of
+   * random and typing one here is miserable — so the flow is "drop a file on
+   * the device over USB, press one button", and a browser to find it again
+   * would put back some of the fiddling the file was meant to remove.
+   */
+  const importFeedFile = useCallback(() => {
+    void (async () => {
+      const text = await readNamed(FEED_LIST_FILE);
+      if (text === null || text.trim() === '') {
+        setStatus({
+          kind: 'error',
+          message: `No ${FEED_LIST_FILE} in the Task Hub folder, or it is empty.`,
+        });
+        return;
+      }
+      const {feeds: found, skipped} = parseFeedList(text);
+      if (found.length === 0) {
+        setStatus({
+          kind: 'error',
+          message: `Nothing usable in ${FEED_LIST_FILE}. Each line needs an https:// address.`,
+        });
+        return;
+      }
+      let added = 0;
+      changeConfig(c => {
+        const merged = mergeFeeds(c.feeds, found);
+        added = merged.added;
+        return {...c, feeds: merged.feeds};
+      });
+      const ignored = skipped > 0 ? ` ${skipped} line(s) were not addresses and were ignored.` : '';
+      setStatus({
+        kind: 'done',
+        message:
+          `Added ${added} calendar(s).${ignored} Press Save settings, then delete ${FEED_LIST_FILE} — those addresses are as good as passwords.`,
+      });
+    })();
+  }, [changeConfig]);
+
+  /** Unsubscribe, and throw away the copy of the feed kept on disk. */
+  const removeFeedByUrl = useCallback(
+    (url: string) => {
+      changeConfig(c => ({...c, feeds: removeFeed(c.feeds, url)}));
+      void forgetFeed(url).catch(() => undefined);
+    },
+    [changeConfig],
+  );
+
   // ---- settings ----
 
   const discover = useCallback(async () => {
@@ -2432,6 +2549,17 @@ export default function App(): React.JSX.Element {
   const calendars = collections.filter(acceptsEvents);
 
   const openEventEditor = (event: RemoteEvent) => {
+    // A subscribed calendar is one file fetched over HTTPS; there is no address
+    // to write an edit back to. Said here, where the user tapped, rather than
+    // discovered by a save that fails — and said in terms of the calendar
+    // rather than of the plugin, because the limit is the subscription's.
+    if (event.readOnly) {
+      setNotice({
+        title: 'Subscribed calendar',
+        body: `"${event.summary}" comes from ${event.calendarLabel}, which Task Hub subscribes to and can only read. Change it in the calendar it belongs to. You can still attach a note to it.`,
+      });
+      return;
+    }
     setEditingEvent(event);
     setEventTarget(event.calendarUrl);
     setEventMore(false);
@@ -3548,6 +3676,12 @@ will not duplicate them.`}
 
       {screen === 'settings' && (
         <SettingsScreen
+          feedDraft={feedDraft}
+          setFeedDraft={setFeedDraft}
+          onAddFeed={addFeedFromDraft}
+          onRemoveFeed={removeFeedByUrl}
+          onImportFeeds={importFeedFile}
+          feedNames={feedNames}
           config={config}
           collections={collections}
           status={status}
@@ -3733,6 +3867,14 @@ will not duplicate them.`}
     />
 
     <Notice
+      visible={notice !== null && ask === null}
+      title={notice?.title ?? ''}
+      body={notice?.body}
+      label="OK"
+      onDismiss={() => setNotice(null)}
+    />
+
+    <Notice
       // Held back while a confirm is up: two stacked sheets on this panel leave
       // the user unsure which one the buttons belong to. It cannot appear on the
       // idle screen — this whole tree only renders once a screen is chosen — so
@@ -3885,6 +4027,13 @@ function PeriodNoteSettings(props: {
 }
 
 function SettingsScreen(props: {
+  /** The address being typed into the subscription box, before it is added. */
+  feedDraft: string;
+  setFeedDraft: (value: string) => void;
+  onAddFeed: () => void;
+  onRemoveFeed: (url: string) => void;
+  onImportFeeds: () => void;
+  feedNames: Record<string, string>;
   config: ServerConfig;
   collections: TaskCollection[];
   status: Status;
@@ -3914,6 +4063,7 @@ function SettingsScreen(props: {
   onWipe: () => void;
   onClose: () => void;
 }): React.JSX.Element {
+  const {feedDraft, setFeedDraft, onAddFeed, onRemoveFeed, onImportFeeds, feedNames} = props;
   /**
    * Which settings groups are open.
    *
@@ -4196,6 +4346,90 @@ What needs a server: tasks, calendar events, and capturing handwriting as a task
         }
       />
 
+      </Fold>
+
+      {/*
+        A sibling of the server fold, deliberately not an alternative to it.
+
+        Both can be in use at once and often should be: tasks (VTODO) only ever
+        come from CalDAV, so somebody running Radicale for their tasks may still
+        want their work Outlook calendar beside it. Making this a choice between
+        the two would have forbidden that combination for no reason.
+      */}
+      <Fold
+        title="Subscribed calendars (.ics)"
+        hint={
+          'Read-only. The way to see a Google or Outlook calendar, neither of which any CalDAV client can reach any more. Needs no server and no account — just the address the calendar publishes.'
+        }
+        open={openFolds.has('feeds')}
+        onToggle={() => toggleFold('feeds')}>
+        <Text style={styles.noteCompact}>
+          {`Google withdrew password access to its CalDAV service in March 2025 and Microsoft retired CalDAV for Outlook altogether, so neither can be connected the way a CalDAV server is. Both still publish a private web address for each calendar, and so do Apple, Fastmail and Proton. Subscribing to one shows its events here.
+
+Events from a subscription can be read and can have a note attached, but cannot be edited or deleted — change them in the calendar they belong to. For two-way sync with Google or Outlook, run the Task Hub server and let it do the syncing.`}
+        </Text>
+
+        <Text style={styles.subheadingCompact}>Where to find the address</Text>
+        <Text style={styles.helpStepCompact}>
+          <Text style={styles.helpNum}>Google: </Text>
+          Calendar → Settings → pick the calendar → Integrate calendar → "Secret address in iCal
+          format". Not the public page and not the browser address.
+        </Text>
+        <Text style={styles.helpStepCompact}>
+          <Text style={styles.helpNum}>Outlook: </Text>
+          Calendar → Settings → Shared calendars → Publish a calendar → pick "Can view all
+          details" → copy the ICS link.
+        </Text>
+        <Text style={styles.helpStepCompact}>
+          <Text style={styles.helpNum}>Apple: </Text>
+          iCloud Calendar → the share icon beside a calendar → Public Calendar → copy the link.
+        </Text>
+        <Text style={styles.noteCompact}>
+          Treat these addresses like passwords: anyone who has one can read that calendar. Task
+          Hub only accepts https:// ones, so they are never sent in the clear.
+        </Text>
+
+        <Text style={styles.subheadingCompact}>Add one</Text>
+        <Text style={styles.noteCompact}>
+          {`A private calendar address is around a hundred characters of random, which is miserable to type here. Put them in a plain text file instead: create ${FEED_LIST_FILE} in the Task Hub folder (the same place settings.json lives), one address per line, optionally "Name|https://...". Then press the button below and delete the file afterwards.`}
+        </Text>
+        <View style={styles.actions}>
+          <Button label={`Import ${FEED_LIST_FILE}`} onPress={onImportFeeds} />
+        </View>
+        <Field
+          scrollHandle={scrollHandle}
+          onScrollTo={onScrollTo}
+          compact
+          label="…or paste one address"
+          value={feedDraft}
+          placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"
+          onChange={setFeedDraft}
+        />
+        <View style={styles.actions}>
+          <Button label="Add calendar" onPress={onAddFeed} />
+        </View>
+
+        <Text style={styles.subheadingCompact}>Subscribed</Text>
+        {config.feeds.length === 0 ? (
+          <Text style={styles.noteCompact}>None yet.</Text>
+        ) : (
+          config.feeds.map(feed => (
+            <View key={feed.url} style={styles.feedRow}>
+              <View style={styles.grow}>
+                <Text style={styles.feedName}>{feedNames[feed.url] || feed.name}</Text>
+                {/*
+                  Shown, because a list of calendars all called "calendar.google.com"
+                  is no list at all — and because seeing the address is how somebody
+                  checks they pasted the right one.
+                */}
+                <Text style={styles.feedUrl} numberOfLines={1}>
+                  {feed.url}
+                </Text>
+              </View>
+              <Button label="Remove" onPress={() => onRemoveFeed(feed.url)} />
+            </View>
+          ))
+        )}
       </Fold>
 
       <Fold

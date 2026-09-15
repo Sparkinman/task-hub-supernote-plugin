@@ -1625,6 +1625,19 @@ export const styles = StyleSheet.create({
   previewWaiting: {fontSize: fs(26), color: '#999'},
   previewCaption: {fontSize: fs(19), color: '#000', marginTop: sp(4)},
   previewMeta: {fontSize: fs(16), color: '#555'},
+  feedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: sp(10),
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
+    paddingVertical: sp(10),
+  },
+  feedName: {fontSize: fs(21), color: '#000'},
+  // Small and clipped to one line: the address is here to be recognised, not
+  // read. A hundred characters of random wrapped over four lines would make a
+  // list of three calendars taller than the panel.
+  feedUrl: {fontSize: fs(15), color: '#666'},
   statusRow: {flexDirection: 'row', alignItems: 'center', gap: sp(8), marginVertical: sp(8)},
   busyMark: {fontSize: fs(24), color: '#000'},
   loadingPanel: {borderRadius: R.lg,

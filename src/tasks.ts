@@ -17,6 +17,7 @@ import {resolveHref} from './discovery';
 import {ensureInternet} from './permissions';
 import {caldavStamp, type DateRange} from './eventwindow';
 import {collectionName, type ServerConfig} from './settings';
+import {listFeedEvents} from './feedfetch';
 
 /**
  * Reading and writing tasks across the watched collections.
@@ -88,6 +89,10 @@ function collectionIsGone(status: number): boolean {
 export interface ListResult<T> {
   items: T[];
   missing: MissingCollection[];
+  /** Names of `.ics` subscriptions that answered with nothing usable. */
+  feedsFailed?: string[];
+  /** The name each feed announced for itself, by URL. See `X-WR-CALNAME`. */
+  feedNames?: Record<string, string>;
 }
 
 /**
@@ -375,10 +380,19 @@ export async function listTasks(config: ServerConfig): Promise<ListResult<Remote
 export interface RemoteEvent extends VEvent {
   calendarLabel: string;
   calendarUrl: string;
-  /** Absolute URL of this event's calendar object. */
+  /** Absolute URL of this event's calendar object. Empty for a feed event. */
   href: string;
   etag?: string;
   raw: string;
+  /**
+   * Came from an `.ics` subscription and cannot be written back.
+   *
+   * Stated rather than inferred from an empty href: the UI has to disable
+   * editing everywhere an event can be tapped, and a rule that reads
+   * `readOnly` is one somebody can follow. Meeting notes are still offered —
+   * that link lives in the device's own settings and never touches the server.
+   */
+  readOnly?: boolean;
 }
 
 async function listEventsOne(
@@ -460,7 +474,19 @@ export async function listEvents(
     config.calendarUrls.map(url => listEventsOne(config, url, range)),
   );
   const {items, missing} = collect(settled);
-  return {items: items.sort((a, b) => a.startAt - b.startAt), missing};
+
+  // Subscriptions are fetched after the collections, not alongside them. A feed
+  // is a whole file rather than a windowed query, so it is the slow half; doing
+  // it second means a device with both draws its real calendars first.
+  const feeds = await listFeedEvents(config.feeds ?? []);
+  const all = [...items, ...feeds.events];
+
+  return {
+    items: all.sort((a, b) => a.startAt - b.startAt),
+    missing,
+    feedsFailed: feeds.failed,
+    feedNames: feeds.names,
+  };
 }
 
 async function putCalendarObject(
