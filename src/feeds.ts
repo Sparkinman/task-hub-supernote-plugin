@@ -65,24 +65,31 @@ export function normaliseFeedUrl(raw: string): FeedUrlResult {
   if (!trimmed) {
     return {error: 'empty'};
   }
-  const upgraded = trimmed.replace(/^webcal:\/\//i, 'https://');
+  let upgraded = trimmed.replace(/^webcal:\/\//i, 'https://');
+  // Protocol-relative, e.g. "//calendar.google.com/…". Some places that offer a
+  // calendar link hand one out this way, and a person copying it has no reason
+  // to know it is missing a scheme. It can only mean https here.
+  if (/^\/\/[^/]/.test(upgraded)) {
+    upgraded = `https:${upgraded}`;
+  }
   if (/^http:\/\//i.test(upgraded)) {
     return {error: 'insecure'};
   }
-  if (!/^https:\/\//i.test(upgraded)) {
+  // Matched rather than parsed with `new URL`.
+  //
+  // React Native ships an incomplete URL polyfill: `new URL(...)` does not
+  // throw on rubbish and `hostname` comes back empty, so a check written
+  // against it passes every unit test under Node and rejects every real
+  // address on the device. This cost a build cycle — the whole feature looked
+  // broken because no address could be added. Anything here that needs a piece
+  // of a URL takes it with a regex.
+  //
+  // scheme, a host with at least one dot and no whitespace, then anything.
+  const match = /^https:\/\/([^/\s?#]+)(?:[/?#]\S*)?$/i.exec(upgraded);
+  if (!match || !match[1].includes('.') || match[1].startsWith('.')) {
     return {error: 'malformed'};
   }
-  try {
-    // Constructing it is the check: a bare "https://" or a space in the host
-    // throws here rather than failing later inside fetch.
-    const parsed = new URL(upgraded);
-    if (!parsed.hostname.includes('.')) {
-      return {error: 'malformed'};
-    }
-    return {url: parsed.toString()};
-  } catch {
-    return {error: 'malformed'};
-  }
+  return {url: upgraded};
 }
 
 /**
@@ -95,12 +102,10 @@ export function normaliseFeedUrl(raw: string): FeedUrlResult {
  * once the first fetch has happened.
  */
 export function defaultFeedName(url: string): string {
-  try {
-    const host = new URL(url).hostname.replace(/^www\./i, '');
-    return host || 'Subscribed calendar';
-  } catch {
-    return 'Subscribed calendar';
-  }
+  // Regex, not `new URL` — see the note in `normaliseFeedUrl`.
+  const match = /^https?:\/\/([^/\s?#:]+)/i.exec((url ?? '').trim());
+  const host = match ? match[1].replace(/^www\./i, '') : '';
+  return host || 'Subscribed calendar';
 }
 
 /**
@@ -147,22 +152,15 @@ export function parseFeedList(text: string): {
     if (!trimmed || trimmed.startsWith('#')) {
       continue;
     }
-    // Split on the LAST bar. A URL cannot contain an unescaped one — it has to
-    // be percent-encoded — but a calendar name readily can ("Work | Home"), so
-    // splitting on the first would cut such a name in half and leave the
-    // remainder of it glued to the front of the address.
-    const bar = trimmed.lastIndexOf('|');
-    const rawName = bar >= 0 ? trimmed.slice(0, bar).trim() : '';
-    const rawUrl = bar >= 0 ? trimmed.slice(bar + 1).trim() : trimmed;
-    const {url} = normaliseFeedUrl(rawUrl);
-    if (!url) {
+    const split = splitFeedLine(trimmed);
+    if (!split) {
       skipped += 1;
       if (firstBad === undefined) {
         firstBad = trimmed;
       }
       continue;
     }
-    feeds.push({url, name: rawName || defaultFeedName(url)});
+    feeds.push(split);
   }
   return {feeds, skipped, firstBad};
 }
@@ -186,6 +184,45 @@ export function pickFeedListFile(names: string[], wanted: string): string {
     return exact;
   }
   return texts.length === 1 ? texts[0] : '';
+}
+
+/**
+ * One line of a setup file, split into a name and an address.
+ *
+ * Three attempts, most specific first, because people write this file by hand
+ * and every reasonable reading should work:
+ *
+ * 1. **After the last bar.** A URL cannot hold an unescaped `|` — it has to be
+ *    percent-encoded — but a calendar name readily can ("Work | Home").
+ * 2. **After the first bar.** Covers a name that itself contains a bar in a
+ *    line whose address somehow does too.
+ * 3. **The whole line.** Covers an address that merely happens to contain one,
+ *    and a line with no name at all.
+ *
+ * Returns null when none of the three yields a usable address, which is what
+ * makes the line worth reporting back to the user rather than silently dropping.
+ */
+export function splitFeedLine(line: string): CalendarFeed | null {
+  const trimmed = line.trim();
+  const attempts: {name: string; raw: string}[] = [];
+
+  const last = trimmed.lastIndexOf('|');
+  if (last >= 0) {
+    attempts.push({name: trimmed.slice(0, last).trim(), raw: trimmed.slice(last + 1).trim()});
+  }
+  const first = trimmed.indexOf('|');
+  if (first >= 0 && first !== last) {
+    attempts.push({name: trimmed.slice(0, first).trim(), raw: trimmed.slice(first + 1).trim()});
+  }
+  attempts.push({name: '', raw: trimmed});
+
+  for (const attempt of attempts) {
+    const {url} = normaliseFeedUrl(attempt.raw);
+    if (url) {
+      return {url, name: attempt.name || defaultFeedName(url)};
+    }
+  }
+  return null;
 }
 
 /** Feeds compare by URL, ignoring a trailing slash, as collections do. */

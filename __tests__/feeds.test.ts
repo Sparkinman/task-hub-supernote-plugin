@@ -8,6 +8,7 @@ import {
   pickFeedListFile,
   removeFeed,
   sameFeed,
+  splitFeedLine,
   type CalendarFeed,
 } from '../src/feeds';
 
@@ -169,5 +170,61 @@ describe('pickFeedListFile', () => {
 
   it('ignores files that are not text', () => {
     expect(pickFeedListFile(['settings.json', 'cache.json'], 'calendars.txt')).toBe('');
+  });
+});
+
+describe('URL handling without the URL constructor', () => {
+  // React Native's URL polyfill returns empty parts instead of throwing, so
+  // every check here is written against a regex. These pin the behaviour that
+  // `new URL` used to provide, so it cannot quietly come back.
+  it('accepts the addresses providers actually hand out', () => {
+    for (const url of [
+      'https://calendar.google.com/calendar/ical/abc/private-xyz/basic.ics',
+      'https://outlook.office365.com/owa/calendar/abc123/xyz/calendar.ics',
+      'https://p61-caldav.icloud.com/published/2/MTIzNDU2',
+      'https://example.com',
+      'https://example.com/',
+      'https://sub.domain.example.co.uk/path?query=1#frag',
+    ]) {
+      expect(normaliseFeedUrl(url)).toEqual({url});
+    }
+  });
+
+  it('upgrades a protocol-relative address', () => {
+    // Some places hand the link out this way, and whoever copied it has no
+    // reason to know a scheme is missing.
+    expect(normaliseFeedUrl('//calendar.google.com/x.ics').url).toBe(
+      'https://calendar.google.com/x.ics',
+    );
+  });
+
+  it('still refuses what is genuinely not an address', () => {
+    expect(normaliseFeedUrl('https://nodots/x.ics').error).toBe('malformed');
+    expect(normaliseFeedUrl('https://.com/x.ics').error).toBe('malformed');
+    expect(normaliseFeedUrl('https://has space.com/x.ics').error).toBe('malformed');
+    expect(normaliseFeedUrl('https://').error).toBe('malformed');
+  });
+
+  it('takes a host for the default name without parsing the URL', () => {
+    expect(defaultFeedName('https://p61-caldav.icloud.com/published/2/abc')).toBe(
+      'p61-caldav.icloud.com',
+    );
+  });
+});
+
+describe('splitFeedLine', () => {
+  it('takes the name before the bar and the address after it', () => {
+    expect(splitFeedLine(`PC Shared | ${GOOGLE}`)).toEqual({url: GOOGLE, name: 'PC Shared'});
+  });
+
+  it('falls back through the readings of a line rather than giving up', () => {
+    // Trailing text after the address: the last bar is the wrong split, and the
+    // whole-line reading is what rescues it.
+    expect(splitFeedLine(GOOGLE)).toEqual({url: GOOGLE, name: 'calendar.google.com'});
+    expect(splitFeedLine(`A|B|${GOOGLE}`)).toEqual({url: GOOGLE, name: 'A|B'});
+  });
+
+  it('is null when no reading of the line yields an address', () => {
+    expect(splitFeedLine('PC Shared | not a url')).toBeNull();
   });
 });

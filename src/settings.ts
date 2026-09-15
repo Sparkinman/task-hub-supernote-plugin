@@ -363,9 +363,16 @@ export function collectionHint(url: string, among: string[]): string {
   if (named && !duplicated) {
     return '';
   }
-  try {
-    return decodeURIComponent(new URL(url).pathname);
-  } catch {
+  // Regex rather than `new URL`: React Native's polyfill is incomplete and
+  // returns empty parts instead of throwing, which would show every collection
+  // a blank hint on device while passing every test under Node.
+  const match = /^https?:\/\/[^/\s]+(\/\S*)?$/i.exec(url.trim());
+  if (!match) {
     return url;
+  }
+  try {
+    return decodeURIComponent(match[1] ?? '/');
+  } catch {
+    return match[1] ?? url;
   }
 }

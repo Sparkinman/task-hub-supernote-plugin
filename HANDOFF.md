@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.70.2** (versionCode 88). **520 tests across 32 suites.** 0.66.0 was the first of these actually
+Current build **0.70.3** (versionCode 89). **527 tests across 32 suites.** 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,40 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.70.3 — `new URL()` is a trap in React Native
+
+The actual reason no calendar could ever be added. **React Native ships an
+incomplete `URL` polyfill**: `new URL(...)` does not throw on rubbish and
+`hostname` comes back empty. `normaliseFeedUrl` validated with
+
+```ts
+const parsed = new URL(upgraded);
+if (!parsed.hostname.includes('.')) return {error: 'malformed'};
+```
+
+Under Node — which is to say under jest — that is correct and all 24 feed tests
+passed. On the device `hostname` is empty, so **every address was rejected as
+malformed**, including a perfectly good `https://…` one. The feature looked
+completely broken while the test suite was green.
+
+Every `new URL()` in the project is gone, replaced by a regex: the two in
+`feeds.ts` and one in `collectionHint`, which would have shown a blank hint
+beside every collection for the same reason. **Do not reintroduce `new URL`,
+`URLSearchParams` or anything else that leans on the polyfill — take the piece
+of a URL you need with a regex.** `__tests__/feeds.test.ts` pins the real
+addresses Google, Outlook and iCloud hand out so this cannot come back quietly.
+
+This is the third distinct bug between the Import button and a working
+subscription, and each hid the next: the message was unhelpful (0.70.1), then
+the message was off-screen (0.70.2), and only then was the real fault visible.
+Worth remembering that **a diagnostic is not a fix, but you cannot find the
+fault without one** — the line quoted back by 0.70.2 is what produced this.
+
+Two other things landed with it, both from the same report: a
+protocol-relative `//host/path` address is upgraded to https rather than
+refused, and `splitFeedLine` now tries the last bar, then the first, then the
+whole line, so a hand-written setup file is read the way its author meant.
 
 ## What changed in 0.70.2 — the message was there; nobody could see it
 
@@ -827,6 +861,12 @@ exist. Fixed locally with a full path plus `-WorkingDirectory`; original kept as
   runs the standalone app, so `MainActivity` is effectively untested.
 
 ## SDK lessons that cost a build cycle each
+
+- **`new URL()` is not usable on device.** React Native's polyfill returns empty
+  parts rather than throwing, so anything validating a URL through it passes
+  every test under Node and fails against every real address on the panel. Use a
+  regex. This cost a build cycle in 0.70.3 and made a whole feature look broken.
+
 
 The vendor SDK reference is authoritative and answers most of these directly — read it before
 guessing at an API. Three findings that were not obvious:
