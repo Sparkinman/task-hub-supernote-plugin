@@ -17,6 +17,16 @@
 
 ---
 
+<p align="center">
+  <a href="docs/README.md"><strong>📖 Full documentation</strong></a> &nbsp;·&nbsp;
+  <a href="docs/getting-started.md">Getting started</a> &nbsp;·&nbsp;
+  <a href="docs/settings.md">Every setting</a> &nbsp;·&nbsp;
+  <a href="docs/connections.md">Connecting tasks &amp; calendars</a> &nbsp;·&nbsp;
+  <a href="docs/troubleshooting.md">Troubleshooting</a>
+</p>
+
+---
+
 ## Why
 
 Ratta's own calendar subscribes to **exactly one** calendar. A work calendar, a family one
