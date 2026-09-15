@@ -1,9 +1,9 @@
 # Task Hub — state as of 2026-09-15
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-**483 tests across 29 suites**; `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.66.0** (versionCode 82), built but **not yet tested on device**.
-0.65.0 was superseded before it was installed; nothing in either is device-verified.
+**489 tests across 30 suites**; `tsc` and eslint clean, all verified 2026-09-15.
+Current build **0.67.0** (versionCode 83). 0.66.0 was the first of these actually
+installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
 **licensed GPLv3**, with v0.64.1 released and `TaskHub.snplg` attached to it.
@@ -17,6 +17,69 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.67.0 — all four from screenshots of 0.66.0
+
+### The phantom `paul`, third and final attempt
+
+Two previous fixes both missed, and the reason is worth keeping. The row is not
+produced by discovery at all — it is a **tick saved in `settings.json`** by a
+build that used to offer it. Settings are durable and independent of what
+discovery finds; that is the entire point of them. So excluding the home from
+discovery (0.65.0) changed nothing visible, and pruning on **Discover** (0.66.0)
+only helped somebody who happened to press Discover.
+
+`pruneContainers` now runs as settings come off disk. A saved collection whose
+URL is a strict ancestor of another saved one is a container, not a calendar —
+CalDAV servers put calendars beside each other under the home, never nested — so
+it goes without a round trip or a prompt. Deliberately conservative: it fires
+only when a saved descendant proves the relationship, so a lone collection is
+never deleted on a guess.
+
+**The general lesson: a fix to what the server offers does nothing about what is
+already saved.** Any change to discovery needs a matching migration of stored
+settings.
+
+### "Saving a task needs a task list" on a configured device
+
+`capture()` read `getConfig()` when the lasso was pressed and set a one-shot
+error status if `isConfigured` was false. On a cold start that runs **before
+settings have come off disk**, so it fired for people who were perfectly well
+configured — and a one-shot status is never re-evaluated, so it then sat there.
+
+It had presumably always done this and simply been below the fold; fitting the
+capture screen to one panel is what made it visible. It is now rendered
+declaratively from the live config (`collectionUrls.length === 0`), so it
+appears and disappears as settings arrive.
+
+**Do not report a configuration problem from a one-shot status set at open
+time.** Render it from the live config, or it will be wrong on every cold start.
+
+### The time picker had two ways to set one value
+
+The typed field survived the rewrite alongside the new grids, which just looked
+like a bug. Removed, along with `forDisplay`, `fromDisplay`, the input ref and
+the `scrollHandle` / `onScrollTo` props — with no text input left there is
+nothing to lift clear of the keyboard, so those came off `Props` and off all
+nine call sites.
+
+The cost is that minutes are now a five-minute grid and nothing else: **3:47 is
+unreachable.** That was the deliberate trade for having one control instead of
+two. If it ever matters, widen the minute grid rather than putting the field
+back.
+
+### Previews were too tall
+
+A whole page at half the panel's width is most of a panel high, and the bottom
+two thirds of a note page is almost always blank ruled lines. The frame is now
+**square and shows the top of the page** — `position: absolute; top: 0` on the
+image rather than `resizeMode: 'cover'`, which crops from both edges and would
+throw away the first lines. Same width, so the same legibility, half the height.
+
+Previews now apply to a keyword's pages too, but only once that keyword is
+expanded: the view reports the expanded pages upward and the render loop draws
+those as well as the starred ones. Rendering a page for every keyword in the
+index would be exactly the unbounded work the index exists to avoid.
 
 ## What changed in 0.66.0
 

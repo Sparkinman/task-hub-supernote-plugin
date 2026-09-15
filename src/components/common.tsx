@@ -1570,14 +1570,20 @@ export const styles = StyleSheet.create({
   previewGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: sp(10), paddingVertical: sp(8)},
   previewCell: {width: '47%'},
   /**
-   * The frame is what holds the row's height steady.
+   * The frame is what holds the row's height steady, and what crops the page.
    *
-   * A fixed 3:4 box, drawn before its image arrives, so tiles do not jump
-   * around the grid as each page finishes rendering — on a panel that repaints
-   * in ~300ms a reflowing grid is genuinely disorienting.
+   * Square rather than the page's own 3:4, showing the **top** of it. A whole
+   * page at this width was most of a panel tall for one result, and the bottom
+   * two thirds of it were almost always blank ruled lines — a note is written
+   * from the top down, and a star sits at the top of what it marks. Cropping
+   * keeps the width, and so the legibility, while halving the height.
+   *
+   * Drawn before its image arrives, so tiles do not jump around the grid as
+   * each page finishes rendering: on a panel that repaints in ~300ms a
+   * reflowing grid is genuinely disorienting.
    */
   previewFrame: {
-    aspectRatio: 0.75,
+    aspectRatio: 1,
     borderWidth: 1,
     borderColor: '#000',
     borderRadius: R.sm,
@@ -1586,7 +1592,14 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  previewImage: {width: '100%', height: '100%'},
+  /**
+   * Full width at the page's own proportions, anchored to the top of the frame.
+   *
+   * `position: absolute` with `top: 0` rather than `resizeMode: 'cover'`:
+   * cover crops equally from both edges and would throw away the first lines,
+   * which are the ones worth seeing.
+   */
+  previewImage: {position: 'absolute', top: 0, width: '100%', aspectRatio: 0.75},
   previewWaiting: {fontSize: fs(26), color: '#999'},
   previewCaption: {fontSize: fs(19), color: '#000', marginTop: sp(4)},
   previewMeta: {fontSize: fs(16), color: '#555'},

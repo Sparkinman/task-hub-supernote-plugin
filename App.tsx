@@ -109,11 +109,11 @@ import {
   getConfig,
   hasCalendars,
   hasCollections,
-  isConfigured,
   setCollections,
   setConfig,
   toggleCalendar,
   forgetCollections,
+  pruneContainers,
   sameCollection,
   toggleCollection,
   type ServerConfig,
@@ -790,6 +790,17 @@ export default function App(): React.JSX.Element {
   const [previewMode, setPreviewMode] = useState(false);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [previewsPending, setPreviewsPending] = useState(0);
+  /**
+   * Keyword pages the reader has expanded, reported up from the Find view.
+   *
+   * Starred pages are all on screen at once, so the view can render them from
+   * the hit list alone. A keyword's pages are behind a fold, and rendering a
+   * page for every keyword in the index whether or not anybody opened it would
+   * be exactly the unbounded work the index exists to avoid.
+   */
+  const [visibleKeywordPages, setVisibleKeywordPages] = useState<
+    {path: string; page: number}[]
+  >([]);
 
   /**
    * Read the note folders and index what is in them.
@@ -873,8 +884,26 @@ export default function App(): React.JSX.Element {
     if (!previewMode || screen !== 'hub' || tab !== 'find') {
       return;
     }
-    const wanted = foundStars.flatMap(hit =>
-      hit.pages.map(page => ({key: `${hit.path}:${page}`, hit, page})),
+    const byPath = new Map(findNotes.map(note => [note.path, note.modified]));
+    const wanted = [
+      ...foundStars.flatMap(hit =>
+        hit.pages.map(page => ({
+          key: `${hit.path}:${page}`,
+          path: hit.path,
+          modified: hit.modified,
+          page,
+        })),
+      ),
+      ...visibleKeywordPages.map(item => ({
+        key: `${item.path}:${item.page}`,
+        path: item.path,
+        // A keyword hit carries the note's modification time only through the
+        // index, which is where the preview's cache name comes from too.
+        modified: byPath.get(item.path) ?? 0,
+        page: item.page,
+      })),
+    ].filter(
+      (item, i, all) => all.findIndex(other => other.key === item.key) === i,
     );
     const undrawn = wanted.filter(item => !previews[item.key]);
     if (undrawn.length === 0) {
@@ -889,7 +918,7 @@ export default function App(): React.JSX.Element {
         if (!live) {
           return;
         }
-        const uri = await ensurePreview(item.hit.path, item.page, item.hit.modified);
+        const uri = await ensurePreview(item.path, item.page, item.modified);
         if (!live) {
           return;
         }
@@ -905,7 +934,7 @@ export default function App(): React.JSX.Element {
     // `previews` is deliberately not a dependency: it is written by this effect,
     // and depending on it would restart the loop after every tile.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewMode, screen, tab, foundStars]);
+  }, [previewMode, screen, tab, foundStars, visibleKeywordPages, findNotes]);
 
 
   /**
@@ -1114,17 +1143,13 @@ export default function App(): React.JSX.Element {
       // into (from settings) and a due date — none of which come from the
       // server. Fetching both collections and scanning for notes here put
       // several seconds between the lasso and being able to press Save.
-      if (isConfigured(cfg)) {
-        setStatus(null);
-      } else {
-        // Not an error in the sense of something having gone wrong: capturing a
-        // task is the one feature that genuinely needs a server to put it on.
-        setStatus({
-          kind: 'error',
-          message:
-            'Saving a task needs a task list. Add a CalDAV server in settings, or use the note features, which work without one.',
-        });
-      }
+      // Deliberately not a status message about there being no task list.
+      // `cfg` here is whatever getConfig() held when the lasso was pressed, and
+      // on a cold start that is before settings have come off disk — so the
+      // warning fired for people who were perfectly well configured and then
+      // stuck, because a one-shot status is never re-evaluated. The capture
+      // screen renders that warning from the live config instead.
+      setStatus(null);
     } catch (err) {
       setStatus({kind: 'error', message: describe(err)});
     }
@@ -1216,7 +1241,11 @@ export default function App(): React.JSX.Element {
         }
       })();
 
-      const stored = await loadSettings();
+      const loaded = await loadSettings();
+      // A tick saved on the account folder by a build that used to offer it
+      // survives every later fix to discovery, because settings are durable and
+      // independent of what discovery finds. Dropped here, where they arrive.
+      const stored = loaded ? pruneContainers(loaded) : loaded;
       if (stored) {
         setConfig(stored);
         // The store is always updated, because getConfig() feeds capture and
@@ -2521,6 +2550,12 @@ export default function App(): React.JSX.Element {
 
               {!captureMore && (
                 <>
+                  {config.collectionUrls.length === 0 && (
+                    <Text style={styles.noteCompact}>
+                      Saving a task needs a task list. Add a CalDAV server in Settings, or
+                      use the note features, which work without one.
+                    </Text>
+                  )}
                   {config.collectionUrls.length > 0 && (
                     <>
                       <Text style={styles.label}>Save to</Text>
@@ -2545,8 +2580,6 @@ export default function App(): React.JSX.Element {
 
                   <Text style={styles.label}>Due</Text>
                   <DateTimePicker
-                    scrollHandle={scrollHandle}
-                    onScrollTo={scrollFieldIntoView}
                     date={draft.dueDate}
                     time={draft.dueTime}
                     timeFormat={timeFormat}
@@ -2623,8 +2656,6 @@ export default function App(): React.JSX.Element {
                   </View>
                   {stepsDateOpen === 'capture' && (
                     <DateTimePicker
-                      scrollHandle={scrollHandle}
-                      onScrollTo={scrollFieldIntoView}
                       date={draft.stepsDate}
                       time={draft.stepsTime}
                       timeFormat={timeFormat}
@@ -2674,8 +2705,6 @@ export default function App(): React.JSX.Element {
 
                   <Text style={styles.label}>Date and start time</Text>
                   <DateTimePicker
-                    scrollHandle={scrollHandle}
-                    onScrollTo={scrollFieldIntoView}
                     date={captureEvent.date}
                     time={captureEvent.startTime}
                     timeFormat={timeFormat}
@@ -2701,8 +2730,6 @@ export default function App(): React.JSX.Element {
                     <>
                       <Text style={styles.label}>Ends</Text>
                       <DateTimePicker
-                        scrollHandle={scrollHandle}
-                        onScrollTo={scrollFieldIntoView}
                         date={captureEvent.date}
                         time={captureEvent.endTime}
                         timeFormat={timeFormat}
@@ -2803,8 +2830,6 @@ export default function App(): React.JSX.Element {
           )}
           <Text style={styles.label}>Due</Text>
           <DateTimePicker
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
             date={taskForm.dueDate}
             time={taskForm.dueTime}
             timeFormat={timeFormat}
@@ -2868,8 +2893,6 @@ export default function App(): React.JSX.Element {
           </View>
           {stepsDateOpen === 'task' && (
             <DateTimePicker
-              scrollHandle={scrollHandle}
-              onScrollTo={scrollFieldIntoView}
               date={taskForm.stepsDate}
               time={taskForm.stepsTime}
               timeFormat={timeFormat}
@@ -2947,8 +2970,6 @@ will not duplicate them.`}
           )}
           <Text style={styles.labelCompact}>Date and start time</Text>
           <DateTimePicker
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
             date={eventForm.date}
             time={eventForm.startTime}
             timeFormat={timeFormat}
@@ -2973,8 +2994,6 @@ will not duplicate them.`}
           */}
           <Text style={styles.label}>Ends</Text>
           <DateTimePicker
-            scrollHandle={scrollHandle}
-            onScrollTo={scrollFieldIntoView}
             date={eventForm.date}
             time={eventForm.endTime}
             timeFormat={timeFormat}
@@ -3496,6 +3515,7 @@ will not duplicate them.`}
               onTogglePreviews={() => setPreviewMode(v => !v)}
               previews={previews}
               previewsPending={previewsPending}
+              onVisiblePages={setVisibleKeywordPages}
               keywords={foundKeywords}
               starredPages={countStarredPages(foundStars)}
               scanning={findScanning}

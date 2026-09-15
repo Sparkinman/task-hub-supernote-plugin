@@ -173,6 +173,45 @@ export function sameCollection(a: string, b: string): boolean {
 }
 
 /**
+ * Drop a saved collection that merely contains the others.
+ *
+ * The calendar home is not a collection, but a `Depth: 1` PROPFIND describes
+ * the collection it was sent to as well as its members, so earlier builds
+ * offered it as a task list named after the last segment of its own URL — an
+ * account name like `paul` sitting beside `paul-tasks`. Excluding it from
+ * discovery stops it being offered again, but settings are durable and
+ * independent of discovery: a tick saved before that fix survives it.
+ *
+ * This is the other half. A collection whose URL is a strict ancestor of
+ * another saved one is a container, not a calendar — CalDAV servers put
+ * calendars beside each other under the home, never inside one another — so it
+ * can be dropped without asking and without a network round trip.
+ *
+ * Deliberately conservative: it only fires when there is a saved descendant to
+ * prove the relationship. A home saved on its own with nothing under it is left
+ * alone, because nothing here can tell it apart from an unusually-laid-out
+ * server, and silently deleting somebody's only task list would be far worse
+ * than showing one odd row.
+ */
+export function pruneContainers(config: ServerConfig): ServerConfig {
+  const tidy = (u: string) => u.trim().replace(/\/+$/, '');
+  const contains = (parent: string, child: string) =>
+    parent !== child && child.startsWith(`${parent}/`);
+
+  const prune = (urls: string[]) => {
+    const tidied = urls.map(tidy);
+    return urls.filter((_, i) => !tidied.some(other => contains(tidied[i], other)));
+  };
+
+  const collectionUrls = prune(config.collectionUrls);
+  const calendarUrls = prune(config.calendarUrls);
+  const target = collectionUrls.some(u => sameCollection(u, config.defaultCollectionUrl))
+    ? config.defaultCollectionUrl
+    : collectionUrls[0] ?? '';
+  return {...config, collectionUrls, calendarUrls, defaultCollectionUrl: target};
+}
+
+/**
  * Forget collections that are no longer on the server.
  *
  * Removing them from the settings form is the only way to stop the warning

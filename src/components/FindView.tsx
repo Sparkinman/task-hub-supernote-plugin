@@ -13,7 +13,7 @@
  * nothing here is a guess.
  */
 
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {Image, Pressable, Text, View} from 'react-native';
 
 import type {KeywordHit, StarHit} from '../notesearch';
@@ -30,6 +30,31 @@ export interface FindSummary {
 function pageLabel(label: string, page: number): string {
   const human = `p.${page + 1}`;
   return label ? `${label} · ${human}` : human;
+}
+
+function PreviewTile(props: {
+  uri?: string;
+  name: string;
+  detail: string;
+  onPress: () => void;
+}): React.JSX.Element {
+  return (
+    <Pressable style={styles.previewCell} onPress={props.onPress}>
+      <View style={styles.previewFrame}>
+        {props.uri ? (
+          <Image style={styles.previewImage} source={{uri: props.uri}} />
+        ) : (
+          // A tile that keeps its place while the page is being drawn, so the
+          // grid does not reflow under the reader as each one lands.
+          <Text style={styles.previewWaiting}>…</Text>
+        )}
+      </View>
+      <Text style={styles.previewCaption} numberOfLines={1}>
+        {props.name}
+      </Text>
+      <Text style={styles.previewMeta}>{props.detail}</Text>
+    </Pressable>
+  );
 }
 
 function HitRow(props: {
@@ -60,6 +85,8 @@ export function FindView(props: {
   /** Rendered page images by `path:page`, filled in as each finishes. */
   previews: Record<string, string>;
   previewsPending: number;
+  /** Keyword pages currently expanded, so the parent can render just those. */
+  onVisiblePages: (pages: {path: string; page: number}[]) => void;
   keywords: KeywordHit[];
   starredPages: number;
   scanning: boolean;
@@ -75,6 +102,19 @@ export function FindView(props: {
   // Which keyword's pages are showing. Collapsed by default so the list stays
   // scannable: the count on each row already says how much is behind it.
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  // Reported upward so the render loop knows which keyword pages are visible.
+  // A keyword nobody has opened draws nothing.
+  const openKeywordPages = props.keywords
+    .filter(hit => expanded[hit.keyword.toLowerCase()] === true)
+    .flatMap(hit => hit.pages.map(page => ({path: page.path, page: page.page})));
+  const {onVisiblePages} = props;
+  useEffect(() => {
+    onVisiblePages(openKeywordPages);
+    // Compared by content: the array is rebuilt on every render, so depending
+    // on the array itself would notify the parent forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onVisiblePages, JSON.stringify(openKeywordPages)]);
 
   const {summary, scanning, progress} = props;
   const nothingIndexed = !scanning && summary !== null && summary.found === 0;
@@ -172,35 +212,15 @@ export function FindView(props: {
                 )}
                 <View style={styles.previewGrid}>
                   {props.stars.flatMap(hit =>
-                    hit.pages.map(page => {
-                      const key = `${hit.path}:${page}`;
-                      const uri = props.previews[key];
-                      return (
-                        <Pressable
-                          key={key}
-                          style={styles.previewCell}
-                          onPress={() => props.onOpen(hit.path, page)}>
-                          <View style={styles.previewFrame}>
-                            {uri ? (
-                              <Image
-                                style={styles.previewImage}
-                                source={{uri}}
-                                resizeMode="contain"
-                              />
-                            ) : (
-                              // A tile that keeps its place while the page is
-                              // being drawn, so the grid does not reflow under
-                              // the reader as each one lands.
-                              <Text style={styles.previewWaiting}>…</Text>
-                            )}
-                          </View>
-                          <Text style={styles.previewCaption} numberOfLines={1}>
-                            {hit.name}
-                          </Text>
-                          <Text style={styles.previewMeta}>{pageLabel(hit.label, page)}</Text>
-                        </Pressable>
-                      );
-                    }),
+                    hit.pages.map(page => (
+                      <PreviewTile
+                        key={`${hit.path}:${page}`}
+                        uri={props.previews[`${hit.path}:${page}`]}
+                        name={hit.name}
+                        detail={pageLabel(hit.label, page)}
+                        onPress={() => props.onOpen(hit.path, page)}
+                      />
+                    )),
                   )}
                 </View>
               </>
@@ -240,14 +260,28 @@ export function FindView(props: {
                       <Text style={styles.findRowMeta}>{hit.pages.length}</Text>
                     </Pressable>
                     {open &&
-                      hit.pages.map(page => (
-                        <HitRow
-                          key={`${page.path}:${page.page}`}
-                          name={page.name}
-                          detail={pageLabel(page.label, page.page)}
-                          indented
-                          onPress={() => props.onOpen(page.path, page.page)}
-                        />
+                      (props.previewMode ? (
+                        <View style={styles.previewGrid}>
+                          {hit.pages.map(page => (
+                            <PreviewTile
+                              key={`${page.path}:${page.page}`}
+                              uri={props.previews[`${page.path}:${page.page}`]}
+                              name={page.name}
+                              detail={pageLabel(page.label, page.page)}
+                              onPress={() => props.onOpen(page.path, page.page)}
+                            />
+                          ))}
+                        </View>
+                      ) : (
+                        hit.pages.map(page => (
+                          <HitRow
+                            key={`${page.path}:${page.page}`}
+                            name={page.name}
+                            detail={pageLabel(page.label, page.page)}
+                            indented
+                            onPress={() => props.onOpen(page.path, page.page)}
+                          />
+                        ))
                       ))}
                   </View>
                 );

@@ -8,22 +8,15 @@
  * renders as static high-contrast blocks.
  */
 
-import React, {useEffect, useRef, useState} from 'react';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {Pressable, StyleSheet, Text, View} from 'react-native';
 
 import {MONTHS, WEEKDAYS, chunkWeeks, monthGrid, shiftMonth} from '../calendar';
-import {formatTime, type TimeFormat} from '../format';
+import type {TimeFormat} from '../format';
 import {R, fs, sp} from './common';
 import {toDateInput} from '../ical';
 
 interface Props {
-  /**
-   * The scroll container and a way to scroll to a y position, so the time box
-   * is brought above the keyboard when it takes focus — the same treatment
-   * every other text input on these forms gets.
-   */
-  scrollHandle?: number | null;
-  onScrollTo?: (y: number) => void;
   /**
    * Hides the month grid and the quick-pick chips, leaving only the time.
    *
@@ -40,64 +33,7 @@ interface Props {
   onChange: (date: string, time: string) => void;
 }
 
-/**
- * A 24-hour HH:MM as the user's own clock reads it.
- *
- * Empty stays empty: the field is blank until a time is set, and turning that
- * into "12:00 am" would be inventing one.
- */
-function forDisplay(time: string, format: TimeFormat): string {
-  if (!time) {
-    return '';
-  }
-  return format === '12' ? formatTime(time, format) : time;
-}
 
-/**
- * The reverse: what was typed, back to 24-hour HH:MM, or null while it is not
- * yet a time.
- *
- * Deliberately forgiving about how a 12-hour time is written — "2pm", "2 PM",
- * "2:05pm" — because it is typed on a device with no keyboard worth the name.
- */
-function fromDisplay(input: string, format: TimeFormat): string | null {
-  const text = input.trim().toLowerCase();
-  if (!text) {
-    return null;
-  }
-  if (format !== '12') {
-    const match = /^(\d{1,2}):(\d{2})$/.exec(text);
-    if (!match) {
-      return null;
-    }
-    const hours = Number(match[1]);
-    const minutes = Number(match[2]);
-    return hours <= 23 && minutes <= 59 ? toHM(hours, minutes) : null;
-  }
-
-  const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/.exec(text);
-  if (!match) {
-    return null;
-  }
-  let hours = Number(match[1]);
-  const minutes = match[2] ? Number(match[2]) : 0;
-  if (hours < 1 || hours > 12 || minutes > 59) {
-    return null;
-  }
-  const suffix = match[3];
-  if (!suffix) {
-    // No am/pm yet — not enough to act on without guessing at the user's
-    // meaning, so wait for it.
-    return null;
-  }
-  if (suffix === 'pm' && hours !== 12) {
-    hours += 12;
-  }
-  if (suffix === 'am' && hours === 12) {
-    hours = 0;
-  }
-  return toHM(hours, minutes);
-}
 
 function parseHM(time: string): {hours: number; minutes: number} {
   const match = /^(\d{1,2}):(\d{2})$/.exec(time);
@@ -112,15 +48,8 @@ function toHM(hours: number, minutes: number): string {
 }
 
 export function DateTimePicker(props: Props): React.JSX.Element {
-  const {date, time, timeFormat, onChange, scrollHandle, onScrollTo, hideCalendar} = props;
-  const timeInputRef = useRef<TextInput>(null);
+  const {date, time, timeFormat, onChange, hideCalendar} = props;
 
-  const handleTimeFocus = () => {
-    if (!scrollHandle || !onScrollTo) {
-      return;
-    }
-    timeInputRef.current?.measureLayout(scrollHandle, (_x, y) => onScrollTo(y));
-  };
 
   const anchor = date ? new Date(`${date}T00:00:00`) : new Date();
   const [view, setView] = useState({year: anchor.getFullYear(), month: anchor.getMonth()});
@@ -135,7 +64,6 @@ export function DateTimePicker(props: Props): React.JSX.Element {
   /** Which value grid is expanded, if any. Only ever one at a time. */
   const [openPart, setOpenPart] = useState<'hour' | 'minute' | null>(null);
   /** What is in the box while it is being typed and does not yet parse. */
-  const [typed, setTyped] = useState<string | null>(null);
   // A time arriving from outside — editing an item that has one — opens the row.
   const showTime = timeOpen || !!time;
 
@@ -318,34 +246,6 @@ export function DateTimePicker(props: Props): React.JSX.Element {
             </View>
           )}
 
-          {/*
-            Typed and displayed in whichever clock the user reads elsewhere.
-            The value handed back is always 24-hour HH:MM — that is what the
-            calendar format needs — but showing 14:00 to somebody whose
-            settings say 2pm is asking them to convert in their head.
-          */}
-          <View style={styles.timeTypeRow}>
-            <Text style={styles.timeTypeLabel}>or type</Text>
-            <TextInput
-              ref={timeInputRef}
-              onFocus={handleTimeFocus}
-              style={styles.timeInput}
-              value={typed ?? forDisplay(time, timeFormat)}
-              onChangeText={next => {
-                // Held as typed until it parses, so a half-written "2:" is not
-                // rewritten under the user's fingers on every keystroke.
-                setTyped(next);
-                const parsed = fromDisplay(next, timeFormat);
-                if (parsed) {
-                  onChange(date || today, parsed);
-                }
-              }}
-              onBlur={() => setTyped(null)}
-              placeholder={timeFormat === '12' ? '3:47 pm' : '15:47'}
-              placeholderTextColor="#999"
-              keyboardType="numbers-and-punctuation"
-            />
-          </View>
         </View>
       ) : (
         <Pressable
