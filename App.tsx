@@ -202,7 +202,7 @@ import {
   type SnList,
 } from './src/sncloud';
 import {SN_EXPIRED, beginSignIn, finishSignIn, listSnLists, listSnTasks} from './src/snclient';
-import {asRemoteTasks, snCollectionUrl} from './src/sntasks';
+import {asRemoteTasks, isSnCollection, isSnTask, snCollectionUrl} from './src/sntasks';
 import {buildIndex, clearIndex, ensurePreview} from './src/noteindex';
 import {
   countStarredPages,
@@ -983,6 +983,32 @@ export default function App(): React.JSX.Element {
    * once. Where each one actually lives is decided by `writeTask`, which reads
    * the scheme off the URL.
    */
+  /**
+   * Whether the task being edited lives in Supernote's own To-Do app.
+   *
+   * It stores a title and a date and nothing else, so priority, repeats, sub
+   * tasks and a time of day have nowhere to go. They are hidden rather than
+   * shown and ignored: a control that silently does nothing is worse than an
+   * absent one, because the user believes they have set something.
+   */
+  const editingSupernote = useMemo(
+    () =>
+      Boolean(
+        taskForm &&
+          ((editingTask && isSnTask(editingTask)) ||
+            (!editingTask &&
+              taskTargets.length > 0 &&
+              taskTargets.every(isSnCollection))),
+      ),
+    [taskForm, editingTask, taskTargets],
+  );
+
+  /** The lasso is being saved only into Supernote lists. Same rule as above. */
+  const capturingToSupernote = useMemo(
+    () => targets.length > 0 && targets.every(isSnCollection),
+    [targets],
+  );
+
   const saveTargets = useMemo(() => {
     const places = config.collectionUrls.map(url => ({
       url,
@@ -3018,6 +3044,7 @@ export default function App(): React.JSX.Element {
 
                   <Text style={styles.label}>Due</Text>
                   <DateTimePicker
+                    dateOnly={capturingToSupernote}
                     date={draft.dueDate}
                     time={draft.dueTime}
                     timeFormat={timeFormat}
@@ -3028,7 +3055,24 @@ export default function App(): React.JSX.Element {
                 </>
               )}
 
-              {captureMore && (
+              {captureMore && capturingToSupernote && (
+                <>
+                  <Text style={styles.noteCompact}>
+                    {`A Supernote to-do holds a title, a date and a note. Priority, repeats and sub tasks are not offered — the tablet's To-Do app has nowhere to put them. The note is kept, but only ${APP_NAME} displays it.`}
+                  </Text>
+                  <Field
+                    compact
+                    scrollHandle={scrollHandle}
+                    onScrollTo={scrollFieldIntoView}
+                    label="Note"
+                    value={draft.description}
+                    multiline
+                    onChange={v => setDraft(d => ({...d, description: v}))}
+                  />
+                </>
+              )}
+
+              {captureMore && !capturingToSupernote && (
                 <>
                   <Text style={styles.label}>Priority</Text>
                   <Choice
@@ -3277,6 +3321,7 @@ export default function App(): React.JSX.Element {
               )}
               <Text style={styles.label}>Due</Text>
               <DateTimePicker
+                dateOnly={editingSupernote}
                 date={taskForm.dueDate}
                 time={taskForm.dueTime}
                 timeFormat={timeFormat}
@@ -3287,7 +3332,26 @@ export default function App(): React.JSX.Element {
             </>
           )}
 
-          {taskMore && (
+          {taskMore && editingSupernote && (
+            <>
+              <Text style={styles.noteCompact}>
+                {`A Supernote to-do holds a title, a date and a note. Priority, repeats and sub tasks are not offered for this one — the tablet's To-Do app has nowhere to put them, so they would be discarded rather than saved.
+
+The note is kept and comes back here, but the To-Do app does not display one, so it is only visible in ${APP_NAME}.`}
+              </Text>
+              <Field
+                compact
+                scrollHandle={scrollHandle}
+                onScrollTo={scrollFieldIntoView}
+                label="Note"
+                value={taskForm.description}
+                multiline
+                onChange={v => setTaskForm(d => (d ? {...d, description: v} : d))}
+              />
+            </>
+          )}
+
+          {taskMore && !editingSupernote && (
             <>
               <Text style={styles.label}>Priority</Text>
               <Choice

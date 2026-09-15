@@ -57,7 +57,12 @@ describe('asRemoteTask', () => {
   it('fills the fields the task list sorts and buckets on', () => {
     expect(mapped.summary).toBe('Call the dentist');
     expect(mapped.dueDate).toBe('2026-09-20');
-    expect(mapped.dueAt).toBe(Date.parse('2026-09-20T00:00:00Z'));
+    // Midnight *local*, whatever zone the suite runs in: a to-do carries a
+    // date, and the instant behind it only has to mean that date where the
+    // device is.
+    const due = new Date(mapped.dueAt as number);
+    expect([due.getFullYear(), due.getMonth(), due.getDate()]).toEqual([2026, 8, 20]);
+    expect(due.getHours()).toBe(0);
     expect(mapped.completed).toBe(false);
     expect(mapped.status).toBe('NEEDS-ACTION');
   });

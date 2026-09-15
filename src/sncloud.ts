@@ -88,27 +88,70 @@ export function snYes(value: unknown): boolean {
  * date", and a task with no date would otherwise be filed under January 1970
  * and sort above everything the user actually has to do.
  */
+function iso(year: number, month: number, day: number): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${year}-${pad(month + 1)}-${pad(day)}`;
+}
+
+/**
+ * The instant Supernote stores, read back as the date it stands for.
+ *
+ * **A to-do carries a date and no time**, but the API transports it as an
+ * instant, so something has to decide which calendar day that instant means —
+ * and the two obvious answers disagree by a day for most of the world.
+ *
+ * Whichever reading lands on an exact midnight is the one that was meant. A
+ * writer that thought in local time produced local midnight; one that thought
+ * in UTC produced UTC midnight. Checking rather than assuming means a to-do
+ * made on the tablet and one made here are both read correctly, without
+ * knowing which produced it.
+ *
+ * Local is preferred when both are midnight, which happens only in UTC itself,
+ * where they are the same date anyway.
+ */
 export function snDate(value: unknown): string {
   const ms = Number(value);
   if (!Number.isFinite(ms) || ms <= 0) {
     return '';
   }
-  // Their dates are stored as an instant at midnight UTC, and the tablet shows
-  // a date with no time — so the UTC calendar date is the one they mean. Read
-  // locally, a user east of Greenwich would see the day before.
   const at = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${at.getUTCFullYear()}-${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())}`;
+  if (at.getUTCHours() === 0 && at.getUTCMinutes() === 0) {
+    return iso(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate());
+  }
+  return iso(at.getFullYear(), at.getMonth(), at.getDate());
 }
 
-/** The reverse: a local 'YYYY-MM-DD' as midnight UTC, or 0 for "no due date". */
+/**
+ * The reverse: a date as the instant the tablet will read it back as.
+ *
+ * **Midnight local, not midnight UTC.** Reported on device: a to-do created
+ * here for tomorrow showed as today in the tablet's own To-Do app. Midnight UTC
+ * falls on the previous day everywhere west of Greenwich, and the To-Do app
+ * renders the instant in the device's own timezone — so the date the user chose
+ * and the date they saw were a day apart.
+ *
+ * Worth knowing why no test caught it: the machine this is built on runs in
+ * UTC, where the two are identical. The same shape as `new URL` — correct
+ * everywhere it was checked, wrong everywhere it ran. `__tests__/sndates.test.ts`
+ * therefore pins this under a non-UTC zone deliberately.
+ */
 export function snEpoch(date: string): number {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date ?? '');
+  if (!match) {
     // 0 rather than null: the API uses it for "no due date", and null is
     // rejected outright on some paths.
     return 0;
   }
-  const ms = Date.parse(`${date}T00:00:00Z`);
+  const at = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    0,
+    0,
+    0,
+    0,
+  );
+  const ms = at.getTime();
   return Number.isFinite(ms) ? ms : 0;
 }
 

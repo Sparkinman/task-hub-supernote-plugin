@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.71.0** (versionCode 90). **557 tests across 34 suites.** 0.66.0 was the first of these actually
+Current build **0.71.1** (versionCode 91). **563 tests across 35 suites.** 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,50 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.71.1 — a to-do carries a date, and only a date
+
+Reported on device: a to-do created here for tomorrow arrived dated **today** in
+the tablet's own To-Do app.
+
+### The suite now runs in a timezone that is not UTC
+
+`snEpoch` wrote midnight **UTC**, transcribed from the server, which runs in UTC
+and where that is right. On a device west of Greenwich midnight UTC falls on the
+previous day, and the To-Do app renders the instant in the device's own zone —
+so the date chosen and the date shown were one apart.
+
+**No test could have caught it: this machine runs in UTC**, where midnight local
+and midnight UTC are the same instant. Exactly the shape of the `new URL` bug —
+correct everywhere it was checked, wrong everywhere it ran.
+
+So `jest.config.js` now sets `process.env.TZ = 'America/New_York'` for the whole
+suite, before any worker starts (setting it inside a test file is too late:
+Node reads the zone once and caches it, and the assertions then pass vacuously —
+which the guard test in `__tests__/sndates.test.ts` demonstrated by failing while
+its five neighbours "passed"). Running everything an offset away means anything
+confusing a wall-clock date with an instant fails here rather than on a tablet.
+**Do not set it back.** Only one existing assertion had to change, and that one
+was wrong.
+
+Reading is now tolerant in a way writing cannot be: whichever of local or UTC
+midnight the instant lands on exactly is taken as the date meant, so a to-do
+written by the tablet and one written here both read correctly without knowing
+which produced it.
+
+### The fields a to-do cannot hold are now actually hidden
+
+0.71.0's notes claimed priority and repeats were hidden for a Supernote task.
+**They were not** — the claim was in a code comment and in this document, and
+nowhere in `App.tsx`; `isSnTask` was not referenced there at all. Both the task
+editor and the capture screen now hide **priority, repeats, sub tasks and the
+time of day** when the target is a Supernote list, and say why.
+
+The note is kept, because `detail` does round-trip — but the To-Do app never
+displays one, so the wording says it is visible only in Task Hub rather than
+implying the tablet will show it. `DateTimePicker` gained `dateOnly` for this: a
+time control whose value is discarded is worse than an absent one, because the
+user believes they set a reminder.
 
 ## What changed in 0.71.0 — the Supernote To-Do app, without a server
 

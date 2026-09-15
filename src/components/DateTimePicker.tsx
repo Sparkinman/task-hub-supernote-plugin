@@ -25,6 +25,15 @@ interface Props {
    * the form has no way to store.
    */
   hideCalendar?: boolean;
+  /**
+   * Hides the time entirely, leaving a date picker.
+   *
+   * For a Supernote to-do, which holds a date and no time at all. Offering the
+   * control and discarding what it was set to is worse than not offering it:
+   * the user believes they have set a reminder for 9am and nothing of the sort
+   * has been stored.
+   */
+  dateOnly?: boolean;
   /** Canonical 'YYYY-MM-DD', or '' for unset. */
   date: string;
   /** Canonical 24-hour 'HH:MM', or '' for unset. */
@@ -48,7 +57,7 @@ function toHM(hours: number, minutes: number): string {
 }
 
 export function DateTimePicker(props: Props): React.JSX.Element {
-  const {date, time, timeFormat, onChange, hideCalendar} = props;
+  const {date, time, timeFormat, onChange, hideCalendar, dateOnly} = props;
 
 
   const anchor = date ? new Date(`${date}T00:00:00`) : new Date();
@@ -148,7 +157,7 @@ export function DateTimePicker(props: Props): React.JSX.Element {
 
   const timeControls = (
     <>
-      {showTime ? (
+      {dateOnly ? null : showTime ? (
         <View style={styles.timeBlockInner}>
           <View style={styles.timePickRow}>
             <Pressable
