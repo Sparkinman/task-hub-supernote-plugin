@@ -1639,6 +1639,23 @@ export const styles = StyleSheet.create({
   // list of three calendars taller than the panel.
   feedUrl: {fontSize: fs(15), color: '#666'},
   /**
+   * What the last subscription action said, sitting under its own buttons.
+   *
+   * Boxed and black rather than the grey of a hint: this is the answer to
+   * something the user just pressed, and on a panel that repaints slowly it has
+   * to be obvious that anything happened at all.
+   */
+  feedMessage: {
+    fontSize: fs(18),
+    color: '#000',
+    lineHeight: fs(25),
+    backgroundColor: '#ededed',
+    borderRadius: R.sm,
+    paddingHorizontal: sp(10),
+    paddingVertical: sp(8),
+    marginBottom: sp(10),
+  },
+  /**
    * A literal to be copied exactly — a path, or a line from a setup file.
    *
    * Boxed and selectable so it reads as "type this, character for character"

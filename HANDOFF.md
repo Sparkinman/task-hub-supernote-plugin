@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.70.1** (versionCode 87). **520 tests across 32 suites.** 0.66.0 was the first of these actually
+Current build **0.70.2** (versionCode 88). **520 tests across 32 suites.** 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,29 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.70.2 — the message was there; nobody could see it
+
+Reported after 0.70.1: pressing Import still gave "no error, no nothing".
+0.70.1 had made the import say precisely what went wrong, and **it was saying
+it somewhere unreachable**. `setStatus` renders through the settings screen's
+`StatusLine`, which sits at the very foot of a form many screens long —
+roughly 660 rows of JSX below the button being pressed. The message was
+produced correctly every time and never came into view.
+
+Feedback now goes to a `feedMessage` shown **directly beneath the two buttons**
+that produce it, and the Import button reads "Reading…" and disables while it
+works, so something visibly changes at the point of touch on a panel that
+repaints in ~300ms. The import is also wrapped in try/catch: an errand that
+throws and says nothing is indistinguishable from a button that is not wired
+up, which is exactly how this looked.
+
+**This is the third time in this project that the fault was the distance
+between an action and its feedback**, after Save-and-exit stranded two thirds
+down the settings form and the date-heading failure that was reported only to
+logcat. The rule worth keeping: *a message about something the user just
+pressed belongs next to the thing they pressed*, and a shared status line at
+the edge of a long scrolling screen does not satisfy that.
 
 ## What changed in 0.70.1 — the import could not say why it failed
 

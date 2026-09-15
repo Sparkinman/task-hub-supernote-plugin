@@ -876,6 +876,16 @@ export default function App(): React.JSX.Element {
    */
   const [notice, setNotice] = useState<{title: string; body: string} | null>(null);
   const [feedDraft, setFeedDraft] = useState('');
+  /**
+   * What the last subscription action said, shown inside its own fold.
+   *
+   * Not `status`: the settings screen renders that at the foot of a form many
+   * screens long, hundreds of rows below the button being pressed, so a message
+   * put there is a message nobody reads. Pressing Import appeared to do nothing
+   * at all for exactly this reason. Feedback belongs where the action was.
+   */
+  const [feedMessage, setFeedMessage] = useState<string>('');
+  const [feedBusy, setFeedBusy] = useState(false);
   /** Names the feeds announced for themselves, for the Settings list only. */
   const [feedNames, setFeedNames] = useState<Record<string, string>>({});
 
@@ -2186,15 +2196,12 @@ export default function App(): React.JSX.Element {
   const addFeedFromDraft = useCallback(() => {
     const {url, error} = normaliseFeedUrl(feedDraft);
     if (!url) {
-      setStatus({kind: 'error', message: FEED_URL_MESSAGES[error ?? 'malformed']});
+      setFeedMessage(FEED_URL_MESSAGES[error ?? 'malformed']);
       return;
     }
     changeConfig(c => ({...c, feeds: addFeed(c.feeds, {url, name: defaultFeedName(url)})}));
     setFeedDraft('');
-    setStatus({
-      kind: 'done',
-      message: 'Calendar added. Press Save settings, then Refresh on the Calendar tab.',
-    });
+    setFeedMessage('Calendar added. Press Save settings, then Refresh on the Calendar tab.');
   }, [feedDraft, changeConfig]);
 
   /**
@@ -2207,68 +2214,72 @@ export default function App(): React.JSX.Element {
    * would put back some of the fiddling the file was meant to remove.
    */
   const importFeedFile = useCallback(() => {
+    setFeedBusy(true);
+    setFeedMessage('Looking for the file…');
     void (async () => {
-      setStatus({kind: 'working', message: 'Looking for the file…'});
       const folder = 'Document/TaskHub';
-      // Listed rather than opened blind. The first version asked for one exact
-      // filename and, when that was not there, could only say "no file" — which
-      // is the same message whether the file is missing, named Calendars.TXT,
-      // or sitting in the wrong folder. Listing lets it say which.
-      const names = await listFilesHere(folder, ['.txt']);
-      const chosen = pickFeedListFile(names, FEED_LIST_FILE);
+      try {
+        // Listed rather than opened blind. Asking for one exact filename could
+        // only ever say "no file", which is the same answer whether it is
+        // missing, named Calendars.TXT, or in the wrong folder.
+        const names = await listFilesHere(folder, ['.txt']);
+        const chosen = pickFeedListFile(names, FEED_LIST_FILE);
 
-      if (!chosen) {
-        setStatus({
-          kind: 'error',
-          message:
+        if (!chosen) {
+          setFeedMessage(
             names.length === 0
               ? `No .txt file in ${folder}. Put ${FEED_LIST_FILE} there — the same folder as settings.json — and try again.`
-              : `Could not tell which file to use. ${folder} holds ${names.join(', ')}. Rename the right one to ${FEED_LIST_FILE}.`,
-        });
-        return;
-      }
+              : `Could not tell which file to use. ${folder} holds: ${names.join(', ')}. Rename the right one to ${FEED_LIST_FILE}.`,
+          );
+          return;
+        }
 
-      const text = await readNamed(chosen);
-      if (text === null) {
-        setStatus({
-          kind: 'error',
-          message: `${folder}/${chosen} could not be read. If ${APP_NAME} has just asked for file permission, allow it and try again.`,
-        });
-        return;
-      }
-      if (text.trim() === '') {
-        setStatus({kind: 'error', message: `${folder}/${chosen} is empty.`});
-        return;
-      }
+        const text = await readNamed(chosen);
+        if (text === null) {
+          setFeedMessage(
+            `${folder}/${chosen} could not be read. If ${APP_NAME} has asked for file permission, allow it and try again.`,
+          );
+          return;
+        }
+        if (text.trim() === '') {
+          setFeedMessage(`${folder}/${chosen} is empty.`);
+          return;
+        }
 
-      const {feeds: found, skipped, firstBad} = parseFeedList(text);
-      if (found.length === 0) {
-        // The offending line is quoted back. "Nothing usable" on its own leaves
-        // somebody re-reading a file that looks fine to them, when the answer is
-        // usually a stray character or an http:// address.
-        setStatus({
-          kind: 'error',
-          message: firstBad
-            ? `No usable address in ${chosen}. Each line needs an https:// address; this one was not one — "${firstBad.slice(0, 80)}"`
-            : `No usable address in ${chosen}. Each line needs an https:// address.`,
-        });
-        return;
-      }
+        const {feeds: found, skipped, firstBad} = parseFeedList(text);
+        if (found.length === 0) {
+          // The offending line is quoted back. "Nothing usable" on its own
+          // leaves somebody re-reading a file that looks fine to them, when the
+          // answer is usually an http:// address or a stray character.
+          setFeedMessage(
+            firstBad
+              ? `No usable address in ${chosen}. Every line needs an https:// address; this one is not — "${firstBad.slice(0, 80)}"`
+              : `No usable address in ${chosen}. Every line needs an https:// address.`,
+          );
+          return;
+        }
 
-      let added = 0;
-      changeConfig(c => {
-        const merged = mergeFeeds(c.feeds, found);
-        added = merged.added;
-        return {...c, feeds: merged.feeds};
-      });
-      const ignored = skipped > 0 ? ` ${skipped} line(s) were not addresses and were ignored.` : '';
-      const already = found.length - added;
-      const dupes = already > 0 ? ` ${already} already subscribed.` : '';
-      setStatus({
-        kind: 'done',
-        message:
-          `Read ${found.length} address(es) from ${chosen}. Added ${added}.${dupes}${ignored} Press Save settings, then delete the file — those addresses are as good as passwords.`,
-      });
+        let added = 0;
+        changeConfig(c => {
+          const merged = mergeFeeds(c.feeds, found);
+          added = merged.added;
+          return {...c, feeds: merged.feeds};
+        });
+        const already = found.length - added;
+        const dupes = already > 0 ? ` ${already} already subscribed.` : '';
+        const ignored =
+          skipped > 0 ? ` ${skipped} line(s) were not addresses and were ignored.` : '';
+        setFeedMessage(
+          `Read ${found.length} address(es) from ${chosen}. Added ${added}.${dupes}${ignored} Press Save settings, then delete the file.`,
+        );
+      } catch (err) {
+        // Nothing may fail silently here. An import that throws and says
+        // nothing is indistinguishable from a button that is not wired up,
+        // which is exactly how this looked on device.
+        setFeedMessage(`Could not read ${folder} — ${describe(err)}`);
+      } finally {
+        setFeedBusy(false);
+      }
     })();
   }, [changeConfig]);
 
@@ -3757,6 +3768,8 @@ will not duplicate them.`}
           onAddFeed={addFeedFromDraft}
           onRemoveFeed={removeFeedByUrl}
           onImportFeeds={importFeedFile}
+          feedMessage={feedMessage}
+          feedBusy={feedBusy}
           feedNames={feedNames}
           config={config}
           collections={collections}
@@ -4109,6 +4122,8 @@ function SettingsScreen(props: {
   onAddFeed: () => void;
   onRemoveFeed: (url: string) => void;
   onImportFeeds: () => void;
+  feedMessage: string;
+  feedBusy: boolean;
   feedNames: Record<string, string>;
   config: ServerConfig;
   collections: TaskCollection[];
@@ -4140,6 +4155,7 @@ function SettingsScreen(props: {
   onClose: () => void;
 }): React.JSX.Element {
   const {feedDraft, setFeedDraft, onAddFeed, onRemoveFeed, onImportFeeds, feedNames} = props;
+  const {feedMessage, feedBusy} = props;
   /**
    * Which settings groups are open.
    *
@@ -4499,7 +4515,11 @@ https://outlook.office365.com/owa/calendar/.../calendar.ics`}
           Hub has already stored what it needs.
         </Text>
         <View style={styles.actions}>
-          <Button label={`Import ${FEED_LIST_FILE}`} onPress={onImportFeeds} />
+          <Button
+            label={feedBusy ? 'Reading…' : `Import ${FEED_LIST_FILE}`}
+            onPress={onImportFeeds}
+            disabled={feedBusy}
+          />
         </View>
         <Field
           scrollHandle={scrollHandle}
@@ -4513,6 +4533,13 @@ https://outlook.office365.com/owa/calendar/.../calendar.ics`}
         <View style={styles.actions}>
           <Button label="Add calendar" onPress={onAddFeed} />
         </View>
+
+        {/*
+          Directly beneath the two buttons, not at the foot of the page. The
+          shared StatusLine sits hundreds of rows below this fold, so a message
+          sent there made pressing Import look like it did nothing at all.
+        */}
+        {!!feedMessage && <Text style={styles.feedMessage}>{feedMessage}</Text>}
 
         <Text style={styles.subheadingCompact}>Subscribed</Text>
         {config.feeds.length === 0 ? (
