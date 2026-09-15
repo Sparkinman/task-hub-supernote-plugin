@@ -5,6 +5,7 @@ import {
   mergeFeeds,
   normaliseFeedUrl,
   parseFeedList,
+  pickFeedListFile,
   removeFeed,
   sameFeed,
   type CalendarFeed,
@@ -129,5 +130,44 @@ describe('the stored list', () => {
     const {feeds, added} = mergeFeeds([a], [a, b]);
     expect(feeds).toHaveLength(2);
     expect(added).toBe(1);
+  });
+});
+
+describe('reading a real setup file', () => {
+  it('survives the byte-order mark Windows Notepad writes', () => {
+    // Invisible, and it makes the first line fail ^https:// — so the commonest
+    // way to produce this file is also the one that silently breaks it.
+    const {feeds} = parseFeedList(`﻿${GOOGLE}`);
+    expect(feeds).toHaveLength(1);
+  });
+
+  it('quotes back the first line it could not use', () => {
+    const {firstBad} = parseFeedList(['# note', 'Work|not-a-url', GOOGLE].join('\n'));
+    expect(firstBad).toBe('Work|not-a-url');
+  });
+
+  it('reports no bad line when every line was fine', () => {
+    expect(parseFeedList(GOOGLE).firstBad).toBeUndefined();
+  });
+});
+
+describe('pickFeedListFile', () => {
+  it('prefers the documented name, whatever its case', () => {
+    expect(pickFeedListFile(['notes.txt', 'Calendars.TXT'], 'calendars.txt')).toBe(
+      'Calendars.TXT',
+    );
+  });
+
+  it('takes the only text file when the name does not match', () => {
+    // Somebody who put one .txt in the folder meant that one.
+    expect(pickFeedListFile(['my-feeds.txt'], 'calendars.txt')).toBe('my-feeds.txt');
+  });
+
+  it('refuses to guess between several', () => {
+    expect(pickFeedListFile(['a.txt', 'b.txt'], 'calendars.txt')).toBe('');
+  });
+
+  it('ignores files that are not text', () => {
+    expect(pickFeedListFile(['settings.json', 'cache.json'], 'calendars.txt')).toBe('');
   });
 });

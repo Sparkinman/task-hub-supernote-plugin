@@ -135,6 +135,7 @@ import {
 import {
   loadSettings,
   readNamed,
+  listFilesHere,
   saveSettings,
   settingsLocation,
   storageAvailable,
@@ -190,6 +191,7 @@ import {
   mergeFeeds,
   normaliseFeedUrl,
   parseFeedList,
+  pickFeedListFile,
   removeFeed,
 } from './src/feeds';
 import {forgetFeed} from './src/feedfetch';
@@ -2206,22 +2208,53 @@ export default function App(): React.JSX.Element {
    */
   const importFeedFile = useCallback(() => {
     void (async () => {
-      const text = await readNamed(FEED_LIST_FILE);
-      if (text === null || text.trim() === '') {
+      setStatus({kind: 'working', message: 'Looking for the file…'});
+      const folder = 'Document/TaskHub';
+      // Listed rather than opened blind. The first version asked for one exact
+      // filename and, when that was not there, could only say "no file" — which
+      // is the same message whether the file is missing, named Calendars.TXT,
+      // or sitting in the wrong folder. Listing lets it say which.
+      const names = await listFilesHere(folder, ['.txt']);
+      const chosen = pickFeedListFile(names, FEED_LIST_FILE);
+
+      if (!chosen) {
         setStatus({
           kind: 'error',
-          message: `No ${FEED_LIST_FILE} in the Task Hub folder, or it is empty.`,
+          message:
+            names.length === 0
+              ? `No .txt file in ${folder}. Put ${FEED_LIST_FILE} there — the same folder as settings.json — and try again.`
+              : `Could not tell which file to use. ${folder} holds ${names.join(', ')}. Rename the right one to ${FEED_LIST_FILE}.`,
         });
         return;
       }
-      const {feeds: found, skipped} = parseFeedList(text);
+
+      const text = await readNamed(chosen);
+      if (text === null) {
+        setStatus({
+          kind: 'error',
+          message: `${folder}/${chosen} could not be read. If ${APP_NAME} has just asked for file permission, allow it and try again.`,
+        });
+        return;
+      }
+      if (text.trim() === '') {
+        setStatus({kind: 'error', message: `${folder}/${chosen} is empty.`});
+        return;
+      }
+
+      const {feeds: found, skipped, firstBad} = parseFeedList(text);
       if (found.length === 0) {
+        // The offending line is quoted back. "Nothing usable" on its own leaves
+        // somebody re-reading a file that looks fine to them, when the answer is
+        // usually a stray character or an http:// address.
         setStatus({
           kind: 'error',
-          message: `Nothing usable in ${FEED_LIST_FILE}. Each line needs an https:// address.`,
+          message: firstBad
+            ? `No usable address in ${chosen}. Each line needs an https:// address; this one was not one — "${firstBad.slice(0, 80)}"`
+            : `No usable address in ${chosen}. Each line needs an https:// address.`,
         });
         return;
       }
+
       let added = 0;
       changeConfig(c => {
         const merged = mergeFeeds(c.feeds, found);
@@ -2229,10 +2262,12 @@ export default function App(): React.JSX.Element {
         return {...c, feeds: merged.feeds};
       });
       const ignored = skipped > 0 ? ` ${skipped} line(s) were not addresses and were ignored.` : '';
+      const already = found.length - added;
+      const dupes = already > 0 ? ` ${already} already subscribed.` : '';
       setStatus({
         kind: 'done',
         message:
-          `Added ${added} calendar(s).${ignored} Press Save settings, then delete ${FEED_LIST_FILE} — those addresses are as good as passwords.`,
+          `Read ${found.length} address(es) from ${chosen}. Added ${added}.${dupes}${ignored} Press Save settings, then delete the file — those addresses are as good as passwords.`,
       });
     })();
   }, [changeConfig]);

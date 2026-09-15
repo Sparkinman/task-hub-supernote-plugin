@@ -129,11 +129,21 @@ export function feedNameFromIcal(text: string): string {
  * skipped, and a line that is not a usable address is skipped rather than
  * failing the whole import — one typo should not discard the other nine.
  */
-export function parseFeedList(text: string): {feeds: CalendarFeed[]; skipped: number} {
+export function parseFeedList(text: string): {
+  feeds: CalendarFeed[];
+  skipped: number;
+  /** The first line that was not usable, verbatim, so it can be shown back. */
+  firstBad?: string;
+} {
   const feeds: CalendarFeed[] = [];
   let skipped = 0;
-  for (const line of (text ?? '').split(/\r?\n/)) {
-    const trimmed = line.trim();
+  let firstBad: string | undefined;
+  // A leading byte-order mark is invisible and makes the first line fail
+  // `^https://` — Windows Notepad writes one by default, so the commonest way
+  // to produce this file is also the one that silently breaks it.
+  const body = (text ?? '').replace(/^\uFEFF/, '');
+  for (const line of body.split(/\r?\n/)) {
+    const trimmed = line.trim().replace(/^\uFEFF/, '');
     if (!trimmed || trimmed.startsWith('#')) {
       continue;
     }
@@ -147,11 +157,35 @@ export function parseFeedList(text: string): {feeds: CalendarFeed[]; skipped: nu
     const {url} = normaliseFeedUrl(rawUrl);
     if (!url) {
       skipped += 1;
+      if (firstBad === undefined) {
+        firstBad = trimmed;
+      }
       continue;
     }
     feeds.push({url, name: rawName || defaultFeedName(url)});
   }
-  return {feeds, skipped: skipped};
+  return {feeds, skipped, firstBad};
+}
+
+/**
+ * Which file in the Task Hub folder to import from.
+ *
+ * `calendars.txt` is what the instructions say, but the instructions are
+ * followed by somebody typing a filename on a computer, so it is matched
+ * case-insensitively — and when it is absent but exactly one `.txt` file is
+ * there, that one is used. A person who saved `Calendars.TXT`, or named it
+ * after their own calendar, meant the file they put in the folder.
+ *
+ * Returns '' when there is nothing to choose, so the caller can say what it
+ * looked for rather than failing silently.
+ */
+export function pickFeedListFile(names: string[], wanted: string): string {
+  const texts = names.filter(n => n.toLowerCase().endsWith('.txt'));
+  const exact = texts.find(n => n.toLowerCase() === wanted.toLowerCase());
+  if (exact) {
+    return exact;
+  }
+  return texts.length === 1 ? texts[0] : '';
 }
 
 /** Feeds compare by URL, ignoring a trailing slash, as collections do. */

@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.70.0** (versionCode 86). **513 tests across 32 suites.** 0.66.0 was the first of these actually
+Current build **0.70.1** (versionCode 87). **520 tests across 32 suites.** 0.66.0 was the first of these actually
 installed, and the four fixes in 0.67.0 all come from what it showed on the panel.
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
@@ -17,6 +17,35 @@ calendar feature with nothing configured. `src/mode.ts`, `src/demo.ts`,
 `PluginConfig.demo.json`, `buildDemo.ps1`, `scripts/set_demo_names.py` and its
 test suite are all gone, along with the `blockedInDemo` guard that sat on every
 write path.
+
+## What changed in 0.70.1 — the import could not say why it failed
+
+Reported on device: importing the setup file "doesn't appear to be working".
+The path was right — `readNamed` resolves to `Document/TaskHub/<name>`, the same
+folder `settings.json` lives in — but that could not be established from the
+plugin, because **one message covered every possible cause**: file absent, file
+named differently, permission not yet granted, and file present but unparseable
+all produced "No calendars.txt in the Task Hub folder, or it is empty."
+
+A message that cannot distinguish its causes is not a diagnosis, and it left the
+user with nothing to act on and nothing to report back. The import now:
+
+- **lists the folder** (`listFilesHere` for `.txt`) instead of opening one exact
+  name blind, so it can say what is actually there;
+- **matches the name case-insensitively**, and uses the only `.txt` in the
+  folder when the name does not match — somebody who put one text file there
+  meant that one. Several, and it says which it found and asks for a rename;
+- **separates "could not read" from "empty" from "nothing usable"**, and the
+  unreadable case names the file-permission prompt, which is a real cause;
+- **quotes the first unusable line back**, truncated to 80 characters. "Nothing
+  usable" on its own leaves somebody re-reading a file that looks fine to them,
+  when the answer is usually an `http://` address or a stray character;
+- **strips a leading byte-order mark**. Windows Notepad writes one by default,
+  it is invisible, and it makes the first line fail `^https://` — so the
+  commonest way to produce this file is also the one that silently broke it.
+
+That last one is the most likely original cause and the reason to check it
+first next time a text file "looks right" and is rejected.
 
 ## What changed in 0.70.0 — making subscriptions cheap
 
