@@ -144,7 +144,9 @@ import {
 } from './src/storage';
 import {CACHE_FILE, decodeCache, encodeCache} from './src/cache';
 import {expandEvents} from './src/expand';
-import {writeDateHeading} from './src/dateheading';
+import {pageSizeOf, writeDateHeading} from './src/dateheading';
+import {dayBackground, type DayEntry} from './src/background';
+import {writeBackground} from './src/backgrounddraw';
 import {
   covers,
   defaultWindow,
@@ -2119,6 +2121,79 @@ export default function App(): React.JSX.Element {
     [leaveForNote, noteConfigFor],
   );
 
+  /**
+   * Draw the day's agenda into its note, as a background to write over.
+   *
+   * Never automatic, and never into a note that does not exist — this writes
+   * into somebody's own file, so it is a button they press on the day they are
+   * looking at, confirmed before anything happens.
+   *
+   * The events and tasks are the ones already on screen. Nothing is fetched:
+   * `eventsRef` and `tasksRef` hold the day's content by the time this button
+   * can be pressed, so the page is a snapshot of exactly what the user is
+   * looking at rather than a second, possibly different, read.
+   */
+  const askCalendarPage = useCallback(
+    (iso: string) => {
+      const cfg = getConfig();
+      const path = dailyNotePath(cfg.dailyNote, iso, cfg.dateFormat);
+      if (!path) {
+        setStatus({kind: 'error', message: 'Could not build a note path for that day.'});
+        return;
+      }
+
+      // startTime and endTime are local 'HH:MM' and absent on an all-day event,
+      // which is exactly the distinction the page needs: a timed event gets a
+      // block on the hour grid, an all-day one has no hour to be drawn at.
+      const minutes = (hhmm?: string) => {
+        const match = /^(\d{2}):(\d{2})$/.exec(hhmm ?? '');
+        return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+      };
+      const entries: DayEntry[] = [];
+      for (const event of eventsOnDay(eventsRef.current, iso)) {
+        const from = event.allDay ? null : minutes(event.startTime);
+        const to = event.allDay ? null : minutes(event.endTime);
+        entries.push(
+          from !== null && to !== null && to > from
+            ? {startMin: from, endMin: to, title: event.summary}
+            : {startMin: 0, endMin: 0, title: event.summary},
+        );
+      }
+      for (const task of tasksOnDay(tasksRef.current, iso)) {
+        if (task.completed) {
+          continue;
+        }
+        // A to-do carries a date and no time, so it has nowhere on an hour grid
+        // to sit. Given a zero-length span it is drawn as a label rather than a
+        // block, which is what it is.
+        entries.push({startMin: 0, endMin: 0, title: `\u2610 ${task.summary}`});
+      }
+
+      setAsk({
+        title: 'Add a calendar page?',
+        body: `The day's events and to-dos will be drawn into ${path} as a background on its own layer, for you to write over.`,
+        label: 'Yes, add it',
+        run: async () => {
+          const absolute = await absoluteNotePath(path);
+          const page = await pageSizeOf(absolute);
+          const report = await writeBackground(absolute, 0, dayBackground(page, entries));
+          if (report.error) {
+            throw new Error(report.error);
+          }
+          // The timings are reported out loud on purpose, for this first build:
+          // whether two hundred elements is fast enough decides whether the
+          // quarter page is drawn or rastered, and guessing it is what this
+          // whole exercise has been trying to avoid.
+          return (
+            `Saved successfully — ${report.elements} element(s) drawn into ${path} ` +
+            `in ${report.ms}ms (${report.allocateMs}ms allocating).`
+          );
+        },
+      });
+    },
+    [],
+  );
+
   const askDailyNote = useCallback(
     (iso: string, exists: boolean) => {
       // Guarded here rather than in runAsk alone: the "already exists" branch
@@ -4064,6 +4139,7 @@ will not duplicate them.`}
                   startHour={config.agendaStartHour}
                   endHour={config.agendaEndHour}
                   onDailyNote={askDailyNote}
+                  onCalendarPage={askCalendarPage}
                   onPickDate={() => setPickingDate('day')}
                   eventNotes={eventNotes}
                   onEventNote={askEventNote}

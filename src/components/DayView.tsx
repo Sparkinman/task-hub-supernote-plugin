@@ -73,6 +73,8 @@ function DayViewImpl(props: {
    */
   onEditTask: (task: RemoteTask) => void;
   onDailyNote: (iso: string, exists: boolean) => void;
+  /** Draw this day's agenda into the note as a background to write over. */
+  onCalendarPage: (iso: string) => void;
   onPickDate: () => void;
   eventNotes: Set<string>;
   onEventNote: (event: RemoteEvent, exists: boolean) => void;
@@ -95,6 +97,7 @@ function DayViewImpl(props: {
     onCompleteTask,
     onEditTask,
     onDailyNote,
+    onCalendarPage,
     onPickDate,
     eventNotes,
     onEventNote,
@@ -188,6 +191,15 @@ function DayViewImpl(props: {
             <Text style={styles.buttonTextPrimary}>
               {hasNote ? 'Open existing note' : 'Create daily note'}
             </Text>
+          </Pressable>
+          {/*
+            Never automatic. A background is written into somebody's note only
+            when they ask for it, on the day they are looking at — the same rule
+            the date heading follows, and the reason this is a button rather
+            than a setting that fires on creation.
+          */}
+          <Pressable style={styles.button} onPress={() => onCalendarPage(day)}>
+            <Text style={styles.buttonText}>Add calendar page</Text>
           </Pressable>
         </View>
       )}

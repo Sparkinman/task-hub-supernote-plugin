@@ -57,7 +57,7 @@ interface Loose {
  * failing when the permission is absent, so a refusal here is expected and not
  * worth reporting.
  */
-async function pageSizeOf(absolutePath: string): Promise<PageSize> {
+export async function pageSizeOf(absolutePath: string): Promise<PageSize> {
   try {
     const res = (await PluginFileAPI.getPageSize(absolutePath, FIRST_PAGE)) as Loose | null;
     const size = res?.result as PageSize | undefined;
