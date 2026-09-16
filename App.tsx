@@ -3056,7 +3056,7 @@ export default function App(): React.JSX.Element {
           // invisible to the only person who can see the device.
           return (
             `Saved successfully — ${report.landed} of ${report.elements} element(s) drawn ` +
-            `into ${target.path} in ${report.ms}ms${report.oneByOne ? ', one at a time' : ''}.`
+            `into ${target.path} in ${report.ms}ms.`
           );
         },
       });

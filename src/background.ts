@@ -96,6 +96,29 @@ const PX_PER_MM = 11.85;
 
 const ruleSpacing = () => Math.round(RULE_MM * PX_PER_MM);
 
+/**
+ * Ruled lines spread evenly between two edges, touching neither.
+ *
+ * Fixed 7mm steps from the top leave whatever does not divide as a ragged gap
+ * at the bottom, and drop a line a hair above the edge below it. Fitting the
+ * same number of lines and spacing them evenly puts the slack between every
+ * line instead of all of it at the end, and never draws one on the boundary —
+ * the boundary is already a line.
+ */
+function evenLines(top: number, bottom: number, spacing: number): number[] {
+  const span = bottom - top;
+  const count = Math.max(0, Math.floor(span / spacing) - 1);
+  if (count <= 0) {
+    return [];
+  }
+  const step = span / (count + 1);
+  const out: number[] = [];
+  for (let i = 1; i <= count; i++) {
+    out.push(Math.round(top + i * step));
+  }
+  return out;
+}
+
 function hairline(left: number, y: number, right: number): Rule {
   return {left, top: y, right, bottom: y};
 }
@@ -123,11 +146,9 @@ function splitForNotes(page: PageSize): {calendar: Rect; notes: Rect; noteRules:
   const f = frame(page);
   const usable = f.bottom - f.top;
   const split = f.top + Math.round(usable * CALENDAR_SHARE);
-  const spacing = ruleSpacing();
-  const rules: Rule[] = [];
-  for (let y = split + spacing; y <= f.bottom; y += spacing) {
-    rules.push(hairline(f.left, y, f.right));
-  }
+  const rules: Rule[] = evenLines(split, f.bottom, ruleSpacing()).map(y =>
+    hairline(f.left, y, f.right),
+  );
   return {
     calendar: {left: f.left, top: f.top, right: f.right, bottom: split},
     notes: {left: f.left, top: split, right: f.right, bottom: f.bottom},
@@ -212,7 +233,7 @@ export function dayBackground(
   // rather than to one column of it.
   const spacing = ruleSpacing();
   const notesTop = f.bottom - Math.round((f.bottom - f.top) * DAY_NOTES_SHARE);
-  for (let ny = notesTop + spacing; ny <= f.bottom; ny += spacing) {
+  for (const ny of evenLines(notesTop, f.bottom, spacing)) {
     rules.push(hairline(f.left, ny, f.right));
   }
   const body = {top: f.top, bottom: notesTop - 12};
@@ -370,9 +391,10 @@ export function weekBackground(page: PageSize, days: {label: string}[]): Backgro
       top: top + 6,
       fontSize: font,
     });
-    // Ruled to fill the row, so the writing space is lined all the way down
-    // rather than being one deep empty box per day.
-    for (let y = top + spacing; y < bottom - 8; y += spacing) {
+    // Ruled to fill the row, evenly, so the slack is shared between the lines
+    // rather than left as a gap at the foot of each day — and never a line
+    // sitting a hair above the day's own divider, which is already a line.
+    for (const y of evenLines(top, bottom, spacing)) {
       rules.push(hairline(calendar.left + gutter, y, calendar.right));
     }
     writable.push({left: calendar.left + gutter, top, right: calendar.right, bottom});

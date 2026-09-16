@@ -308,6 +308,31 @@ async function allocate(type: number): Promise<Record<string, unknown> | null> {
   return made.result as Record<string, unknown>;
 }
 
+/**
+ * How many elements are allocated at once.
+ *
+ * `createElement` is a bridge round trip each, and awaiting them one at a time
+ * is why building forty-seven elements was noticeable on its own. Patterns
+ * measured the same thing over 48 marks — 192ms at one at a time, 80ms at
+ * sixteen, 57ms at sixty-four, every mark landing every time — and settled on
+ * 64 because nothing was dropped at it. There was a real question about
+ * `createElement` being re-entrant, since it allocates natively and registers
+ * accessors behind a uuid; the answer is that it copes.
+ */
+const BUILD_CONCURRENCY = 64;
+
+/** Allocate several elements at once, in order. */
+async function allocateAll<T>(
+  items: T[],
+  make: (item: T) => Promise<Record<string, unknown> | null>,
+): Promise<(Record<string, unknown> | null)[]> {
+  const out: (Record<string, unknown> | null)[] = [];
+  for (let i = 0; i < items.length; i += BUILD_CONCURRENCY) {
+    out.push(...(await Promise.all(items.slice(i, i + BUILD_CONCURRENCY).map(make))));
+  }
+  return out;
+}
+
 /** What a background draw cost, for deciding raster against vector. */
 export interface DrawReport {
   error: string | null;
@@ -318,8 +343,6 @@ export interface DrawReport {
   elements: number;
   /** How many of them the device actually drew, counted rather than trusted. */
   landed: number;
-  /** True when the batch was refused and they went down one at a time. */
-  oneByOne: boolean;
   /** Which template the blank page actually got. Reported, not logged: there
    * is no adb on the machine this is built from, so anything only logged is
    * invisible to the person who can see the device. */
@@ -359,7 +382,6 @@ export async function writeBackground(
   let switched = false;
   let notePath = '';
   let landedCount = 0;
-  let oneByOne = false;
   let drawnPage = 0;
   const elements: Record<string, unknown>[] = [];
 
@@ -389,7 +411,6 @@ export async function writeBackground(
         allocateMs: 0,
         elements: 0,
         landed: 0,
-        oneByOne: false,
         template: '',
         presets: [],
       };
@@ -435,7 +456,6 @@ export async function writeBackground(
         allocateMs: 0,
         elements: 0,
         landed: 0,
-        oneByOne: false,
         template: '',
         presets,
       };
@@ -459,10 +479,12 @@ export async function writeBackground(
 
     const startedAllocating = Date.now();
 
-    for (const rule of bg.rules) {
+    // Built several at a time. One at a time is a bridge round trip each, and
+    // it was a visible share of the wait on its own.
+    const madeRules = await allocateAll(bg.rules, async rule => {
       const geo = await allocate(Element.TYPE_GEO);
       if (!geo) {
-        continue;
+        return null;
       }
       geo.pageNum = pageNum;
       // A real Geometry, not an object of the same shape. `createElement`
@@ -482,19 +504,17 @@ export async function writeBackground(
         {x: rule.right, y: rule.bottom},
       ];
       geo.geometry = shape;
-      // **The line that makes a rule appear at all.** Taken from the Patterns
-      // plugin, which draws thousands of these: an element carries its own
-      // thickness beside the pen's width, and without it the insert is accepted
-      // and nothing is drawn — the exact failure seen here, where the text
-      // elements in the same call arrived and every rule did not.
+      // **The line that makes a rule appear at all.** An element carries its
+      // own thickness beside the pen's width, and without it the insert is
+      // accepted and nothing is drawn.
       geo.thickness = RULE_PEN.penWidth;
-      elements.push(geo);
-    }
+      return geo;
+    });
 
-    for (const label of bg.labels) {
+    const madeLabels = await allocateAll(bg.labels, async label => {
       const text = await allocate(Element.TYPE_TEXT);
       if (!text) {
-        continue;
+        return null;
       }
       const box = new TextBox();
       box.textContentFull = safeText(label.text);
@@ -518,7 +538,13 @@ export async function writeBackground(
       box.textEditable = 0;
       text.pageNum = pageNum;
       text.textBox = box;
-      elements.push(text);
+      return text;
+    });
+
+    for (const made of [...madeRules, ...madeLabels]) {
+      if (made) {
+        elements.push(made);
+      }
     }
     allocateMs = Date.now() - startedAllocating;
 
@@ -537,74 +563,33 @@ export async function writeBackground(
     // "the layer of the element does not match the provided layer parameter",
     // even when the element's own layerNum says the same thing. Whichever layer
     // is current is the one it lands on.
-    const before = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
     let inserted = (await PluginCommAPI.insertPageElements(
       elements,
       pageNum,
       WRITE_LAYER,
     )) as Loose | null;
 
-    // **Counted, not trusted, and retried once.** The Patterns plugin recorded
-    // this after losing a session to it: the first batch insert after the panel
-    // opens is often swallowed — it reports success and draws nothing — and a
-    // second attempt always lands. On a Nomad it happened to every first
-    // insert; on a Manta, never. A path that writes without checking is a path
-    // that silently does nothing on one of the two panels.
-    await PluginNoteAPI.saveCurrentNote();
-    const after = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
-    const landed = Number(after ?? 0) - Number(before ?? 0);
-    if (landed <= 0) {
-      console.log(`${TAG} first insert drew nothing (${before} -> ${after}); retrying`);
+    // One retry, and only when the call itself says it failed.
+    //
+    // The Patterns plugin records that the first batch insert after the panel
+    // opens is often swallowed — success reported, nothing drawn — so a retry
+    // is worth having. What is NOT worth having is deciding that from an
+    // element count: reading straight after a write can show the page as it was
+    // rather than as it is, because a reload still in flight is this firmware's
+    // signature failure. A count-triggered retry therefore fires when nothing
+    // is wrong, inserts everything twice, and on the device took the note down
+    // with it.
+    if (inserted?.success !== true) {
+      console.log(`${TAG} insert refused: ${JSON.stringify(inserted)} — retrying once`);
+      await PluginNoteAPI.saveCurrentNote();
       inserted = (await PluginCommAPI.insertPageElements(
         elements,
         pageNum,
         WRITE_LAYER,
       )) as Loose | null;
-      await PluginNoteAPI.saveCurrentNote();
-      const second = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
-      landedCount = Number(second ?? 0) - Number(before ?? 0);
-    } else {
-      landedCount = landed;
     }
+    landedCount = inserted?.success === true ? elements.length : 0;
 
-    // Still nothing, so the batch is being refused rather than swallowed — and
-    // a batch is all-or-nothing, so one element the host dislikes loses the
-    // whole page. Put them down one at a time instead: the bad one loses only
-    // itself, and the count says how many there were. The Patterns plugin has
-    // the same fallback for the same reason.
-    if (landedCount <= 0 && elements.length > 0) {
-      console.log(`${TAG} batch refused twice; inserting one at a time`);
-      let drawn = 0;
-      for (const element of elements) {
-        const one = (await PluginCommAPI.insertPageElements(
-          [element],
-          pageNum,
-          WRITE_LAYER,
-        )) as Loose | null;
-        if (one?.success === true) {
-          drawn += 1;
-        }
-      }
-      oneByOne = true;
-      landedCount = drawn;
-      inserted = {success: drawn > 0, result: drawn > 0};
-    }
-
-    if (!inserted?.success || inserted.result === false) {
-      const code = inserted?.error?.code;
-      return {
-        error: `${inserted?.error?.message ?? 'the device refused the background'}${
-          code ? ` (code ${code})` : ''
-        }`,
-        ms: Date.now() - started,
-        allocateMs,
-        elements: elements.length,
-        landed: landedCount,
-        oneByOne,
-        template: usedTemplate,
-        presets,
-      };
-    }
     // Save, THEN reload — the ordering for an in-memory write, and the opposite
     // of the rule for the file route. Reloading without saving first throws the
     // insert away, which looks exactly like the API having silently done
@@ -618,7 +603,6 @@ export async function writeBackground(
       allocateMs,
       elements: elements.length,
       landed: landedCount,
-      oneByOne,
       template: usedTemplate,
       presets,
     };
@@ -629,7 +613,6 @@ export async function writeBackground(
       allocateMs,
       elements: elements.length,
       landed: landedCount,
-      oneByOne,
       template: usedTemplate,
       presets,
     };
@@ -639,12 +622,16 @@ export async function writeBackground(
     if (switched && notePath) {
       await setCurrentLayer(notePath, drawnPage, MAIN_LAYER).catch(() => false);
     }
-    for (const element of elements) {
-      try {
-        await (element as {recycle?: () => Promise<void>}).recycle?.();
-      } catch {
-        // Freeing native memory is best-effort; the write has already happened.
-      }
-    }
+    // **Nothing is recycled here, deliberately.** `createElement` allocates
+    // natively and the host finds the element behind its uuid; after an
+    // in-memory insert the host is still holding it, so freeing it pulls the
+    // ground out from under the page it was just drawn on. On the device that
+    // showed as a few elements arriving and then the note dying.
+    //
+    // `dateheading.ts` does recycle, and is right to: it writes through
+    // `PluginFileAPI.insertElements`, where the element is serialised into the
+    // file and nothing keeps a reference. Two routes, opposite rules, the same
+    // way the save belongs after one and never after the other. The Patterns
+    // plugin recycles nothing it inserts.
   }
 }

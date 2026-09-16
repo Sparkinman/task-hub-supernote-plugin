@@ -118,7 +118,8 @@ describe('the day page', () => {
     const spacing = Math.round(7 * 11.85);
     const band = bg.rules.filter(r => r.top === r.bottom && r.top > notes.top);
     expect(band.length).toBeGreaterThanOrEqual(3);
-    expect(band[1].top - band[0].top).toBe(spacing);
+    const step = band[1].top - band[0].top;
+    expect(Math.abs(step - spacing)).toBeLessThanOrEqual(spacing * 0.25);
     expect(notes.right - notes.left).toBeGreaterThan(PAGE.width / 2);
   });
 });
@@ -135,10 +136,15 @@ describe('the week and month pages', () => {
   it('rule the notes area at 7mm, which is about seven lines', () => {
     const bg = monthBackground(PAGE, 5, Array.from({length: 35}, (_, i) => String(i + 1)));
     const spacing = Math.round(7 * 11.85);
-    const notesTop = bg.writable[bg.writable.length - 1].top;
-    const band = bg.rules.filter(r => r.top > notesTop && r.top === r.bottom);
+    const notes = bg.writable[bg.writable.length - 1];
+    const band = bg.rules.filter(r => r.top > notes.top && r.top === r.bottom);
     expect(band.length).toBeGreaterThanOrEqual(6);
-    expect(band[1].top - band[0].top).toBe(spacing);
+    // Evenly spread rather than stepped from the top, so the slack is shared
+    // between the lines instead of left as a gap at the foot — and the last one
+    // never lands on the boundary, which is already a line.
+    const step = band[1].top - band[0].top;
+    expect(Math.abs(step - spacing)).toBeLessThanOrEqual(spacing * 0.25);
+    expect(band[band.length - 1].top).toBeLessThan(notes.bottom);
   });
 
   it('runs the week as rows across the page, not columns down it', () => {
