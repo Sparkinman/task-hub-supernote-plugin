@@ -145,7 +145,14 @@ import {
 import {CACHE_FILE, decodeCache, encodeCache} from './src/cache';
 import {expandEvents} from './src/expand';
 import {writeDateHeading} from './src/dateheading';
-import {dayBackground, type DayEntry} from './src/background';
+import {
+  dayBackground,
+  monthBackground,
+  weekBackground,
+  type Background,
+  type DayEntry,
+  type PageSize,
+} from './src/background';
 import {writeBackground} from './src/backgrounddraw';
 import {
   covers,
@@ -236,6 +243,7 @@ import {TemplatePicker, TemplateSheet} from './src/components/TemplatePicker';
 import {FolderPicker} from './src/components/FolderPicker';
 import {MiniCalendar} from './src/components/MiniCalendar';
 import {weekOf} from './src/components/WeekView';
+import {monthGrid} from './src/calendar';
 
 /** Where a list of calendar subscriptions is read from, inside Document/TaskHub. */
 const FEED_LIST_FILE = 'calendars.txt';
@@ -2134,7 +2142,7 @@ export default function App(): React.JSX.Element {
    * looking at rather than a second, possibly different, read.
    */
   const askCalendarPage = useCallback(
-    (iso: string) => {
+    (iso: string, kind: 'day' | 'week' | 'month') => {
       // startTime and endTime are local 'HH:MM' and absent on an all-day event,
       // which is exactly the distinction the page needs: a timed event gets a
       // block on the hour grid, an all-day one has no hour to be drawn at.
@@ -2162,15 +2170,41 @@ export default function App(): React.JSX.Element {
         entries.push({startMin: 0, endMin: 0, title: `\u2610 ${task.summary}`});
       }
 
+      // Week and month are deliberately empty boxes. The schedule is drawn only
+      // on the day page, where the agenda is the thing being written over; a
+      // month with every cell full has nowhere left to write, which is the
+      // whole point of the page.
+      const build = (page: PageSize): Background => {
+        if (kind === 'week') {
+          return weekBackground(
+            page,
+            weekOf(iso).map(d => String(Number(d.slice(8, 10)))),
+          );
+        }
+        if (kind === 'month') {
+          const at = new Date(`${iso}T00:00:00`);
+          const cells = monthGrid(at.getFullYear(), at.getMonth());
+          return monthBackground(
+            page,
+            cells.length / 7,
+            cells.map((c: {day: number | null}) => (c.day === null ? '' : String(c.day))),
+          );
+        }
+        return dayBackground(page, entries);
+      };
+
       setAsk({
         title: 'Add a calendar page?',
         // Into the note being read, because that is where the host can draw:
         // the insert writes the in-memory page, so the page it writes to is
         // whichever one is displayed.
-        body: `A blank page will be added to the note you are in, after the page you are on, carrying ${formatDate(iso, getConfig().dateFormat)}'s events and to-dos as a background to write over.`,
+        body:
+          kind === 'day'
+            ? `A blank page will be added to the note you are in, after the page you are on, carrying ${formatDate(iso, getConfig().dateFormat)}'s events and to-dos as a background to write over.`
+            : `A blank page will be added to the note you are in, after the page you are on, with an empty ${kind} grid and a ruled notes area to write in.`,
         label: 'Yes, add it',
         run: async () => {
-          const report = await writeBackground(page => dayBackground(page, entries));
+          const report = await writeBackground(build);
           if (report.error) {
             throw new Error(report.error);
           }
@@ -3855,6 +3889,19 @@ will not duplicate them.`}
                 <Button label="+ New task" onPress={() => openTaskEditor(null)} />
                 <Button label="Today" onPress={goToday} />
                 <Button label="Refresh" onPress={() => void refresh()} />
+                {/*
+                  Here rather than beside the note buttons, for two reasons.
+                  It is always visible — the note-button row is gated on daily
+                  notes being switched on and sits under a scroll on a busy day
+                  — and one button serves all three views, because what it
+                  draws follows whichever one is showing.
+                */}
+                {(calView === 'day' || calView === 'week' || calView === 'month') && (
+                  <Button
+                    label="Calendar page"
+                    onPress={() => askCalendarPage(day, calView)}
+                  />
+                )}
                 {calView === 'day' && (
                   <Text style={styles.dayHeading}>{formatDate(day, dateFormat)}</Text>
                 )}
@@ -4137,7 +4184,7 @@ will not duplicate them.`}
                   startHour={config.agendaStartHour}
                   endHour={config.agendaEndHour}
                   onDailyNote={askDailyNote}
-                  onCalendarPage={askCalendarPage}
+                  onCalendarPage={d => askCalendarPage(d, 'day')}
                   onPickDate={() => setPickingDate('day')}
                   eventNotes={eventNotes}
                   onEventNote={askEventNote}

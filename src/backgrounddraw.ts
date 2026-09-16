@@ -176,6 +176,24 @@ interface Loose {
   error?: {message?: string; code?: number};
 }
 
+/**
+ * The value out of an `APIResponse`, or null.
+ *
+ * Every one of these calls answers `{success, result, error}` rather than the
+ * value itself. Casting the envelope to the value is how "no note is open"
+ * appeared while a note plainly was: `getCurrentFilePath` returned an object,
+ * the string check failed, and the message blamed the user for it. The sibling
+ * plugins unwrap everything through a helper of exactly this shape, which is
+ * the reason they do not hit this.
+ */
+function value<T>(res: unknown): T | null {
+  if (res && typeof res === 'object' && 'result' in (res as Record<string, unknown>)) {
+    const inner = (res as {result?: unknown}).result;
+    return (inner ?? null) as T | null;
+  }
+  return (res ?? null) as T | null;
+}
+
 interface RawLayer {
   layerId: number;
   name: string;
@@ -210,8 +228,7 @@ async function setCurrentLayer(
       // page everywhere else here.
       await PluginNoteAPI.saveCurrentNote();
     }
-    const raw = (await PluginFileAPI.getLayers(filePath, page)) as Loose | null;
-    const layers = (raw?.result ?? raw) as RawLayer[] | null;
+    const layers = value<RawLayer[]>(await PluginFileAPI.getLayers(filePath, page));
     if (!Array.isArray(layers)) {
       continue;
     }
@@ -292,10 +309,10 @@ export async function writeBackground(
     // writes to is whichever one is displayed — which means the calendar goes
     // into the note they are in. That is how the Tables and Patterns plugins
     // work too, and it is the platform's shape rather than a compromise.
-    const absolutePath = (await PluginCommAPI.getCurrentFilePath()) as unknown as string;
+    const absolutePath = value<string>(await PluginCommAPI.getCurrentFilePath()) ?? '';
     notePath = absolutePath;
-    const current = ((await PluginCommAPI.getCurrentPageNum()) as unknown as number) ?? 0;
-    if (typeof absolutePath !== 'string' || !absolutePath) {
+    const current = Number(value<number>(await PluginCommAPI.getCurrentPageNum()) ?? 0);
+    if (!absolutePath) {
       return {
         error: 'No note is open. Open the note you want the calendar page in, then try again.',
         ms: Date.now() - started,
@@ -312,9 +329,9 @@ export async function writeBackground(
     // The device's own page size, asked for here rather than passed in: the
     // caller has no way to know it, and `getPageDisplaySize` is what the SDK
     // says to use for anything that will be drawn on the current page.
-    const size = (await PluginCommAPI.getPageDisplaySize()) as unknown as
-      | {width?: number; height?: number}
-      | null;
+    const size = value<{width?: number; height?: number}>(
+      await PluginCommAPI.getPageDisplaySize(),
+    );
     const bg = build({
       width: Number(size?.width) || FALLBACK_PAGE.width,
       height: Number(size?.height) || FALLBACK_PAGE.height,
@@ -444,8 +461,7 @@ export async function writeBackground(
     // "the layer of the element does not match the provided layer parameter",
     // even when the element's own layerNum says the same thing. Whichever layer
     // is current is the one it lands on.
-    const before = ((await PluginFileAPI.getElementCounts(absolutePath, pageNum)) as Loose | null)
-      ?.result;
+    const before = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
     let inserted = (await PluginCommAPI.insertPageElements(
       elements,
       pageNum,
@@ -459,8 +475,7 @@ export async function writeBackground(
     // insert; on a Manta, never. A path that writes without checking is a path
     // that silently does nothing on one of the two panels.
     await PluginNoteAPI.saveCurrentNote();
-    const after = ((await PluginFileAPI.getElementCounts(absolutePath, pageNum)) as Loose | null)
-      ?.result;
+    const after = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
     const landed = Number(after ?? 0) - Number(before ?? 0);
     if (landed <= 0) {
       console.log(`${TAG} first insert drew nothing (${before} -> ${after}); retrying`);
