@@ -3898,7 +3898,10 @@ will not duplicate them.`}
                 */}
                 {(calView === 'day' || calView === 'week' || calView === 'month') && (
                   <Button
-                    label="Calendar page"
+                    // "Calendar page" said what it made, not what pressing it
+                    // does, which is the usual way a button ends up meaning
+                    // nothing until you have already pressed it once.
+                    label="Insert snapshot"
                     onPress={() => askCalendarPage(day, calView)}
                   />
                 )}
