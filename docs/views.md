@@ -70,6 +70,10 @@ Two rules apply everywhere:
   selection and updates the panel underneath; the second opens the day view.
 - **Today is always marked**, in every view, even when you are looking at
   another day — so the calendar never loses its anchor.
+- **Task Hub reopens on the day you left.** Handing over to a note — opening a
+  daily note, or inserting a snapshot — records the day that was showing, so
+  coming back lands there rather than on today. **Today**, in the button row,
+  brings every view back to today whenever you want it.
 
 ### Year
 

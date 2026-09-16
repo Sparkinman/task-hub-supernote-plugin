@@ -77,6 +77,9 @@ yarn-error.log
 # --- Task Hub additions ---
 # Build outputs. The .snplg is reproducible from source in ~15s.
 build/
+# A copy of the release binary kept at the root for installing and uploading.
+# It reaches people through the release page, never through the repository.
+/*.snplg
 android/.gradle/
 android/app/build/
 android/build/

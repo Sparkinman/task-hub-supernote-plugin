@@ -395,6 +395,8 @@ function describe(err: unknown): string {
 export default function App(): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>('idle');
   const [tab, setTab] = useState<Tab>('tasks');
+  /** Whether a tab was chosen by hand since this opening — see the tab strip. */
+  const tabPickedRef = useRef(false);
   const [calView, setCalViewRaw] = useState<CalView>('month');
   const [viewHistory, setViewHistory] = useState<CalView[]>([]);
   /**
@@ -633,11 +635,45 @@ export default function App(): React.JSX.Element {
     }, 120);
   }, []);
 
-  const [day, setDay] = useState(() => toDateInput(new Date()));
-  const [view, setView] = useState(() => {
+  const [day, setDayState] = useState(() => toDateInput(new Date()));
+  const [view, setViewState] = useState(() => {
     const now = new Date();
     return {year: now.getFullYear(), month: now.getMonth()};
   });
+
+  /**
+   * Whether the calendar has been moved by hand since this opening.
+   *
+   * The settings load is asynchronous, and the day it restores lands whenever
+   * the filesystem gets round to it. Anyone quick enough to press Today — or
+   * page the month, or tap a day — before that had their choice thrown away a
+   * moment later by a restore that knew nothing about it. It presented as
+   * "Today does nothing in the week view", because `lastDay` is only ever a day
+   * other than today when the last thing you did was page the calendar and then
+   * hand over to a note, which is exactly what Insert snapshot does.
+   *
+   * Tracked in a ref rather than by checking the day against today: the user
+   * may legitimately have moved the calendar to some other day, and that choice
+   * deserves the same protection as pressing Today.
+   *
+   * Set by wrapping the two setters rather than at each call site. There are a
+   * dozen places that move the calendar, and a flag every one of them has to
+   * remember to set is a flag the next one added will not — the same reasoning
+   * that made the settings form compare by value instead of tracking a dirty
+   * flag by hand.
+   */
+  const calendarMovedRef = useRef(false);
+  const setDay = useCallback((next: React.SetStateAction<string>) => {
+    calendarMovedRef.current = true;
+    setDayState(next);
+  }, []);
+  const setView = useCallback(
+    (next: React.SetStateAction<{year: number; month: number}>) => {
+      calendarMovedRef.current = true;
+      setViewState(next);
+    },
+    [],
+  );
 
 
   /**
@@ -1467,6 +1503,7 @@ export default function App(): React.JSX.Element {
     // The configured tab, read fresh each opening. getConfig rather than the
     // `config` state: on a cold start this runs before the settings load has
     // finished, and the restore below sets it again from what it read.
+    tabPickedRef.current = false;
     setTab(getConfig().startTab);
     // Back to the default width. Last session may have paged to another year
     // and widened it; carrying that over would make every later opening as slow
@@ -1559,8 +1596,11 @@ export default function App(): React.JSX.Element {
         // made in the meantime is not overwritten.
         // Set here as well as in openHub: on a cold start this load finishes
         // after the hub has already opened, so openHub saw an empty config.
-        // Only on the one restore, so a tab switched by hand is never undone.
-        setTab(stored.startTab);
+        // Skipped once a tab has been chosen by hand, which is what stops a
+        // late-landing read snatching the screen back to the configured tab.
+        if (!tabPickedRef.current) {
+          setTab(stored.startTab);
+        }
         if (stored.defaultCollectionUrl) {
           setTargets(previous =>
             previous.length === 0 ? [stored.defaultCollectionUrl] : previous,
@@ -1571,10 +1611,15 @@ export default function App(): React.JSX.Element {
         }
         // Reopen on the day the plugin was last left from, so coming back from
         // a note lands where it was rather than on today.
-        if (stored.lastDay) {
-          setDay(stored.lastDay);
+        //
+        // Skipped once the calendar has been moved by hand: this read can land
+        // seconds after the panel is usable, and applying it then undoes a day
+        // the user has already chosen. The raw setters, so restoring the
+        // bookmark does not itself count as moving the calendar.
+        if (stored.lastDay && !calendarMovedRef.current) {
+          setDayState(stored.lastDay);
           const d = new Date(`${stored.lastDay}T00:00:00`);
-          setView({year: d.getFullYear(), month: d.getMonth()});
+          setViewState({year: d.getFullYear(), month: d.getMonth()});
         }
         // Tasks and events only. The note folders are walked when the calendar
         // is first opened — four directory walks are a large part of what the
@@ -1655,7 +1700,7 @@ export default function App(): React.JSX.Element {
       const now = new Date();
       setView({year: now.getFullYear(), month: now.getMonth()});
     }
-  }, []);
+  }, [setDay, setView]);
 
   const goBackView = useCallback(() => {
     const history = viewHistoryRef.current;
@@ -1702,39 +1747,39 @@ export default function App(): React.JSX.Element {
     // to today the way a plain view switch is.
     setCalViewRaw('day');
     setViewHistory(h => [...h, calViewRef.current]);
-  }, []);
+  }, [setDay]);
   const openWeekOn = useCallback((iso: string) => {
     setDay(iso);
     // Raw setter: this IS a deliberate choice of day, so it must not be moved
     // to today the way a plain view switch is.
     setCalViewRaw('week');
     setViewHistory(h => [...h, calViewRef.current]);
-  }, []);
+  }, [setDay]);
   const openQuarterOn = useCallback((iso: string) => {
     setDay(iso);
     // Raw setter: this IS a deliberate choice of day, so it must not be moved
     // to today the way a plain view switch is.
     setCalViewRaw('quarter');
     setViewHistory(h => [...h, calViewRef.current]);
-  }, []);
+  }, [setDay]);
   const openMonthAt = useCallback((year: number, month: number) => {
     setView({year, month});
     setCalViewRaw('month');
     setViewHistory(h => [...h, calViewRef.current]);
-  }, []);
+  }, [setView]);
   const shiftToYear = useCallback(
     (year: number) => {
       const next = `${year}${day.slice(4)}`;
       setDay(next);
       setView(v => ({year, month: v.month}));
     },
-    [day],
+    [day, setDay, setView],
   );
   const shiftToQuarter = useCallback((iso: string) => {
     setDay(iso);
     const d = new Date(`${iso}T00:00:00`);
     setView({year: d.getFullYear(), month: d.getMonth()});
-  }, []);
+  }, [setDay, setView]);
 
   /**
    * Whether the settings form differs from what is stored.
@@ -1798,7 +1843,7 @@ export default function App(): React.JSX.Element {
     const now = new Date();
     setDay(toDateInput(now));
     setView({year: now.getFullYear(), month: now.getMonth()});
-  }, []);
+  }, [setDay, setView]);
 
 
   // ---- writes, all funnelled through ask() ----
@@ -3792,7 +3837,12 @@ will not duplicate them.`}
               {key: 'find', label: 'Find'},
             ]}
             value={tab}
-            onPick={k => setTab(k as Tab)}
+            onPick={k => {
+              // Same race as the day below it: a tab chosen before the settings
+              // read lands was put back to the configured one when it did.
+              tabPickedRef.current = true;
+              setTab(k as Tab);
+            }}
           />
 
           {tab === 'tasks' && (

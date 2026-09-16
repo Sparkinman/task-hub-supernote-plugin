@@ -85,6 +85,17 @@ both. Both are explained in [Capturing handwriting](capture.md#two-limits-worth-
 - Tap **Rescan** if you restored notes from a backup — a restored file can carry
   its old modification time, which is what the index compares.
 
+## Today did nothing when I came back from a note
+
+Fixed in **0.81.3**. On earlier builds, the day Task Hub reopens on is read from
+storage a moment after the panel is usable, and that read overwrote anything you
+did in the meantime — so pressing **Today** straight after coming back from a
+note appeared to do nothing, and pressing it a second time worked.
+
+It showed up most often after **Insert snapshot**, because that hands over to the
+note it has just written, and the day it records is whichever week or month you
+had paged to. Choosing a tab in that first moment could be undone the same way.
+
 ## Everything is an hour or a day out
 
 Task Hub reads times as the device's own. It bundles no timezone database, so an

@@ -2,13 +2,66 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-16.
-Current build **0.81.2** (versionCode 123). **606 tests across 36 suites.**
+Current build **0.81.3** (versionCode 124). **609 tests across 37 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
-**licensed GPLv3**. **v0.81.2 is released and marked Latest**, with `TaskHub-0.81.2.snplg`
+**licensed GPLv3**. **v0.81.3 is released and marked Latest**, with `TaskHub-0.81.3.snplg`
 attached. `main` is pushed and clean.
 
 ## READ THIS FIRST — where the work stopped
+
+### 0.81.3 — a late settings read was undoing what the user had just done
+
+**Reported as "Today does not snap the week back in the week view", and it is not a week
+view bug at all.** The repro that found it: go to Week, page one week forward, *Insert
+snapshot*, write on the page it makes, come back to Task Hub, press **Today** — nothing
+moves. Press it again and it works.
+
+The shape is a race this repo has met once before, on the settings form:
+
+1. Leaving for a note writes `lastDay = day` into the settings (`leaveForNote`), so coming
+   back lands where you were. After paging the week, that bookmark is *not* today.
+2. The plugin remounts, `day` initialises to today, and the restore effect reads
+   `settings.json` **asynchronously**.
+3. You press Today before that read lands. It lands, does `setDay(stored.lastDay)`, and
+   drags the calendar back to the bookmarked day. The second press works because the read
+   has finished by then.
+
+**Why it looked week-specific.** `lastDay` differs from today only when the last thing you
+did was move the calendar and then hand over to a note — and *Insert snapshot* does exactly
+that. Day and month carry the identical fault; there is just no everyday way to trigger it.
+
+**What was done about it.** `setDay` and `setView` are now thin `useCallback` wrappers that
+set `calendarMovedRef` before calling the real setter, and the restore skips `lastDay` when
+that ref is set, using the raw setters so restoring the bookmark does not itself count as
+moving the calendar. **Wrapping the setters rather than tagging the call sites is the point**
+— a dozen places move the calendar, and a flag each of them must remember to set is a flag
+the next one added will not. The same reasoning already made `settingsDirty` a value
+comparison instead of a hand-maintained flag.
+
+`setTab(stored.startTab)`, one line above in the same block, had the same race and the same
+guard (`tabPickedRef`, reset per opening in `openHub`). Its old comment claimed a tab
+switched by hand was never undone; the restore was the thing undoing it.
+
+`__tests__/day-restore-race.test.tsx` pins all three states: press-then-late-restore keeps
+today, the unguarded version reproduces the bug, and an untouched calendar still restores
+the bookmark. It models the structure rather than mounting the plugin, which needs the SDK —
+the same approach as `settings-restore-race.test.tsx`.
+
+**The lesson worth carrying.** *Every* asynchronous read that lands on shared state needs to
+ask whether the user has already acted. Three of them sit in that one effect (settings form,
+tab, day); two are now guarded and the third was guarded from the start. Anything added
+there needs the same question asked of it.
+
+**Looked at and deliberately left alone.** The event-fetch effect asks `widenEvents` about
+`day`, but the month grid draws from `view`, and paging the month only moves `view`. It
+costs nothing inside the window opened each session — three months back, twelve forward —
+so it shows only if you page the *month* view past those edges, where the grid comes up with
+no event marks until you select a day in it. Week, quarter and year all move `day` when
+paged, so they widen correctly. Judged not worth touching a code path every calendar tap
+runs through; a year ahead is further than anyone pages by hand. The one-line fix, if it is
+ever wanted, is to feed the effect the month on screen for the month view, exactly as
+*Insert snapshot* already does.
 
 ### Drawing on a note page — everything that cost a build to learn
 
