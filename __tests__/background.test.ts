@@ -17,7 +17,6 @@ const agenda = (over: Partial<DayAgenda> = {}): DayAgenda => ({
   allDay: [],
   timed: [],
   dueToday: [],
-  upcoming: [],
   ...over,
 });
 
@@ -95,17 +94,24 @@ describe('the day page', () => {
     expect(bg.labels.some(l => l.text === 'PC Shared Calendar')).toBe(true);
   });
 
+  it('fills the rest of the tasks column with a checklist to write in', () => {
+    // A day with two tasks left two thirds of the column blank.
+    const bg = dayBackground(PAGE, agenda());
+    const boxes = bg.labels.filter(l => l.text === '[ ]');
+    expect(boxes.length).toBeGreaterThanOrEqual(5);
+    const spacing = Math.round(8 * 11.85);
+    expect(boxes[1].top - boxes[0].top).toBe(spacing);
+  });
+
   it('carries the tasks column the Day view shows', () => {
     const bg = dayBackground(
       PAGE,
-      agenda({
-        dueToday: [{title: 'Call the dentist', subtitle: 'paul-tasks'}],
-        upcoming: [{date: '09/18/2026', rows: [{title: 'Super note Inbox'}]}],
-      }),
+      agenda({dueToday: [{title: 'Call the dentist', subtitle: 'paul-tasks'}]}),
     );
     expect(bg.labels.some(l => l.text.includes('Call the dentist'))).toBe(true);
-    expect(bg.labels.some(l => l.text === 'Next 7 days')).toBe(true);
-    expect(bg.labels.some(l => l.text === '09/18/2026')).toBe(true);
+    // Not the next seven days. This is a snapshot, and a list of what is coming
+    // is wrong the moment anything moves.
+    expect(bg.labels.some(l => l.text === 'Next 7 days')).toBe(false);
   });
 
   it('says so when nothing is due, rather than leaving a blank column', () => {

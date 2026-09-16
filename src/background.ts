@@ -86,6 +86,14 @@ const CALENDAR_SHARE = 0.75;
 const RULE_MM = 7;
 
 /**
+ * Ruled spacing for the day page's checklist, in millimetres.
+ *
+ * Wider than the notes ruling because a line with a box on it is written in
+ * one pass rather than filled with prose, and a box wants room around it.
+ */
+const CHECKLIST_MM = 8;
+
+/**
  * Pixels per millimetre.
  *
  * A Manta is 1920px across a page about 162mm wide. Every panel in the range is
@@ -191,8 +199,15 @@ export interface AgendaRow {
 export interface DayAgenda {
   allDay: AgendaRow[];
   timed: AgendaRow[];
+  /**
+   * Only what is due on the day itself.
+   *
+   * The next seven days were here at first and came straight off the Day view.
+   * They do not belong on a page: this is a snapshot, so a list of what is
+   * coming is wrong the moment anything moves, and it is the half of the column
+   * that goes stale while the other half does not.
+   */
   dueToday: AgendaRow[];
-  upcoming: {date: string; rows: AgendaRow[]}[];
 }
 
 /** How the clock is written, matching whatever the Day view is showing. */
@@ -350,32 +365,19 @@ export function dayBackground(
     ty += rowHeight;
   }
 
-  if (agenda.upcoming.length > 0) {
-    ty += 10;
-    rules.push(hairline(right, ty, f.right));
-    ty += 14;
-    labels.push({text: 'Next 7 days', left: right, top: ty, fontSize: headFont});
-    ty += Math.round(headFont * 1.6);
-    for (const group of agenda.upcoming) {
-      if (ty > body.bottom - rowHeight) {
-        break;
-      }
-      labels.push({text: group.date, left: right, top: ty, fontSize: smallFont});
-      ty += Math.round(smallFont * 1.5);
-      for (const row of group.rows) {
-        if (ty > body.bottom - rowHeight) {
-          break;
-        }
-        labels.push({
-          text: fit(`[ ] ${row.title}`, f.right - right, titleFont),
-          left: right,
-          top: ty,
-          fontSize: titleFont,
-        });
-        ty += Math.round(titleFont * 1.5);
-      }
-    }
+  // The rest of the column, as a checklist to fill in.
+  //
+  // A day with two tasks left two thirds of this column blank, which is a lot
+  // of page to spend on nothing. Ruled at 8mm with a box on each line, so it
+  // carries on meaning "tasks" rather than becoming a second notes area — that
+  // is already at the foot, across the full width.
+  const boxSpacing = Math.round(CHECKLIST_MM * PX_PER_MM);
+  ty += 12;
+  for (let by = ty; by + boxSpacing <= body.bottom; by += boxSpacing) {
+    labels.push({text: '[ ]', left: right, top: by - Math.round(titleFont * 0.9), fontSize: titleFont});
+    rules.push(hairline(right + Math.round(titleFont * 2.2), by, f.right));
   }
+
   writable.push(
     {left: right, top: ty, right: f.right, bottom: body.bottom},
     {left: f.left, top: notesTop, right: f.right, bottom: f.bottom},

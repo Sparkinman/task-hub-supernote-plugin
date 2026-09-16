@@ -2938,24 +2938,7 @@ export default function App(): React.JSX.Element {
         dueToday: tasksOnDay(tasksRef.current, iso)
           .filter(t => !t.completed)
           .map(t => ({title: t.summary, subtitle: t.collectionLabel})),
-        upcoming: [],
       };
-
-      // The same seven days the Day view lists down its right-hand side.
-      const soon = new Map<string, {title: string; subtitle?: string}[]>();
-      for (let i = 1; i <= 7; i++) {
-        const when = shiftDays(iso, i);
-        const rows = tasksOnDay(tasksRef.current, when)
-          .filter(t => !t.completed)
-          .map(t => ({title: t.summary, subtitle: t.collectionLabel}));
-        if (rows.length > 0) {
-          soon.set(when, rows);
-        }
-      }
-      agenda.upcoming = Array.from(soon.entries()).map(([date, rows]) => ({
-        date: formatDate(date, getConfig().dateFormat),
-        rows,
-      }));
 
       // Week and month are deliberately empty boxes. The schedule is drawn only
       // on the day page, where the agenda is the thing being written over; a
