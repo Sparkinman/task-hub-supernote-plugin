@@ -263,6 +263,26 @@ async function allocate(type: number): Promise<Record<string, unknown> | null> {
  * 37ms to insert one — so this is a few per cent of the wait, and not where the
  * time goes.
  */
+/**
+ * Allocate geometry several at a time.
+ *
+ * Only for `TYPE_GEO`, which is the case the Patterns plugin actually measured
+ * and established — 192ms at one at a time against 57ms at sixty-four over the
+ * same 48 marks, every one landing. Text is allocated singly by `allocateAll`:
+ * doing both at once is what turned the day page blank, and re-entrancy across
+ * two element types was never something that plugin demonstrated.
+ */
+async function allocateMany<T>(
+  items: T[],
+  make: (item: T) => Promise<Record<string, unknown> | null>,
+): Promise<(Record<string, unknown> | null)[]> {
+  const out: (Record<string, unknown> | null)[] = [];
+  for (let i = 0; i < items.length; i += 32) {
+    out.push(...(await Promise.all(items.slice(i, i + 32).map(make))));
+  }
+  return out;
+}
+
 async function allocateAll<T>(
   items: T[],
   make: (item: T) => Promise<Record<string, unknown> | null>,
@@ -424,7 +444,7 @@ export async function writeBackground(
 
     // Built several at a time. One at a time is a bridge round trip each, and
     // it was a visible share of the wait on its own.
-    const madeRules = await allocateAll(bg.rules, async rule => {
+    const madeRules = await allocateMany(bg.rules, async rule => {
       const geo = await allocate(Element.TYPE_GEO);
       if (!geo) {
         return null;
@@ -484,7 +504,13 @@ export async function writeBackground(
       return text;
     });
 
-    for (const made of [...madeRules, ...madeLabels]) {
+    for (const made of madeRules) {
+      if (made) {
+        elements.push(made);
+      }
+    }
+    const ruleCount = elements.length;
+    for (const made of madeLabels) {
       if (made) {
         elements.push(made);
       }
@@ -517,11 +543,22 @@ export async function writeBackground(
     // Chunking means a refusal costs one chunk instead of the page, and the
     // count says how far it got. Rules go first so that a page which loses its
     // text still arrives as a usable grid rather than as nothing at all.
-    const CHUNK = 12;
+    // Rules go in one call and text in small chunks, because the two behave
+    // differently: the week page put ~45 rules down in a single insert without
+    // complaint, while 26 text elements in one call drew nothing. Text is what
+    // has to be rationed, and rationing the rules as well was simply slow.
+    const TEXT_CHUNK = 8;
     const before = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
     let refusals = 0;
-    for (let i = 0; i < elements.length; i += CHUNK) {
-      const chunk = elements.slice(i, i + CHUNK);
+    const batches: Record<string, unknown>[][] = [];
+    if (ruleCount > 0) {
+      batches.push(elements.slice(0, ruleCount));
+    }
+    for (let i = ruleCount; i < elements.length; i += TEXT_CHUNK) {
+      batches.push(elements.slice(i, i + TEXT_CHUNK));
+    }
+
+    for (const chunk of batches) {
       let res = (await PluginCommAPI.insertPageElements(
         chunk,
         pageNum,
@@ -539,9 +576,7 @@ export async function writeBackground(
       }
       if (res?.success !== true) {
         refusals += 1;
-        console.log(
-          `${TAG} chunk ${i / CHUNK} of ${chunk.length} refused: ${JSON.stringify(res)}`,
-        );
+        console.log(`${TAG} chunk of ${chunk.length} refused: ${JSON.stringify(res)}`);
       }
     }
 

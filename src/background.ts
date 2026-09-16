@@ -163,6 +163,20 @@ const TITLE_FONT = 0.013;
 const fontPx = (page: PageSize, fraction: number) =>
   Math.max(18, Math.round(page.height * fraction));
 
+/**
+ * Cut a label to the width it has to live in.
+ *
+ * The tasks column is about a third of the page, and "Schedule Install -
+ * Ericsson Approved Finish Proposal" ran off the edge of it on the device: the
+ * host does not wrap a text box, it just draws past the end. Roughly half the
+ * font size per character is close enough for a proportional face, and being a
+ * little cautious costs a word where being wrong costs the sentence.
+ */
+function fit(text: string, width: number, fontSize: number): string {
+  const chars = Math.max(6, Math.floor(width / (fontSize * 0.52)));
+  return text.length <= chars ? text : `${text.slice(0, chars - 1)}\u2026`;
+}
+
 /** A row on the day page: what it says, and what it belongs to. */
 export interface AgendaRow {
   title: string;
@@ -253,10 +267,15 @@ export function dayBackground(
   if (agenda.allDay.length > 0) {
     labels.push({text: 'all day', left: f.left, top: y + 2, fontSize: smallFont});
     for (const row of agenda.allDay) {
-      labels.push({text: row.title, left: f.left + gutter, top: y, fontSize: titleFont});
+      labels.push({
+        text: fit(row.title, split - (f.left + gutter), titleFont),
+        left: f.left + gutter,
+        top: y,
+        fontSize: titleFont,
+      });
       if (row.subtitle) {
         labels.push({
-          text: row.subtitle,
+          text: fit(row.subtitle, split - (f.left + gutter), smallFont),
           left: f.left + gutter,
           top: y + titleFont + 4,
           fontSize: smallFont,
@@ -287,10 +306,15 @@ export function dayBackground(
   }
   for (const row of timed) {
     const top = Math.round(at(row.startMin ?? 0));
-    labels.push({text: row.title, left: f.left + gutter, top: top + 6, fontSize: titleFont});
+    labels.push({
+      text: fit(row.title, split - (f.left + gutter), titleFont),
+      left: f.left + gutter,
+      top: top + 6,
+      fontSize: titleFont,
+    });
     if (row.subtitle) {
       labels.push({
-        text: row.subtitle,
+        text: fit(row.subtitle, split - (f.left + gutter), smallFont),
         left: f.left + gutter,
         top: top + 6 + titleFont + 2,
         fontSize: smallFont,
@@ -309,9 +333,19 @@ export function dayBackground(
     ty += rowHeight;
   }
   for (const row of agenda.dueToday) {
-    labels.push({text: `[ ] ${row.title}`, left: right, top: ty, fontSize: titleFont});
+    labels.push({
+      text: fit(`[ ] ${row.title}`, f.right - right, titleFont),
+      left: right,
+      top: ty,
+      fontSize: titleFont,
+    });
     if (row.subtitle) {
-      labels.push({text: row.subtitle, left: right + 20, top: ty + titleFont + 2, fontSize: smallFont});
+      labels.push({
+        text: fit(row.subtitle, f.right - right - 20, smallFont),
+        left: right + 20,
+        top: ty + titleFont + 2,
+        fontSize: smallFont,
+      });
     }
     ty += rowHeight;
   }
@@ -332,7 +366,12 @@ export function dayBackground(
         if (ty > body.bottom - rowHeight) {
           break;
         }
-        labels.push({text: `[ ] ${row.title}`, left: right, top: ty, fontSize: titleFont});
+        labels.push({
+          text: fit(`[ ] ${row.title}`, f.right - right, titleFont),
+          left: right,
+          top: ty,
+          fontSize: titleFont,
+        });
         ty += Math.round(titleFont * 1.5);
       }
     }
