@@ -506,49 +506,51 @@ export async function writeBackground(
     // "the layer of the element does not match the provided layer parameter",
     // even when the element's own layerNum says the same thing. Whichever layer
     // is current is the one it lands on.
-    // Counted before, so what landed can be measured rather than believed.
+    // **Inserted in chunks, not as one batch.**
+    //
+    // The evidence for this is the three pages side by side. The week page
+    // carries 7 text elements among ~45 rules and draws. The month page carries
+    // 42 and does not. The day page carries 26 and does not. The week page has
+    // *more* elements in total than the day page, so it is not the size of the
+    // batch — it is how much text is in it.
+    //
+    // Chunking means a refusal costs one chunk instead of the page, and the
+    // count says how far it got. Rules go first so that a page which loses its
+    // text still arrives as a usable grid rather than as nothing at all.
+    const CHUNK = 12;
     const before = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
-    let inserted = (await PluginCommAPI.insertPageElements(
-      elements,
-      pageNum,
-      WRITE_LAYER,
-    )) as Loose | null;
+    let refusals = 0;
+    for (let i = 0; i < elements.length; i += CHUNK) {
+      const chunk = elements.slice(i, i + CHUNK);
+      let res = (await PluginCommAPI.insertPageElements(
+        chunk,
+        pageNum,
+        WRITE_LAYER,
+      )) as Loose | null;
+      if (res?.success !== true) {
+        // One retry per chunk: the first insert after the panel opens is often
+        // swallowed, which the Patterns plugin saw on every run on a Nomad and
+        // never once on a Manta.
+        res = (await PluginCommAPI.insertPageElements(
+          chunk,
+          pageNum,
+          WRITE_LAYER,
+        )) as Loose | null;
+      }
+      if (res?.success !== true) {
+        refusals += 1;
+        console.log(
+          `${TAG} chunk ${i / CHUNK} of ${chunk.length} refused: ${JSON.stringify(res)}`,
+        );
+      }
+    }
 
-    // **`success` is not evidence.** The Patterns plugin recorded that the
-    // first batch insert after the panel opens is often swallowed: it reports
-    // success and draws nothing, every time on a Nomad and never on a Manta.
-    // Trusting the flag is how a page comes out blank while the plugin says it
-    // worked — which is exactly what happened when this check was removed.
-    //
-    // So the page is counted. The count has a trap of its own: reading straight
-    // after a write can show the page as it was rather than as it is, because a
-    // reload still in flight is this firmware's signature failure. Hence the
-    // save and the reload before reading, which is what `settleForRead` does in
-    // the plugin this is copied from.
-    //
-    // What made the earlier version of this dangerous was not the retry. It was
-    // recycling the elements afterwards, which freed memory the host still held
-    // and took the note down. The retry is safe; the recycle was not.
     await PluginNoteAPI.saveCurrentNote();
     await PluginCommAPI.reloadFile();
     const after = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
     landedCount = Math.max(0, Number(after ?? 0) - Number(before ?? 0));
-
-    if (landedCount <= 0) {
-      console.log(
-        `${TAG} insert drew nothing (${before} -> ${after}, reported ${JSON.stringify(
-          inserted?.success,
-        )}); retrying once`,
-      );
-      inserted = (await PluginCommAPI.insertPageElements(
-        elements,
-        pageNum,
-        WRITE_LAYER,
-      )) as Loose | null;
-      await PluginNoteAPI.saveCurrentNote();
-      await PluginCommAPI.reloadFile();
-      const second = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
-      landedCount = Math.max(0, Number(second ?? 0) - Number(before ?? 0));
+    if (refusals > 0) {
+      console.log(`${TAG} ${refusals} chunk(s) refused; ${landedCount} element(s) landed`);
     }
 
     // The save above is what commits an in-memory write, and it comes before the

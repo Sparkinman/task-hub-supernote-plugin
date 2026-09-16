@@ -3978,7 +3978,18 @@ will not duplicate them.`}
                     // does, which is the usual way a button ends up meaning
                     // nothing until you have already pressed it once.
                     label="Insert snapshot"
-                    onPress={() => askCalendarPage(day, calView)}
+                    onPress={() =>
+                      askCalendarPage(
+                        // The month page belongs to the month on screen, not to
+                        // whichever day is selected. Paging the calendar to
+                        // October and pressing this put the page in September's
+                        // note, because `day` had not moved with the view.
+                        calView === 'month'
+                          ? toDateInput(new Date(view.year, view.month, 1))
+                          : day,
+                        calView,
+                      )
+                    }
                   />
                 )}
                 {calView === 'day' && (
