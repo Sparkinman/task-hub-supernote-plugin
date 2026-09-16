@@ -21,18 +21,18 @@
  *    which way they stack. `dateheading` puts a heading on 0 and the user
  *    writes there too, so the background goes on `BACKGROUND_LAYER` and that
  *    constant is the one to change if it comes out on top.
- * 2. **Whether the mask actually hides the note's template.** A lined template
- *    under a calendar grid is unreadable, so this matters more than it sounds.
- * 3. **How long two hundred elements take.** The quarter page is 185 of them.
+ * 2. **How long two hundred elements take.** The quarter page is 185 of them.
  *    If it is slow, the rules become one raster and only the dates stay as
  *    text — lines need no font, which is what makes that split possible.
+ *
+ * The third question — whether a background can hide the note's own template —
+ * is answered below, and the answer is no, not this way.
  */
 
-import {Element, PluginCommAPI, PluginFileAPI, TextBox} from 'sn-plugin-lib';
+import {Element, Geometry, PluginCommAPI, PluginFileAPI, TextBox} from 'sn-plugin-lib';
 
 import type {Background} from './background';
 import {ensureFileAccess} from './permissions';
-import {writeLinkImage} from './storage';
 
 const TAG = '[TaskHub]';
 
@@ -46,21 +46,28 @@ const TAG = '[TaskHub]';
 const BACKGROUND_LAYER = 1;
 
 /**
- * A 2×2 solid white PNG, 71 bytes.
+ * Why there is no mask, and what it would take to have one.
  *
- * The mask that hides the note's own template. `Picture` carries a path and a
- * rect and the host stretches one to the other, so the image's own size is
- * irrelevant — which means the whole of "cover the page in white" costs 71
- * bytes and no encoder. The alternative was rendering a full-page raster in
- * TypeScript, which needs a deflate implementation, about 800KB of base64 over
- * the bridge, and a bitmap font for every label.
+ * The first attempt covered the page with a white `Picture` element stretched
+ * to the page rect — 71 bytes and no encoder, which would have been the neat
+ * answer to a lined template showing through a calendar grid. The device
+ * refused the whole insert with **code 106, invalid API parameters**, and the
+ * SDK says why in a comment that is easy to miss: `TYPE_PICTURE` is annotated
+ * *"currently unused"*. There is no picture element to place.
  *
- * Regenerate with:
- *   python3 -c "import zlib,struct,base64; ..." — see the session that added it.
+ * `PluginNoteAPI.insertImage` does exist, but it takes a path and nothing else
+ * — no rect to stretch to — and it writes into the page the host is displaying,
+ * which is the dependency `dateheading.ts` established cannot be relied on from
+ * here.
+ *
+ * So a background drawn this way sits on top of whatever template the note
+ * already has. If that template is ruled, use a blank one for notes that get a
+ * calendar page. Masking with white geometry is the untried idea: `penColor`
+ * runs 0 for black through 201 for light grey, so 255 is plausibly white, but
+ * nothing has established that a white stroke paints over a template rather
+ * than being composited away — and an experiment that is wrong leaves grey
+ * bands across somebody's note.
  */
-const WHITE_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAAAAABX3VL4AAAADklEQVR42mP4/5/h/38AC/oD/f1NxGYAAAAASUVORK5CYII=';
-const WHITE_PNG_PATH = 'Document/TaskHub/background-mask.png';
 
 /** The pen a background rule is drawn with: thin, and grey rather than black. */
 const RULE_PEN = {penType: 1, penColor: 157, penWidth: 400};
@@ -111,19 +118,7 @@ export async function writeBackground(
   try {
     await ensureFileAccess();
 
-    // The mask first, so everything else is drawn over it rather than under.
-    // Order within the array is the order the host receives them.
-    const maskPath = await writeLinkImage(WHITE_PNG_PATH, WHITE_PNG_BASE64, 'Task Hub background');
     const startedAllocating = Date.now();
-    if (maskPath) {
-      const picture = await allocate(Element.TYPE_PICTURE);
-      if (picture) {
-        picture.pageNum = pageNum;
-        picture.layerNum = BACKGROUND_LAYER;
-        picture.picture = {picturePath: maskPath, rect: bg.mask};
-        elements.push(picture);
-      }
-    }
 
     for (const rule of bg.rules) {
       const geo = await allocate(Element.TYPE_GEO);
@@ -132,16 +127,23 @@ export async function writeBackground(
       }
       geo.pageNum = pageNum;
       geo.layerNum = BACKGROUND_LAYER;
-      geo.geometry = {
-        ...RULE_PEN,
-        // Off, or every rule leaves a lasso box on the page as it lands.
-        showLassoAfterInsert: false,
-        type: 'straightLine',
-        points: [
-          {x: rule.left, y: rule.top},
-          {x: rule.right, y: rule.bottom},
-        ],
-      };
+      // A real Geometry, not an object of the same shape. `createElement`
+      // allocates natively and the host looks for its own accessors behind the
+      // uuid; the same is true of the shapes hung off it, which is why
+      // `dateheading` builds a `new TextBox()` rather than a literal. A literal
+      // here was half of what the device rejected with code 106.
+      const shape = new Geometry();
+      shape.type = Geometry.TYPE_STRAIGHT_LINE;
+      shape.penType = RULE_PEN.penType;
+      shape.penColor = RULE_PEN.penColor;
+      shape.penWidth = RULE_PEN.penWidth;
+      // Off, or every rule leaves a lasso box on the page as it lands.
+      shape.showLassoAfterInsert = false;
+      shape.points = [
+        {x: rule.left, y: rule.top},
+        {x: rule.right, y: rule.bottom},
+      ];
+      geo.geometry = shape;
       elements.push(geo);
     }
 
