@@ -7,6 +7,7 @@ import {
   SN_TASK,
   snFieldsFrom,
   snListsFrom,
+  snTaskRead,
   snTasksFrom,
   type SnList,
   type SnTask,
@@ -250,6 +251,15 @@ export async function listSnLists(token: string): Promise<SnList[]> {
  */
 export async function listSnTasks(token: string): Promise<SnTask[]> {
   return snTasksFrom(await read(SN_LIST_TASKS, token));
+}
+
+/** The same request, reporting how many rows arrived and how many were dropped. */
+export async function readSnTasks(token: string): Promise<{
+  tasks: SnTask[];
+  rows: number;
+  dropped: number;
+}> {
+  return snTaskRead(await read(SN_LIST_TASKS, token));
 }
 
 /** The server's own row for one task, to lay an update over. */

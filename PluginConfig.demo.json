@@ -5,8 +5,8 @@
   "desc": "Demonstration build of Task Hub, with invented tasks and a month of invented calendar events built in. Makes no network request, and reads and writes no settings - it cannot see or change anything belonging to the real plugin. For screenshots and screen recordings.",
   "name": "Task Hub Demo",
   "author": "Sparkinman",
-  "versionCode": "95",
-  "versionName": "0.72.2",
+  "versionCode": "96",
+  "versionName": "0.72.3",
   "jsMainPath": "index",
   "uses-permissions": [
     "plugin.permission.FILE:READ",

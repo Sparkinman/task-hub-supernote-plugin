@@ -9,6 +9,8 @@ import {
   snListsFrom,
   snListsWithUnfiled,
   snNoteLink,
+  snOpenCounts,
+  snTaskRead,
   snUnfiledCounts,
   snUnfiledNote,
   snTaskFrom,
@@ -299,5 +301,61 @@ describe('saying why the Inbox is not there', () => {
     expect(snUnfiledNote(lists, [filed])).toBe(
       'No Inbox: every to-do on this account is in a list.',
     );
+  });
+});
+
+describe('what each list actually holds', () => {
+  const lists = [
+    {id: '1', name: 'Tasks'},
+    {id: 'abc', name: 'Work'},
+  ];
+  const open = {title: 'x', completed: false, dueDate: '', notes: undefined};
+
+  it('counts open to-dos per list, and unfiled ones under the Inbox', () => {
+    const tasks = [
+      {...open, id: 'a', listId: '1'},
+      {...open, id: 'b', listId: '1'},
+      {...open, id: 'c', listId: 'abc'},
+      {...open, id: 'd', listId: ''},
+    ];
+    expect(snOpenCounts(lists, tasks)).toEqual({'1': 2, abc: 1, __unfiled__: 1});
+  });
+
+  it('counts a list with nothing in it as zero rather than leaving it out', () => {
+    // A row that silently has no number is the thing that made "which list is
+    // my to-do in?" unanswerable in the first place.
+    expect(snOpenCounts(lists, [])).toEqual({'1': 0, abc: 0, __unfiled__: 0});
+  });
+
+  it('does not count completed to-dos, which are never shown', () => {
+    const tasks = [
+      {...open, id: 'a', listId: '1', completed: true},
+      {...open, id: 'b', listId: '', completed: true},
+    ];
+    expect(snOpenCounts(lists, tasks)).toEqual({'1': 0, abc: 0, __unfiled__: 0});
+  });
+
+  it('files a to-do whose list has been deleted under the Inbox', () => {
+    const tasks = [{...open, id: 'a', listId: 'deleted'}];
+    expect(snOpenCounts(lists, tasks).__unfiled__).toBe(1);
+  });
+});
+
+describe('reporting what actually arrived', () => {
+  it('counts the rows received as well as the to-dos kept', () => {
+    const row = {taskId: 'x', taskListId: '1', title: 'Live', status: 'needsAction'};
+    const out = snTaskRead({
+      scheduleTask: [row, {...row, taskId: 'y', isDeleted: 'Y'}, {taskId: ''}],
+    });
+    // Three rows in, one usable to-do out: without the raw count, "it never
+    // arrived" and "it arrived and was dropped here" look identical.
+    expect(out.rows).toBe(3);
+    expect(out.tasks).toHaveLength(1);
+    expect(out.dropped).toBe(2);
+  });
+
+  it('reports nothing rather than throwing on a body it cannot read', () => {
+    expect(snTaskRead(null)).toEqual({tasks: [], rows: 0, dropped: 0});
+    expect(snTaskRead({})).toEqual({tasks: [], rows: 0, dropped: 0});
   });
 });

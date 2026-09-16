@@ -200,11 +200,19 @@ import {
   DEFAULT_SN_CONFIG,
   snDaysLeft,
   snListsWithUnfiled,
+  snOpenCounts,
   snReady,
   snUnfiledNote,
   type SnList,
 } from './src/sncloud';
-import {SN_EXPIRED, beginSignIn, finishSignIn, listSnLists, listSnTasks} from './src/snclient';
+import {
+  SN_EXPIRED,
+  beginSignIn,
+  finishSignIn,
+  listSnLists,
+  listSnTasks,
+  readSnTasks,
+} from './src/snclient';
 import {
   asRemoteTasks,
   isSnCollection,
@@ -972,6 +980,8 @@ export default function App(): React.JSX.Element {
     null,
   );
   const [snLists, setSnLists] = useState<SnList[]>([]);
+  /** Open to-dos per list, so a row can say what is in it before it is ticked. */
+  const [snCounts, setSnCounts] = useState<Record<string, number>>({});
   const [snMessage, setSnMessage] = useState('');
   const [snBusy, setSnBusy] = useState(false);
   /**
@@ -2457,16 +2467,25 @@ export default function App(): React.JSX.Element {
         // offered when — and only when — something is actually in it. It is one
         // extra request, on a screen the user asked to refresh: a cheaper place
         // to pay for it than the opening screen.
-        const [live, loaded] = await Promise.all([listSnLists(token), listSnTasks(token)]);
+        const [live, read] = await Promise.all([listSnLists(token), readSnTasks(token)]);
+        const loaded = read.tasks;
         const lists = snListsWithUnfiled(live, loaded);
         setSnLists(lists);
+        setSnCounts(snOpenCounts(live, loaded));
         // Why the Inbox is absent, when it is. Said here rather than left to be
         // inferred: a missing row looks identical to a broken feature.
         const why = snUnfiledNote(live, loaded);
+        // What the account actually returned, so "it never arrived" and "it
+        // arrived and was filed somewhere I did not expect" stop looking alike.
+        const heard =
+          `Supernote returned ${read.rows} to-do(s)` +
+          (read.dropped > 0 ? `, ${read.dropped} of them marked deleted.` : '.');
         setSnMessage(
           lists.length === 0
-            ? 'Signed in, but this account has no to-do lists.'
-            : `Signed in. Tick the lists to show, then Save settings.${why ? ` ${why}` : ''}`,
+            ? `Signed in, but this account has no to-do lists. ${heard}`
+            : `Signed in. Tick the lists to show, then Save settings. ${heard}${
+                why ? ` ${why}` : ''
+              }`,
         );
       } catch (err) {
         setSnMessage(describe(err));
@@ -4089,6 +4108,7 @@ will not duplicate them.`}
           setSnCode={setSnCode}
           snPending={snPending !== null}
           snLists={snLists}
+          snCounts={snCounts}
           snMessage={snMessage}
           snBusy={snBusy}
           snDaysLeftLabel={snDaysLeftLabel}
@@ -4459,6 +4479,7 @@ function SettingsScreen(props: {
   setSnCode: (v: string) => void;
   snPending: boolean;
   snLists: SnList[];
+  snCounts: Record<string, number>;
   snMessage: string;
   snBusy: boolean;
   snDaysLeftLabel: string;
@@ -4507,6 +4528,7 @@ function SettingsScreen(props: {
     setSnCode,
     snPending,
     snLists,
+    snCounts,
     snMessage,
     snBusy,
     snDaysLeftLabel,
@@ -5039,7 +5061,9 @@ If you run the Task Hub server, you do not want this — it already syncs these 
                     <CheckRow
                       compact
                       key={list.id}
-                      label={list.name}
+                      // The count is what answers "which list is it actually
+                      // in?" without ticking each one in turn and saving.
+                      label={`${list.name} — ${snCounts[list.id] ?? 0} open`}
                       checked={config.supernote.lists.some(l => l.id === list.id)}
                       onToggle={() =>
                         onChange(c => ({
