@@ -5,9 +5,8 @@ Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`
 Current build **0.73.2** (versionCode 99). **587 tests across 35 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
-**licensed GPLv3**. **v0.71.2 is still the released build marked Latest**, with
-`TaskHub-0.71.2.snplg` attached — everything since is committed and pushed but not yet
-released.
+**licensed GPLv3**. **v0.73.2 is released and marked Latest**, with `TaskHub-0.73.2.snplg`
+attached. `main` is pushed and clean.
 
 ## READ THIS FIRST — where the work stopped
 
@@ -70,10 +69,12 @@ on screen is not deleted because one sample lacked it.
 could not be replayed has been corrected: it is a real delta cursor, refused with
 "NextSyncToken timeout" when stale, and left unused deliberately.
 
-### 0.72.0 — the Supernote Inbox, written but NOT yet run on a device
+### 0.72.0 — the Supernote Inbox, confirmed on the device
 
-Everything below in this section is off-device logic, verified by `tsc`, eslint and 577
-tests, and **not yet installed**. It is the first thing to check on the next build.
+Shipped in **v0.73.2** and **verified on the tablet on 2026-09-16**: the maintainer sees the
+Inbox with their unfiled to-do in it. Note that it only appeared once `maxResults` was added —
+their unfiled to-do was past the twenty-row cap, so for several builds the Inbox looked broken
+when it was working and being starved of input.
 
 **The bug it fixes: Supernote to-dos that belong to no list were dropped silently.**
 
@@ -158,9 +159,10 @@ Two chores are outstanding and neither is code:
    says "capture handwriting as CalDAV tasks…" with no mention of `.ics` subscriptions or the
    Supernote To-Do app. The replacement text and the topics to add are in the session notes;
    the maintainer has to paste them into the repo's *About* gear.
-2. **0.72.0 needs building and installing.** The code and the docs are done and pushed; no
-   `.snplg` has been produced for it. See the checklist at the top of this section for what
-   to look at once it is on the device.
+2. Nothing else. **v0.73.2 is released** with `TaskHub-0.73.2.snplg` attached and marked
+   Latest, the Inbox is confirmed on the device, and the forty-task round trip passed against
+   the live account. The server is at `v1.0.2` on GitHub and Docker Hub with the same
+   `maxResults` fix.
 
 ## The demo build — and the bug it currently has
 
