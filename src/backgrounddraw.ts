@@ -32,7 +32,9 @@
 import {Element, Geometry, PluginCommAPI, PluginFileAPI, TextBox} from 'sn-plugin-lib';
 
 import type {Background} from './background';
+import {MY_STYLE_ROOT, listSystemTemplates} from './notes';
 import {ensureFileAccess} from './permissions';
+import {externalRoot, writeLinkImage} from './storage';
 
 const TAG = '[TaskHub]';
 
@@ -46,21 +48,75 @@ const TAG = '[TaskHub]';
 const BACKGROUND_LAYER = 1;
 
 /**
- * The template a calendar page is given: none.
+ * Names that might mean "a blank page", tried in order.
  *
- * This is what makes the whole idea work on somebody whose notes are all ruled.
- * A calendar grid over ruled paper is unreadable, and the first attempt at
- * solving it covered the page with a white `Picture` element — which the device
- * refused outright with code 106, because the SDK annotates `TYPE_PICTURE` as
- * *"currently unused"*. There is no picture element to place, and asking for
- * one rejects the entire insert rather than just that element.
- *
- * The answer was not masking at all. `insertNotePage` takes a template *per
- * page*, so the calendar gets a page of its own with a blank one while every
- * other page in the note keeps whatever ruling the user chose. Nothing is
- * painted over, nothing is guessed at, and the user's own pages are untouched.
+ * The device ships a blank template among its presets, so the right answer is
+ * to use theirs rather than install one. Which of these it is called is not
+ * documented and differs by firmware and language, so the list is matched
+ * loosely against `getNoteSystemTemplates()` and the first hit wins.
  */
-const NO_TEMPLATE = '';
+const BLANK_PATTERNS = [/^blank$/i, /^none$/i, /^plain$/i, /^white$/i, /blank/i, /空白/];
+
+/**
+ * A blank white PNG, 71 bytes — the fallback if no preset matches.
+ *
+ * Written into MyStyle, where the device keeps user templates, so it is a
+ * legitimate template rather than a file smuggled in from somewhere the host
+ * does not look. Two pixels of white: a template is scaled or tiled to the page
+ * and white does the same thing either way, so its own size is irrelevant.
+ */
+const BLANK_TEMPLATE_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAAAAABX3VL4AAAADklEQVR42mP4/5/h/38AC/oD/f1NxGYAAAAASUVORK5CYII=';
+const BLANK_TEMPLATE_NAME = 'TaskHub-blank.png';
+
+/**
+ * Every spelling of "a blank page" worth trying, best first.
+ *
+ * Several, tried in turn, because which form a given firmware accepts is
+ * undocumented — the same problem `createAt` in `notes.ts` already solves the
+ * same way. Two answers are already ruled out and must not be retried: an empty
+ * string is refused with **code 107** (blank is not expressible as "no
+ * template"), and covering the page with a white `Picture` element is refused
+ * with **code 106**, because the SDK annotates `TYPE_PICTURE` as *"currently
+ * unused"*.
+ */
+async function blankTemplateNames(): Promise<string[]> {
+  const names: string[] = [];
+  try {
+    const presets = await listSystemTemplates();
+    for (const pattern of BLANK_PATTERNS) {
+      for (const preset of presets) {
+        if (pattern.test(preset.name) && !names.includes(preset.name)) {
+          names.push(preset.name, preset.vUri);
+        }
+      }
+    }
+    console.log(
+      `${TAG} presets: ${presets.map(t => t.name).join(', ') || 'none'} — blank candidates ${
+        names.join(', ') || 'none'
+      }`,
+    );
+  } catch (err) {
+    console.log(`${TAG} could not list presets: ${String(err)}`);
+  }
+
+  // Only if none of theirs matched.
+  const relative = `${MY_STYLE_ROOT}/${BLANK_TEMPLATE_NAME}`;
+  try {
+    const written = await writeLinkImage(relative, BLANK_TEMPLATE_BASE64, 'Task Hub blank page');
+    if (written) {
+      names.push(written);
+    }
+    const root = await externalRoot();
+    if (root) {
+      names.push(`${root}/${relative}`);
+    }
+    names.push(relative, BLANK_TEMPLATE_NAME);
+  } catch {
+    // The presets are the real answer; this is only the safety net.
+  }
+  return names;
+}
 
 /** The pen a background rule is drawn with: thin, and grey rather than black. */
 const RULE_PEN = {penType: 1, penColor: 157, penWidth: 400};
@@ -111,13 +167,21 @@ export async function writeBackground(
   try {
     await ensureFileAccess();
 
-    // A page of its own, with no template, rather than drawing over one of the
-    // user's. Their ruling stays on their pages; the calendar gets clean paper.
-    const added = (await PluginFileAPI.insertNotePage({
-      notePath: absolutePath,
-      page: pageNum,
-      template: NO_TEMPLATE,
-    })) as Loose | null;
+    // A page of its own, blank, rather than drawing over one of the user's.
+    // Their ruling stays on their pages; the calendar gets clean paper.
+    let added: Loose | null = null;
+    let usedTemplate = '';
+    for (const candidate of await blankTemplateNames()) {
+      added = (await PluginFileAPI.insertNotePage({
+        notePath: absolutePath,
+        page: pageNum,
+        template: candidate,
+      })) as Loose | null;
+      if (added?.success && added.result !== false) {
+        usedTemplate = candidate;
+        break;
+      }
+    }
     if (!added?.success || added.result === false) {
       const code = added?.error?.code;
       return {
@@ -129,6 +193,7 @@ export async function writeBackground(
         elements: 0,
       };
     }
+    console.log(`${TAG} blank page inserted with template "${usedTemplate}"`);
 
     const startedAllocating = Date.now();
 
