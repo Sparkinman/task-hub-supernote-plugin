@@ -1,4 +1,11 @@
-import {snEpoch, type SnList, type SnTask} from './sncloud';
+import {
+  SN_UNFILED_ID,
+  SN_UNFILED_NAME,
+  snEpoch,
+  snFiledUnder,
+  type SnList,
+  type SnTask,
+} from './sncloud';
 import type {RemoteTask} from './tasks';
 
 /**
@@ -35,6 +42,21 @@ export function isSnTask(task: {collectionUrl: string}): boolean {
 /** The list id inside a Supernote collection URL. */
 export function snListId(url: string): string {
   return isSnCollection(url) ? url.slice(SN_SCHEME.length) : '';
+}
+
+/** The collection URL of the Inbox — the to-dos that belong to no list. */
+export const SN_UNFILED_URL = snCollectionUrl(SN_UNFILED_ID);
+
+/**
+ * Whether this collection is the Inbox.
+ *
+ * Worth a name of its own because it is the one Supernote collection that is
+ * **read-only**. It is a view of to-dos that sit outside every list, so there
+ * is nowhere for a new one to go: nothing may offer it as a save target, and
+ * the write path refuses it outright.
+ */
+export function isSnUnfiled(url: string): boolean {
+  return snListId(url) === SN_UNFILED_ID;
 }
 
 /**
@@ -79,8 +101,22 @@ export function asRemoteTasks(
   for (const list of lists) {
     names.set(list.id, list.name);
   }
+  // The Inbox always reads by its own name, never by whatever was stored when
+  // it was ticked.
+  names.set(SN_UNFILED_ID, SN_UNFILED_NAME);
+  const live = new Set(lists.map(l => l.id));
   const wanted = new Set(watched.map(l => l.id));
   return tasks
+    // Open to-dos only, the same rule the CalDAV side applies in its REPORT.
+    // It has to be done here rather than in the request: their API has no
+    // filter, so the whole account arrives whatever happens. This saves the
+    // parsing, the merge and the cache write, not the network.
+    .filter(task => !task.completed)
+    // Re-filed before the watched check, not dropped by it. A task with no list
+    // — or one whose list has been deleted — matches no watched id, so filtering
+    // first would lose it silently, which is the worst way to lose somebody's
+    // data. It belongs to the Inbox, and is shown if the Inbox is ticked.
+    .map(task => (snFiledUnder(task, live) ? task : {...task, listId: SN_UNFILED_ID}))
     .filter(task => wanted.has(task.listId))
     .map(task => asRemoteTask(task, names.get(task.listId) ?? 'Supernote'));
 }

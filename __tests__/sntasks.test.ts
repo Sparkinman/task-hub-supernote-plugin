@@ -1,8 +1,10 @@
 import {
+  SN_UNFILED_URL,
   asRemoteTask,
   asRemoteTasks,
   isSnCollection,
   isSnTask,
+  isSnUnfiled,
   snCollectionUrl,
   snIdOf,
   snListId,
@@ -76,13 +78,13 @@ describe('asRemoteTask', () => {
 
 describe('asRemoteTasks', () => {
   const watched = [{id: 'list1', name: 'Work'}];
+  const live = [
+    {id: 'list1', name: 'Work'},
+    {id: 'list2', name: 'Home'},
+  ];
 
   it('keeps only the ticked lists', () => {
-    const out = asRemoteTasks(
-      [task, {...task, id: 'other', listId: 'list2'}],
-      [],
-      watched,
-    );
+    const out = asRemoteTasks([task, {...task, id: 'other', listId: 'list2'}], live, watched);
     expect(out).toHaveLength(1);
     expect(out[0].uid).toBe('supernote-abc123');
   });
@@ -91,8 +93,70 @@ describe('asRemoteTasks', () => {
     const out = asRemoteTasks([task], [{id: 'list1', name: 'Renamed'}], watched);
     expect(out[0].collectionLabel).toBe('Renamed');
   });
+});
 
-  it('falls back to the stored name when nothing was fetched', () => {
-    expect(asRemoteTasks([task], [], watched)[0].collectionLabel).toBe('Work');
+describe('the Inbox — to-dos that belong to no list', () => {
+  const inbox = {id: '__unfiled__', name: 'Inbox'};
+  const live = [{id: 'list1', name: 'Work'}];
+  const loose: SnTask = {...task, id: 'loose', listId: ''};
+
+  it('has a collection URL of its own that reads as read-only', () => {
+    expect(SN_UNFILED_URL).toBe('supernote:__unfiled__');
+    expect(isSnUnfiled(SN_UNFILED_URL)).toBe(true);
+    expect(isSnUnfiled('supernote:list1')).toBe(false);
+    expect(isSnUnfiled('https://host/dav/tasks/')).toBe(false);
+  });
+
+  it('shows a task with no list at all, rather than dropping it silently', () => {
+    const out = asRemoteTasks([loose], live, [inbox]);
+    expect(out).toHaveLength(1);
+    expect(out[0].collectionUrl).toBe(SN_UNFILED_URL);
+    expect(out[0].collectionLabel).toBe('Inbox');
+  });
+
+  it('treats a task whose list has been deleted the same way', () => {
+    // `snListsFrom` drops deleted lists, so the id simply is not live any more.
+    // The task is just as invisible to a per-list read as one with no list.
+    const orphan: SnTask = {...task, id: 'orphan', listId: 'deleted-list'};
+    const out = asRemoteTasks([orphan], live, [inbox]);
+    expect(out.map(t => t.collectionUrl)).toEqual([SN_UNFILED_URL]);
+  });
+
+  it('hides them again when the Inbox is not ticked', () => {
+    expect(asRemoteTasks([loose], live, [{id: 'list1', name: 'Work'}])).toEqual([]);
+  });
+
+  it('never lets a real list leak into it', () => {
+    const out = asRemoteTasks([task, loose], live, [{id: 'list1', name: 'Work'}, inbox]);
+    expect(out.map(t => t.collectionUrl).sort()).toEqual([
+      SN_UNFILED_URL,
+      'supernote:list1',
+    ]);
+  });
+
+  it('reads by its own name even if a stale one was stored when it was ticked', () => {
+    const out = asRemoteTasks([loose], live, [{id: '__unfiled__', name: 'Unfiled tasks'}]);
+    expect(out[0].collectionLabel).toBe('Inbox');
+  });
+});
+
+describe('completed to-dos', () => {
+  const live = [{id: 'list1', name: 'Work'}];
+  const watched = [
+    {id: 'list1', name: 'Work'},
+    {id: '__unfiled__', name: 'Inbox'},
+  ];
+  const doneTask: SnTask = {...task, id: 'done', completed: true};
+
+  it('are never shown, from a real list or from the Inbox', () => {
+    // The same rule the CalDAV side applies in its REPORT. Their API has no
+    // server-side filter, so it is applied here instead.
+    expect(asRemoteTasks([doneTask], live, watched)).toEqual([]);
+    expect(asRemoteTasks([{...doneTask, listId: ''}], live, watched)).toEqual([]);
+  });
+
+  it('do not take the open ones with them', () => {
+    const out = asRemoteTasks([task, doneTask, {...task, id: 'loose', listId: ''}], live, watched);
+    expect(out.map(t => t.uid).sort()).toEqual(['supernote-abc123', 'supernote-loose']);
   });
 });

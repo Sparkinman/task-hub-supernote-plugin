@@ -51,6 +51,28 @@ export const SN_LIST_TASKS = '/file/schedule/task/all';
  */
 export const SN_TASK = '/file/schedule/task';
 
+/**
+ * Stand-in list for to-dos that belong to no list at all — what the tablet's
+ * own To-Do app calls the **Inbox**.
+ *
+ * A task can arrive carrying `taskListId: null`, or naming a list that has
+ * since been deleted. Either way it sits in the To-Do app's "All" view and in
+ * none of its lists, so filtering tasks by list — the obvious implementation,
+ * and the one this plugin shipped — drops it without a word. Rather than guess
+ * a list for it, which would file it somewhere the user never chose, it is
+ * offered as a list of its own that they can tick or ignore knowingly.
+ *
+ * The name is the tablet's, deliberately. The Task Hub server called it
+ * "Unfiled tasks" first, which was accurate and unrecognisable: somebody
+ * looking for the list they see on the device would not know it was the same
+ * one. See `app/connectors/supernote.py`, which is the original of this.
+ *
+ * The id cannot collide with a real one: theirs are 32-character hex strings,
+ * or the literal "1" for the default list.
+ */
+export const SN_UNFILED_ID = '__unfiled__';
+export const SN_UNFILED_NAME = 'Inbox';
+
 /** Their status vocabulary happens to match Google Tasks exactly. */
 const STATUS_FROM_REMOTE: Record<string, boolean> = {
   needsAction: false,
@@ -191,6 +213,13 @@ export function snTaskFrom(row: unknown): SnTask | null {
   if (!id) {
     return null;
   }
+  // A to-do deleted on the tablet still comes back in `scheduleTask`, flagged
+  // rather than absent. `snListsFrom` has always dropped deleted *lists*; this
+  // is the same rule for tasks, which was missing — without it a to-do deleted
+  // on the device stays on screen here indefinitely.
+  if (snYes(r.isDeleted)) {
+    return null;
+  }
 
   const completed = STATUS_FROM_REMOTE[String(r.status ?? '')] === true;
   let notes = String(r.detail ?? '').trim();
@@ -247,6 +276,35 @@ export function snListsFrom(body: unknown): SnList[] {
     lists.push({id, name: String(row.title ?? '').trim() || 'Untitled list'});
   }
   return lists;
+}
+
+/**
+ * Whether this task belongs to a list that still exists.
+ *
+ * It can fail two ways — no list id at all, or one naming a list that has since
+ * been deleted. Both leave it invisible to a per-list read, so both are treated
+ * the same and both belong in the Inbox.
+ */
+export function snFiledUnder(task: SnTask, liveIds: Set<string>): boolean {
+  return task.listId !== '' && liveIds.has(task.listId);
+}
+
+/**
+ * The lists to offer for ticking, with the Inbox appended when anything is
+ * actually in it.
+ *
+ * Only offered when non-empty, so an account with every to-do properly filed
+ * never sees a puzzling empty list it has to reason about.
+ */
+export function snListsWithUnfiled(lists: SnList[], tasks: SnTask[]): SnList[] {
+  const live = new Set(lists.map(l => l.id));
+  // Completed to-dos are never shown, so they must not be what makes the Inbox
+  // appear either: offering a list that turns out empty the moment it is ticked
+  // is worse than not offering it.
+  if (!tasks.some(task => !task.completed && !snFiledUnder(task, live))) {
+    return lists;
+  }
+  return [...lists, {id: SN_UNFILED_ID, name: SN_UNFILED_NAME}];
 }
 
 /**

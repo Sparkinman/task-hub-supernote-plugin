@@ -7,7 +7,7 @@ import {
   type TaskCollection,
 } from './discovery';
 import {ensureInternet} from './permissions';
-import {isSnCollection, snListId} from './sntasks';
+import {isSnCollection, isSnUnfiled, snListId} from './sntasks';
 import {createSnTask} from './snclient';
 import {collectionsOwner, type ServerConfig} from './settings';
 
@@ -184,6 +184,14 @@ async function writeTask(
   // editor and the step writer all reach this one function, and each of them
   // deciding for itself would be three chances to PUT at "supernote:abc123".
   if (isSnCollection(collection)) {
+    // The Inbox is a view, not a list: it holds the to-dos Supernote keeps
+    // outside every list, so there is no list id to create one in. Refused
+    // rather than quietly filed somewhere the user did not choose.
+    if (isSnUnfiled(collection)) {
+      throw new Error(
+        'Inbox holds the to-dos that belong to no list, so nothing can be added to it. Choose a real list.',
+      );
+    }
     await createSnTask(config.supernote.token, snListId(collection), {
       title: task.summary,
       notes: task.description,

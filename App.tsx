@@ -198,11 +198,18 @@ import {forgetFeed} from './src/feedfetch';
 import {
   DEFAULT_SN_CONFIG,
   snDaysLeft,
+  snListsWithUnfiled,
   snReady,
   type SnList,
 } from './src/sncloud';
 import {SN_EXPIRED, beginSignIn, finishSignIn, listSnLists, listSnTasks} from './src/snclient';
-import {asRemoteTasks, isSnCollection, isSnTask, snCollectionUrl} from './src/sntasks';
+import {
+  asRemoteTasks,
+  isSnCollection,
+  isSnTask,
+  isSnUnfiled,
+  snCollectionUrl,
+} from './src/sntasks';
 import {buildIndex, clearIndex, ensurePreview} from './src/noteindex';
 import {
   countStarredPages,
@@ -640,8 +647,16 @@ export default function App(): React.JSX.Element {
           listSnTasks(cfg.supernote.token),
         ]);
         const mapped = asRemoteTasks(cloudTasks, lists, cfg.supernote.lists);
+        // One request returns the whole account, so this answer is complete: a
+        // to-do missing from it has been deleted, or sits in a list no longer
+        // ticked, and either way it should leave the screen. `mergeFetched`
+        // only ever adds, so the Supernote tasks are cleared first and rebuilt
+        // from the answer — which is safe *because* the read is account-wide.
+        // A per-list read would make a to-do merely moved between lists, or
+        // filed out of the Inbox, look deleted instead.
+        const kept = tasksRef.current.filter(task => !isSnTask(task));
         const merged = mergeFetched(
-          tasksRef.current,
+          kept,
           mapped,
           t => `${t.collectionUrl}|${t.uid}`,
           (a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity),
@@ -1017,11 +1032,15 @@ export default function App(): React.JSX.Element {
     }));
     if (snReady(config.supernote)) {
       for (const list of config.supernote.lists) {
-        places.push({
-          url: snCollectionUrl(list.id),
-          label: list.name,
-          hint: 'Supernote To-Do',
-        });
+        const url = snCollectionUrl(list.id);
+        // The Inbox is read-only — a view of to-dos that belong to no list, so
+        // there is nowhere in it for a new one to go. `writeTask` refuses it,
+        // but offering it here and then failing would be feedback shown far
+        // from the action, so it is never offered.
+        if (isSnUnfiled(url)) {
+          continue;
+        }
+        places.push({url, label: list.name, hint: 'Supernote To-Do'});
       }
     }
     return places;
@@ -2432,7 +2451,12 @@ export default function App(): React.JSX.Element {
   const loadSnLists = useCallback(
     async (token: string) => {
       try {
-        const lists = await listSnLists(token);
+        // The tasks are read as well as the lists, only so the Inbox can be
+        // offered when — and only when — something is actually in it. It is one
+        // extra request, on a screen the user asked to refresh: a cheaper place
+        // to pay for it than the opening screen.
+        const [live, loaded] = await Promise.all([listSnLists(token), listSnTasks(token)]);
+        const lists = snListsWithUnfiled(live, loaded);
         setSnLists(lists);
         setSnMessage(
           lists.length === 0
@@ -5023,6 +5047,14 @@ If you run the Task Hub server, you do not want this — it already syncs these 
                   edited and added to from here. Priority and repeats are not offered for
                   them: the tablet's To-Do app stores a title and a date and nothing else.
                 </Text>
+                {snLists.some(list => isSnUnfiled(snCollectionUrl(list.id))) && (
+                  <Text style={styles.noteCompact}>
+                    Inbox holds the to-dos that belong to no list — the ones in the To-Do
+                    app's All view and nowhere else. It is shown only while something is
+                    in it, and nothing can be added to it: file a to-do on the tablet and
+                    it moves to that list here too.
+                  </Text>
+                )}
               </>
             )}
 

@@ -1,9 +1,13 @@
 import {
+  SN_UNFILED_ID,
+  SN_UNFILED_NAME,
   snDate,
   snDaysLeft,
   snEpoch,
   snFieldsFrom,
+  snFiledUnder,
   snListsFrom,
+  snListsWithUnfiled,
   snNoteLink,
   snTaskFrom,
   snTasksFrom,
@@ -199,5 +203,62 @@ describe('the session token', () => {
     expect(snTokenExpiry('not.a.jwt')).toBeNull();
     expect(snTokenExpiry('onepart')).toBeNull();
     expect(snDaysLeft('')).toBeNull();
+  });
+});
+
+describe('to-dos that belong to no list', () => {
+  const filed = {id: 'a', listId: 'list1', title: 'Filed', completed: false, dueDate: ''};
+  const loose = {...filed, id: 'b', listId: '', title: 'Loose'};
+  const orphan = {...filed, id: 'c', listId: 'gone', title: 'Orphan'};
+  const lists = [{id: 'list1', name: 'Work'}];
+
+  it('counts a task as filed only when its list still exists', () => {
+    const live = new Set(['list1']);
+    expect(snFiledUnder(filed, live)).toBe(true);
+    // No list at all, and a list that has since been deleted: both are
+    // invisible to a per-list read, so both belong in the Inbox.
+    expect(snFiledUnder(loose, live)).toBe(false);
+    expect(snFiledUnder(orphan, live)).toBe(false);
+  });
+
+  it('offers the Inbox under the name the tablet uses', () => {
+    const out = snListsWithUnfiled(lists, [filed, loose]);
+    expect(out).toHaveLength(2);
+    expect(out[1]).toEqual({id: SN_UNFILED_ID, name: SN_UNFILED_NAME});
+    expect(SN_UNFILED_NAME).toBe('Inbox');
+  });
+
+  it('does not offer it for a completed to-do, which would never be shown', () => {
+    // Offering a list that turns out empty the moment it is ticked is worse
+    // than not offering it at all.
+    expect(snListsWithUnfiled(lists, [filed, {...loose, completed: true}])).toEqual(lists);
+  });
+
+  it('does not offer it when every to-do is properly filed', () => {
+    // An empty list nobody can explain is worse than no list.
+    expect(snListsWithUnfiled(lists, [filed])).toEqual(lists);
+    expect(snListsWithUnfiled(lists, [])).toEqual(lists);
+  });
+
+  it('offers it for a task orphaned by a deleted list, not only an unfiled one', () => {
+    expect(snListsWithUnfiled(lists, [filed, orphan])).toHaveLength(2);
+  });
+
+  it('cannot collide with a real list id', () => {
+    // Theirs are 32-character hex, or the literal "1" for the default list.
+    expect(SN_UNFILED_ID).toBe('__unfiled__');
+    expect(/^[0-9a-f]{32}$|^1$/.test(SN_UNFILED_ID)).toBe(false);
+  });
+});
+
+describe('a to-do deleted on the tablet', () => {
+  it('is dropped, rather than lingering on screen for ever', () => {
+    // It comes back in `scheduleTask` flagged rather than absent, and nothing
+    // downstream removes a task it has already been shown.
+    const row = {taskId: 'x', taskListId: 'list1', title: 'Gone', status: 'needsAction'};
+    expect(snTaskFrom(row)).not.toBeNull();
+    expect(snTaskFrom({...row, isDeleted: 'Y'})).toBeNull();
+    expect(snTaskFrom({...row, isDeleted: 'N'})).not.toBeNull();
+    expect(snTasksFrom({scheduleTask: [row, {...row, taskId: 'y', isDeleted: 'Y'}]})).toHaveLength(1);
   });
 });
