@@ -1,4 +1,5 @@
 import {
+  WEEKDAYS,
   backgroundCost,
   dayBackground,
   monthBackground,
@@ -9,6 +10,7 @@ import {
 
 /** A Manta's page, which is what the plugin assumes when the device will not say. */
 const PAGE: PageSize = {width: 1920, height: 2560};
+const WEEK_DAYS = WEEKDAYS.map((name, i) => ({label: `${name} ${14 + i}`}));
 
 const inside = (r: {left: number; top: number; right: number; bottom: number}) =>
   r.left >= 0 && r.top >= 0 && r.right <= PAGE.width && r.bottom <= PAGE.height;
@@ -16,7 +18,7 @@ const inside = (r: {left: number; top: number; right: number; bottom: number}) =
 describe('every background page', () => {
   const pages = {
     day: dayBackground(PAGE, [{startMin: 540, endMin: 600, title: 'Stand-up'}]),
-    week: weekBackground(PAGE, ['14', '15', '16', '17', '18', '19', '20']),
+    week: weekBackground(PAGE, WEEK_DAYS),
     month: monthBackground(PAGE, 5, Array.from({length: 35}, (_, i) => String(i + 1))),
     quarter: quarterBackground(PAGE, [
       Array.from({length: 31}, (_, i) => String(i + 1)),
@@ -81,7 +83,7 @@ describe('the day page', () => {
 
 describe('the week and month pages', () => {
   it('give the calendar three quarters and the notes area the rest', () => {
-    const bg = weekBackground(PAGE, ['1', '2', '3', '4', '5', '6', '7']);
+    const bg = weekBackground(PAGE, WEEK_DAYS);
     const margin = Math.round(PAGE.width * 0.02);
     const split = margin + Math.round((PAGE.height - 2 * margin) * 0.75);
     const notes = bg.writable[bg.writable.length - 1];
@@ -97,13 +99,23 @@ describe('the week and month pages', () => {
     expect(band[1].top - band[0].top).toBe(spacing);
   });
 
-  it('put the date in the corner, never where the writing goes', () => {
-    const bg = weekBackground(PAGE, ['14', '15', '16', '17', '18', '19', '20']);
-    const first = bg.labels[0];
-    const column = bg.writable[0];
-    expect(first.text).toBe('14');
-    // Above the writable area, not inside it.
-    expect(first.top).toBeLessThan(column.top);
+  it('runs the week as rows across the page, not columns down it', () => {
+    // Columns were the first attempt. A column is about 270px on a Manta —
+    // three or four words a line — so a day's note became a ragged stack.
+    const bg = weekBackground(PAGE, WEEK_DAYS);
+    const rows = bg.writable.slice(0, 7);
+    expect(rows.every(r => r.right - r.left > PAGE.width / 2)).toBe(true);
+    expect(bg.labels[0].text).toBe('Sun 14');
+  });
+
+  it('keeps the date out of the writing, in a gutter on the left', () => {
+    const bg = weekBackground(PAGE, WEEK_DAYS);
+    expect(bg.labels[0].left).toBeLessThan(bg.writable[0].left);
+  });
+
+  it('names the days on the month page, so bare numbers can be read', () => {
+    const bg = monthBackground(PAGE, 5, Array.from({length: 35}, (_, i) => String(i + 1)));
+    expect(bg.labels.slice(0, 7).map(l => l.text)).toEqual(WEEKDAYS);
   });
 });
 
@@ -143,9 +155,14 @@ describe('how much work each page is', () => {
     // page is the worst case by a wide margin, which is why it is the one to
     // time.
     const quarter = backgroundCost(quarterBackground(PAGE, months3()));
-    const week = backgroundCost(weekBackground(PAGE, ['1', '2', '3', '4', '5', '6', '7']));
+    const week = backgroundCost(weekBackground(PAGE, WEEK_DAYS));
+    // Measured on the device, not inferred: a 25-element day page took 7,536ms
+    // end to end — about 300ms an element once the page insert, the layer
+    // switches, the save and the reload are counted, far above the 37-40ms the
+    // Patterns plugin measured for the insert alone. So element count is the
+    // budget, and the quarter page at 185 is the one to watch.
     expect(quarter.elements).toBeGreaterThan(180);
-    expect(week.elements).toBeLessThan(40);
+    expect(week.elements).toBeLessThan(60);
   });
 });
 

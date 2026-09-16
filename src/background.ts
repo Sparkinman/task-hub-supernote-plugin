@@ -155,18 +155,42 @@ export function dayBackground(
 ): Background {
   const f = frame(page);
   const timed = entries.filter(e => e.endMin > e.startMin);
+  // Everything with no hour to sit at: all-day events, and to-dos, which carry
+  // a date and never a time. The first version dropped these on the floor — on
+  // a day whose every event was all-day the page came out as bare hour rules,
+  // which read as the feature not working at all.
+  const untimed = entries.filter(e => e.endMin <= e.startMin);
   const first = timed.reduce((h, e) => Math.min(h, Math.floor(e.startMin / 60)), fromHour);
   const last = timed.reduce((h, e) => Math.max(h, Math.ceil(e.endMin / 60)), toHour);
   const hours = Math.max(1, last - first);
 
   const gutter = Math.round(page.width * 0.08);
   const body = {left: f.left + gutter, right: f.right};
-  const height = f.bottom - f.top;
+  // A band at the top for the untimed rows, sized to what there is, so a day
+  // with none of them gives the whole page to the hour grid.
+  const bandFont = fontPx(page, TITLE_FONT);
+  const bandLine = Math.round(bandFont * 1.7);
+  const bandHeight = untimed.length > 0 ? untimed.length * bandLine + 16 : 0;
+  const gridTop = f.top + bandHeight;
+  const height = f.bottom - gridTop;
   const perHour = height / hours;
-  const y = (minutes: number) => f.top + ((minutes - first * 60) / 60) * perHour;
+  const y = (minutes: number) => gridTop + ((minutes - first * 60) / 60) * perHour;
 
   const rules: Rule[] = [];
   const labels: Label[] = [];
+
+  untimed.forEach((entry, i) => {
+    labels.push({
+      text: entry.title,
+      left: f.left,
+      top: f.top + i * bandLine,
+      fontSize: bandFont,
+    });
+  });
+  if (bandHeight > 0) {
+    rules.push(hairline(f.left, gridTop - 8, f.right));
+  }
+
   for (let h = first; h <= last; h++) {
     const top = Math.round(y(h * 60));
     rules.push(hairline(f.left, top, f.right));
@@ -203,47 +227,64 @@ export function dayBackground(
     mask: {left: 0, top: 0, right: page.width, bottom: page.height},
     rules,
     labels,
-    writable: [{left: body.left, top: f.top, right: f.right, bottom: f.bottom}],
+    writable: [{left: body.left, top: gridTop, right: f.right, bottom: f.bottom}],
   };
 }
 
+/** Sunday first, matching `monthGrid`. */
+export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 /**
- * The week page: seven empty columns, dates in each column's top-left corner.
+ * The week page: seven rows across the page, not seven columns down it.
  *
- * Empty boxes on purpose. What makes this page useful is the shape of the week
- * and the room to write in it, not a rendering of what is already on the
- * Calendar tab — and an empty grid cannot go stale the way a snapshot of events
- * does the moment anything moves.
+ * Columns were the first attempt and they are wrong for writing. A column is
+ * about 270px wide on a Manta — three or four words a line — so a day's note
+ * becomes a narrow ragged stack. Rows run the full width of the page, which is
+ * how a paper week-to-view is laid out and for the same reason.
+ *
+ * The date sits in a gutter on the left, out of the way of the writing, and the
+ * rest of each row is ruled at the same 7mm as the notes area so the lines
+ * continue across the whole page rather than restarting per day.
  */
-export function weekBackground(page: PageSize, dayNumbers: string[]): Background {
+export function weekBackground(page: PageSize, days: {label: string}[]): Background {
   const {calendar, notes, noteRules} = splitForNotes(page);
-  const width = (calendar.right - calendar.left) / 7;
+  const rows = 7;
+  const height = (calendar.bottom - calendar.top) / rows;
+  const font = fontPx(page, DATE_FONT);
+  const gutter = Math.round(page.width * 0.13);
+  const spacing = ruleSpacing();
   const rules: Rule[] = [...noteRules];
   const labels: Label[] = [];
   const writable: Rect[] = [];
 
-  rules.push(hairline(calendar.left, calendar.top, calendar.right));
-  for (let i = 0; i <= 7; i++) {
-    const x = Math.round(calendar.left + i * width);
-    rules.push({left: x, top: calendar.top, right: x, bottom: calendar.bottom});
+  // The gutter runs the height of the calendar, so the dates read as a column
+  // rather than as seven unrelated marks.
+  rules.push({
+    left: calendar.left + gutter,
+    top: calendar.top,
+    right: calendar.left + gutter,
+    bottom: calendar.bottom,
+  });
+
+  for (let i = 0; i < rows; i++) {
+    const top = Math.round(calendar.top + i * height);
+    const bottom = Math.round(calendar.top + (i + 1) * height);
+    // The day's own line, heavier in intent than the rules inside it.
+    rules.push(hairline(calendar.left, top, calendar.right));
+    labels.push({
+      text: days[i]?.label ?? '',
+      left: calendar.left + 8,
+      top: top + 6,
+      fontSize: font,
+    });
+    // Ruled to fill the row, so the writing space is lined all the way down
+    // rather than being one deep empty box per day.
+    for (let y = top + spacing; y < bottom - 8; y += spacing) {
+      rules.push(hairline(calendar.left + gutter, y, calendar.right));
+    }
+    writable.push({left: calendar.left + gutter, top, right: calendar.right, bottom});
   }
   rules.push(hairline(calendar.left, calendar.bottom, calendar.right));
-
-  for (let i = 0; i < 7; i++) {
-    const x = Math.round(calendar.left + i * width);
-    labels.push({
-      text: dayNumbers[i] ?? '',
-      left: x + 6,
-      top: calendar.top + 4,
-      fontSize: fontPx(page, DATE_FONT),
-    });
-    writable.push({
-      left: x,
-      top: calendar.top + fontPx(page, DATE_FONT),
-      right: Math.round(calendar.left + (i + 1) * width),
-      bottom: calendar.bottom,
-    });
-  }
   writable.push(notes);
   return {mask: {left: 0, top: 0, right: page.width, bottom: page.height}, rules, labels, writable};
 }
@@ -261,18 +302,32 @@ export function monthBackground(
 ): Background {
   const {calendar, notes, noteRules} = splitForNotes(page);
   const width = (calendar.right - calendar.left) / 7;
-  const height = (calendar.bottom - calendar.top) / weeks;
   const rules: Rule[] = [...noteRules];
   const labels: Label[] = [];
   const writable: Rect[] = [];
   const font = fontPx(page, DATE_FONT);
 
+  // A header strip naming the days, so a grid of bare numbers can be read as a
+  // week without counting columns.
+  const headerHeight = Math.round(font * 1.8);
+  const gridTop = calendar.top + headerHeight;
+  const cellHeight = (calendar.bottom - gridTop) / weeks;
+  for (let c = 0; c < 7; c++) {
+    labels.push({
+      text: WEEKDAYS[c],
+      left: Math.round(calendar.left + c * width) + 8,
+      top: calendar.top + 2,
+      fontSize: font,
+    });
+  }
+  rules.push(hairline(calendar.left, gridTop, calendar.right));
+
   for (let c = 0; c <= 7; c++) {
     const x = Math.round(calendar.left + c * width);
-    rules.push({left: x, top: calendar.top, right: x, bottom: calendar.bottom});
+    rules.push({left: x, top: gridTop, right: x, bottom: calendar.bottom});
   }
   for (let r = 0; r <= weeks; r++) {
-    const y = Math.round(calendar.top + r * height);
+    const y = Math.round(gridTop + r * cellHeight);
     rules.push(hairline(calendar.left, y, calendar.right));
   }
 
@@ -282,9 +337,14 @@ export function monthBackground(
       continue;
     }
     const x = Math.round(calendar.left + (i % 7) * width);
-    const y = Math.round(calendar.top + Math.floor(i / 7) * height);
+    const y = Math.round(gridTop + Math.floor(i / 7) * cellHeight);
     labels.push({text, left: x + 6, top: y + 4, fontSize: font});
-    writable.push({left: x, top: y + font, right: Math.round(x + width), bottom: Math.round(y + height)});
+    writable.push({
+      left: x,
+      top: y + font,
+      right: Math.round(x + width),
+      bottom: Math.round(y + cellHeight),
+    });
   }
   writable.push(notes);
   return {mask: {left: 0, top: 0, right: page.width, bottom: page.height}, rules, labels, writable};

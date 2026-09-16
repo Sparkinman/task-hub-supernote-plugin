@@ -64,12 +64,14 @@ const FALLBACK_PAGE: PageSize = {width: 1920, height: 2560};
 /**
  * Names that might mean "a blank page", tried in order.
  *
- * The device ships a blank template among its presets, so the right answer is
- * to use theirs rather than install one. Which of these it is called is not
- * documented and differs by firmware and language, so the list is matched
- * loosely against `getNoteSystemTemplates()` and the first hit wins.
+ * It is called **`style_white`** on this firmware — established by listing the
+ * presets on a device rather than guessed. The first attempt matched `/^white$/`
+ * exactly, missed it, and fell through to the PNG fallback, whose caption then
+ * appeared in the middle of every page as "Task Hub blank page". Matched
+ * loosely now, exact name first, because the name will differ by firmware and
+ * language.
  */
-const BLANK_PATTERNS = [/^blank$/i, /^none$/i, /^plain$/i, /^white$/i, /blank/i, /空白/];
+const BLANK_PATTERNS = [/^style_white$/i, /white/i, /blank/i, /^none$/i, /^plain$/i, /空白/];
 
 /**
  * A blank white PNG, 71 bytes — the fallback if no preset matches.
@@ -425,10 +427,14 @@ export async function writeBackground(
       }
       const box = new TextBox();
       box.textContentFull = label.text;
+      // Generous, because a box that is merely wide enough wraps. "14" came
+      // back as a 1 above a 4 on the device: the host measures its own font and
+      // a width derived from `length * fontSize` is not the width it needs.
+      // Nothing reads the box's edges, so there is no cost to overshooting.
       box.textRect = {
         left: label.left,
         top: label.top,
-        right: label.left + label.text.length * label.fontSize,
+        right: label.left + Math.max(240, label.text.length * label.fontSize * 2),
         bottom: label.top + label.fontSize * 2,
       };
       box.fontSize = label.fontSize;

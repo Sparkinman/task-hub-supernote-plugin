@@ -152,6 +152,7 @@ import {
   type Background,
   type DayEntry,
   type PageSize,
+  WEEKDAYS,
 } from './src/background';
 import {writeBackground} from './src/backgrounddraw';
 import {
@@ -2176,9 +2177,15 @@ export default function App(): React.JSX.Element {
       // whole point of the page.
       const build = (page: PageSize): Background => {
         if (kind === 'week') {
+          // Day name and date together, in the row's own gutter: "Mon 14".
+          // The name has to be on the page somewhere and a header strip above
+          // seven rows would cost a row's worth of writing space.
           return weekBackground(
             page,
-            weekOf(iso).map(d => String(Number(d.slice(8, 10)))),
+            weekOf(iso).map(d => {
+              const at = new Date(`${d}T00:00:00`);
+              return {label: `${WEEKDAYS[at.getDay()]} ${at.getDate()}`};
+            }),
           );
         }
         if (kind === 'month') {
