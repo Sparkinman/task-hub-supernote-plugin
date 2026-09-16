@@ -4,6 +4,7 @@ import {
   SN_BASE_URL,
   SN_LIST_GROUPS,
   SN_LIST_TASKS,
+  SN_MAX_RESULTS,
   SN_TASK,
   snFieldsFrom,
   snListsFrom,
@@ -32,14 +33,17 @@ const TAG = '[TaskHub]';
 export class SnAuthError extends Error {}
 
 /**
- * Said whenever Supernote admits to holding more to-dos than it will hand over.
+ * Said if Supernote still holds to-dos back despite being asked for everything.
  *
- * Names the cap, names the cause and gives the one action that works, because
- * "some to-dos are missing" without a remedy is only slightly better than
- * silence.
+ * A backstop rather than an expectation. Every read asks for `SN_MAX_RESULTS`
+ * rows, which is far past any real account, so this should never be seen — but
+ * it was written when the twenty-row default looked unfixable, and it stays
+ * because the alternative is the plugin silently omitting to-dos again if that
+ * ceiling ever moves. Unexplained absence is the failure this whole area has
+ * been prone to.
  */
 export const SN_CAPPED =
-  'Supernote only returns your first 20 to-dos and gives no way to ask for the rest, so some are not shown here. Completing or deleting old to-dos on the tablet brings the newer ones into view.';
+  'Supernote returned only part of your to-do list and would not give up the rest, so some to-dos are not shown here. Completing or deleting old ones on the tablet brings the newer ones into view.';
 
 export const SN_EXPIRED =
   'Your Supernote sign-in has run out. It lasts thirty days and cannot renew itself, so sign in again in Settings.';
@@ -247,7 +251,7 @@ export async function finishSignIn(
 
 /** Every live to-do list on the account. */
 export async function listSnLists(token: string): Promise<SnList[]> {
-  return snListsFrom(await read(SN_LIST_GROUPS, token));
+  return snListsFrom(await read(SN_LIST_GROUPS, token, {maxResults: SN_MAX_RESULTS}));
 }
 
 /**
@@ -279,14 +283,14 @@ export async function readSnTasks(token: string): Promise<{
   dropped: number;
   truncated: boolean;
 }> {
-  const body = await read(SN_LIST_TASKS, token);
+  const body = await read(SN_LIST_TASKS, token, {maxResults: SN_MAX_RESULTS});
   const batch = snTaskRead(body);
   return {...batch, truncated: snTruncated(body)};
 }
 
 /** The server's own row for one task, to lay an update over. */
 async function taskRow(token: string, id: string): Promise<Record<string, unknown> | null> {
-  const body = await read(SN_LIST_TASKS, token);
+  const body = await read(SN_LIST_TASKS, token, {maxResults: SN_MAX_RESULTS});
   const rows = body.scheduleTask;
   if (!Array.isArray(rows)) {
     return null;

@@ -38,29 +38,29 @@ export const SN_LIST_GROUPS = '/file/schedule/group/all';
 export const SN_LIST_TASKS = '/file/schedule/task/all';
 
 /**
- * How many task rows `SN_LIST_TASKS` will return, ever.
+ * How many to-dos to ask for in one request.
  *
- * **The endpoint is capped at twenty rows and takes no arguments.** It answers
- * with `nextPageToken` beside them when more exist, which reads like ordinary
- * pagination — but the request body is ignored outright: filtering by
- * `taskListId`, by `status`, or sending a deliberate nonsense key all return
- * the identical twenty rows, and so does every spelling of a page parameter in
- * the body, in the query string and in a header. Twenty-seven were tried.
+ * **The endpoint defaults to twenty rows and says nothing about it.** Asking
+ * plainly returns the first twenty with `nextPageToken` set, and because the
+ * rows come back oldest first, the to-dos it silently omits are the *newest* —
+ * so a to-do created today on a busy account never arrived here at all.
  *
- * Proved on a live account: with 21 to-dos the newest was absent and
- * `nextPageToken` was `'2'`; after deleting the completed ones the account
- * returned 6 rows, `nextPageToken` was null, and the missing to-do appeared.
- * It had been on page two all along.
+ * `maxResults` is the way out, and it was not guessable. The endpoint ignores
+ * unknown JSON keys in silence, so roughly a hundred spellings of "page" in
+ * bodies, query strings, headers and paths all returned the identical twenty
+ * rows. What found it was asking the server which fields it knows: sending a
+ * field with a deliberately wrong type makes it answer "Request Parameter
+ * Serialisation Exception" when the field is real and ignore it when it is not.
+ * `/file/schedule/task/all` admits to exactly two — `nextSyncToken` and this —
+ * which also explains why no page token ever worked: tasks have none. The
+ * sibling `/file/schedule/group/all` has `pageToken` and `maxResults`.
  *
- * So the second page cannot be asked for by any means found, and the only
- * honest thing left is to notice the cap and say so. `snTruncated` is what does
- * that. Do not replace this with a page walk unless a route is actually found —
- * a loop that re-requests a body-ignoring endpoint just fetches page one twice.
+ * The name is Google Tasks', like the rest of this API's vocabulary.
  *
- * The Task Hub server's connector has the same cap and does not yet know it.
- * See `app/connectors/supernote.py`.
+ * `snTruncated` stays as a backstop: if a ceiling is ever imposed below this,
+ * the plugin says so rather than quietly dropping to-dos again.
  */
-export const SN_PAGE_SIZE = 20;
+export const SN_MAX_RESULTS = 1000;
 
 /**
  * Whether the account holds more to-dos than this answer contains.

@@ -2,80 +2,63 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-16.
-Current build **0.72.0** (versionCode 93). **577 tests across 35 suites.**
+Current build **0.73.1** (versionCode 98). **589 tests across 35 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
 **licensed GPLv3**. **v0.71.2 is still the released build marked Latest**, with
-`TaskHub-0.71.2.snplg` attached — 0.72.0 is committed and pushed but not yet built, installed
-or released.
+`TaskHub-0.71.2.snplg` attached — everything since is committed and pushed but not yet
+released.
 
 ## READ THIS FIRST — where the work stopped
 
-### Supernote Cloud returns only 20 to-dos, and cannot be asked for more
+### Supernote Cloud defaults to 20 to-dos per read — ask for `maxResults`
 
-**This is the most important thing on this page.** `/file/schedule/task/all` answers with at
-most **twenty rows**, and there is no way to ask for the rest. Both this plugin and the Task
-Hub server have always read a capped view of any account with more than twenty to-dos.
+**Solved, and the method is the reusable part.** `/file/schedule/task/all` returns twenty rows
+by default with `nextPageToken` set, and **the rows come back oldest first**, so the to-dos it
+silently omits are the newest. A to-do created today on a busy account never arrived — which
+is how it presented: "the plugin cannot see my new Inbox to-do", not "some old to-dos are
+missing".
 
-**Proved on the maintainer's live account**, not inferred:
+**The fix is `{"maxResults": 1000}` on every task read.** Three call sites in `snclient.ts`,
+and `taskRow` is one of them — it looks a single task up in the full set, so capped at twenty
+it could not find, and therefore could not *update*, any task past the twentieth. The groups
+read takes it too.
 
-- With 21 to-dos, the newest — an open one plainly visible in the tablet's own Inbox — was
-  absent from the response, and `nextPageToken` came back `'2'`.
-- After deleting the completed to-dos, the account returned **6 rows, `nextPageToken: null`**,
-  and the missing to-do was there. It had been on page two all along.
+**How it was found, because guessing failed completely.** The endpoint ignores unknown JSON
+keys in silence, so roughly a hundred spellings of "page" — camelCase and snake_case, in the
+body, the query string, as headers, in the path, as keyset cursors, as nested objects — all
+returned the identical twenty rows. What worked was **asking the server which fields it
+knows**: send a field with a deliberately wrong type (`{"name": {"deliberately": "wrong"}}`)
+and it answers `Request Parameter Serialisation Exception` if the field is real, and ignores
+it if it is not. That oracle named them in one pass:
 
-**The body is ignored outright.** This is the finding that closes off the obvious fix, so do
-not spend another session on it: sending `{"taskListId": ...}`, `{"status": ...}` or a
-deliberate nonsense key all return the *identical* twenty rows. So do fourteen spellings of a
-page parameter in the body, eight in the query string, and five as headers — twenty-seven in
-total, none of which changed a single row. `GET` on the same path answers "Server Error", and
-so do `/file/schedule/task/list`, `/page`, `/query` and `/sync`.
+| Endpoint | Fields it admits to |
+|---|---|
+| `/file/schedule/task/all` | `nextSyncToken`, `maxResults` |
+| `/file/schedule/group/all` | `pageToken`, `maxResults` |
 
-It also retires the old note in `sncloud.ts` about `nextSyncToken` "coming back but never
-replaying". That was this cap being mistaken for a broken delta read. `nextSyncToken` is null
-on this account; `nextPageToken` is the field that means something, and nothing can be done
-with it.
+Which also explains why no page token ever worked for tasks: **that endpoint has none.** Use
+this oracle first the next time this API hides something; it turned an unbounded guess into
+one request.
 
-**What the plugin does about it:** `snTruncated()` reads `nextPageToken`, and `SN_CAPPED` is
-shown both in Settings after *Refresh lists* and as a status on the Tasks tab — the place the
-to-dos are actually missing from. It names the cap, the cause and the only remedy there is:
-clear old to-dos on the tablet. **Do not add a page walk.** Re-requesting a body-ignoring
-endpoint just fetches page one twice.
+**Other facts established on the way**, so none of it is repeated: the body must be JSON (form
+encoding answers "Content type not supported") and must be present (an empty body is a
+serialisation error); `GET` fails; only `/file/schedule/task/all` and `/file/schedule/group/all`
+exist, everything else returns a Spring Boot 404; `nextSyncToken` is a real delta cursor that
+rejects stale values with "NextSyncToken timeout"; and `viewer.supernote.com` has **no to-do
+interface at all**, so there is no web client whose traffic could be read — the tablet is the
+only thing that speaks this API.
 
-**The rows come back oldest first**, which is what makes the cap bite: the to-dos beyond row
-twenty are the *newest* ones. A to-do created today on a busy account is the one that never
-arrives. That is why this presented as "the plugin cannot see my new Inbox to-do" rather than
-as "some old to-dos are missing".
+**`snTruncated` stays as a backstop.** It reads `nextPageToken` and shows `SN_CAPPED` if the
+server ever holds rows back despite being asked for everything. It should never fire; it
+exists because silent omission is the failure this area is prone to.
 
-**A truncated read is therefore never authoritative.** `refreshSupernote` rebuilds the
-Supernote tasks from the answer only when `truncated` is false; when it is true it merges, so
-a to-do already on screen is not deleted just because this sample did not contain it. Getting
-this wrong deletes a live to-do from the plugin on every refresh.
+**A truncated read is never authoritative.** `refreshSupernote` rebuilds the Supernote tasks
+from the answer only when `truncated` is false, and merges when it is true, so a to-do already
+on screen is not deleted because one sample lacked it.
 
-**Ruled out, so it is not re-done.** Roughly eighty parameter spellings: camelCase and
-snake_case, in the JSON body, the query string and as headers; string and integer values;
-nested `{"page": {...}}` shapes; keyset cursors built from page one's own `lastModified` and
-`taskId`; the page in the path. None changed a single row. Form encoding answers "Content type
-not supported", an empty body answers "Request Parameter Serialisation Exception" — so the
-endpoint *does* parse its JSON body, it simply ignores every key we know. `GET` fails. A path
-sweep found that only `/file/schedule/task/all` and `/file/schedule/group/all` exist at all;
-everything else returns a Spring Boot 404.
-
-**One lead not yet followed up:** `/file/schedule/group/all` returns its token under
-`pageToken`, while `/file/schedule/task/all` returns `nextPageToken`. The two endpoints use
-different spellings, which suggests the request parameter may differ too.
-
-**There is no web client to observe.** viewer.supernote.com has no to-do interface — confirmed
-by signing in — so the tablet is the only thing that speaks this API, and capturing its
-traffic is the remaining way to settle it.
-
-**Still open:** how the Partner app reads a full account. Nobody has looked at its traffic; the
-original reverse engineering read its compiled Dart, and no copy of it is on this machine. That
-is where the answer is, if there is one.
-
-**The server has the same defect** and does not yet know it — `app/connectors/supernote.py`,
-in `_get(LIST_TASKS)` and in `_task_row`, which means a task beyond the first twenty cannot be
-updated either.
+**The server has the same defect and is not yet fixed** — `app/connectors/supernote.py`, in
+`_get(LIST_TASKS)` and `_task_row`. It needs the same `maxResults`.
 
 ### 0.72.0 — the Supernote Inbox, written but NOT yet run on a device
 
