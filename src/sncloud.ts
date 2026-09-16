@@ -290,21 +290,75 @@ export function snFiledUnder(task: SnTask, liveIds: Set<string>): boolean {
 }
 
 /**
+ * How many to-dos belong to no list, split by whether they are still open.
+ *
+ * Both halves are needed, and the completed half is the interesting one. The
+ * Inbox is offered only for *open* unfiled to-dos, so an account whose only
+ * unfiled to-do is completed sees no Inbox — which is correct, and completely
+ * baffling to somebody looking straight at that to-do in the tablet's own
+ * Inbox. Counting them separately is what lets Settings say so instead of
+ * silently leaving the row out.
+ */
+export function snUnfiledCounts(
+  lists: SnList[],
+  tasks: SnTask[],
+): {open: number; completed: number} {
+  const live = new Set(lists.map(l => l.id));
+  let open = 0;
+  let completed = 0;
+  for (const task of tasks) {
+    if (snFiledUnder(task, live)) {
+      continue;
+    }
+    if (task.completed) {
+      completed += 1;
+    } else {
+      open += 1;
+    }
+  }
+  return {open, completed};
+}
+
+/**
  * The lists to offer for ticking, with the Inbox appended when anything is
  * actually in it.
  *
- * Only offered when non-empty, so an account with every to-do properly filed
- * never sees a puzzling empty list it has to reason about.
+ * Only offered when it holds an open to-do, so an account with every to-do
+ * properly filed never sees a puzzling empty list it has to reason about, and
+ * one whose unfiled to-dos are all completed is never offered a list that turns
+ * out empty the moment it is ticked.
  */
 export function snListsWithUnfiled(lists: SnList[], tasks: SnTask[]): SnList[] {
-  const live = new Set(lists.map(l => l.id));
-  // Completed to-dos are never shown, so they must not be what makes the Inbox
-  // appear either: offering a list that turns out empty the moment it is ticked
-  // is worse than not offering it.
-  if (!tasks.some(task => !task.completed && !snFiledUnder(task, live))) {
+  if (snUnfiledCounts(lists, tasks).open === 0) {
     return lists;
   }
   return [...lists, {id: SN_UNFILED_ID, name: SN_UNFILED_NAME}];
+}
+
+/**
+ * What to say after a refresh, when the Inbox is *not* among the lists.
+ *
+ * Null when there is nothing to explain. This exists because the absence of the
+ * Inbox is indistinguishable from a broken feature: it has already cost one
+ * round trip of "I have an item in my Inbox and the plugin does not show it",
+ * where the answer was that the plugin was working exactly as asked. Feedback
+ * shown far from the action is feedback nobody sees, and no feedback at all is
+ * worse.
+ */
+export function snUnfiledNote(lists: SnList[], tasks: SnTask[]): string | null {
+  const {open, completed} = snUnfiledCounts(lists, tasks);
+  if (open > 0) {
+    return null;
+  }
+  if (completed > 0) {
+    const s = completed === 1 ? '' : 's';
+    const it = completed === 1 ? 'It is' : 'They are';
+    return (
+      `No Inbox: the ${completed} to-do${s} that belong to no list ` +
+      `${it.toLowerCase()} already completed, and completed to-dos are not brought over.`
+    );
+  }
+  return 'No Inbox: every to-do on this account is in a list.';
 }
 
 /**

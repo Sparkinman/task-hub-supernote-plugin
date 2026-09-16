@@ -200,6 +200,7 @@ import {
   snDaysLeft,
   snListsWithUnfiled,
   snReady,
+  snUnfiledNote,
   type SnList,
 } from './src/sncloud';
 import {SN_EXPIRED, beginSignIn, finishSignIn, listSnLists, listSnTasks} from './src/snclient';
@@ -2458,10 +2459,13 @@ export default function App(): React.JSX.Element {
         const [live, loaded] = await Promise.all([listSnLists(token), listSnTasks(token)]);
         const lists = snListsWithUnfiled(live, loaded);
         setSnLists(lists);
+        // Why the Inbox is absent, when it is. Said here rather than left to be
+        // inferred: a missing row looks identical to a broken feature.
+        const why = snUnfiledNote(live, loaded);
         setSnMessage(
           lists.length === 0
             ? 'Signed in, but this account has no to-do lists.'
-            : 'Signed in. Tick the lists to show, then Save settings.',
+            : `Signed in. Tick the lists to show, then Save settings.${why ? ` ${why}` : ''}`,
         );
       } catch (err) {
         setSnMessage(describe(err));

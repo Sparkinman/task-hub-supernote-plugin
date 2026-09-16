@@ -9,6 +9,8 @@ import {
   snListsFrom,
   snListsWithUnfiled,
   snNoteLink,
+  snUnfiledCounts,
+  snUnfiledNote,
   snTaskFrom,
   snTasksFrom,
   snTokenExpiry,
@@ -260,5 +262,42 @@ describe('a to-do deleted on the tablet', () => {
     expect(snTaskFrom({...row, isDeleted: 'Y'})).toBeNull();
     expect(snTaskFrom({...row, isDeleted: 'N'})).not.toBeNull();
     expect(snTasksFrom({scheduleTask: [row, {...row, taskId: 'y', isDeleted: 'Y'}]})).toHaveLength(1);
+  });
+});
+
+describe('saying why the Inbox is not there', () => {
+  const filed = {id: 'a', listId: 'list1', title: 'Filed', completed: false, dueDate: ''};
+  const loose = {...filed, id: 'b', listId: '', title: 'Loose'};
+  const lists = [{id: 'list1', name: 'Work'}];
+
+  it('counts unfiled to-dos by whether they are still open', () => {
+    const counts = snUnfiledCounts(lists, [filed, loose, {...loose, id: 'c', completed: true}]);
+    expect(counts).toEqual({open: 1, completed: 1});
+  });
+
+  it('says nothing when the Inbox is there to speak for itself', () => {
+    expect(snUnfiledNote(lists, [loose])).toBeNull();
+  });
+
+  it('explains an Inbox holding only completed to-dos', () => {
+    // The case that actually happened: an item plainly visible in the tablet's
+    // own Inbox, no Inbox in the plugin, and nothing anywhere saying why.
+    const note = snUnfiledNote(lists, [{...loose, completed: true}]) ?? '';
+    expect(note).toContain('1 to-do that belong to no list');
+    expect(note).toContain('completed');
+  });
+
+  it('counts more than one of them properly', () => {
+    const done = [
+      {...loose, id: 'x', completed: true},
+      {...loose, id: 'y', completed: true},
+    ];
+    expect(snUnfiledNote(lists, done) ?? '').toContain('2 to-dos');
+  });
+
+  it('says so plainly when everything really is filed', () => {
+    expect(snUnfiledNote(lists, [filed])).toBe(
+      'No Inbox: every to-do on this account is in a list.',
+    );
   });
 });
