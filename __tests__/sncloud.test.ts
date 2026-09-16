@@ -10,7 +10,6 @@ import {
   snListsWithUnfiled,
   snNoteLink,
   snOpenCounts,
-  snTaskRead,
   snTruncated,
   snUnfiledCounts,
   snUnfiledNote,
@@ -342,26 +341,7 @@ describe('what each list actually holds', () => {
   });
 });
 
-describe('reporting what actually arrived', () => {
-  it('counts the rows received as well as the to-dos kept', () => {
-    const row = {taskId: 'x', taskListId: '1', title: 'Live', status: 'needsAction'};
-    const out = snTaskRead({
-      scheduleTask: [row, {...row, taskId: 'y', isDeleted: 'Y'}, {taskId: ''}],
-    });
-    // Three rows in, one usable to-do out: without the raw count, "it never
-    // arrived" and "it arrived and was dropped here" look identical.
-    expect(out.rows).toBe(3);
-    expect(out.tasks).toHaveLength(1);
-    expect(out.dropped).toBe(2);
-  });
-
-  it('reports nothing rather than throwing on a body it cannot read', () => {
-    expect(snTaskRead(null)).toEqual({tasks: [], rows: 0, dropped: 0});
-    expect(snTaskRead({})).toEqual({tasks: [], rows: 0, dropped: 0});
-  });
-});
-
-describe('the twenty-row cap', () => {
+describe('noticing a truncated answer', () => {
   it('notices when Supernote is holding to-dos back', () => {
     // Proved on a live account: 21 to-dos gave nextPageToken '2' and omitted
     // the newest; deleting the completed ones gave 6 rows, a null token, and

@@ -8,7 +8,7 @@ import {
   SN_TASK,
   snFieldsFrom,
   snListsFrom,
-  snTaskRead,
+  snTasksFrom,
   snTruncated,
   type SnList,
   type SnTask,
@@ -279,13 +279,10 @@ export async function listSnTasks(token: string): Promise<SnTask[]> {
  */
 export async function readSnTasks(token: string): Promise<{
   tasks: SnTask[];
-  rows: number;
-  dropped: number;
   truncated: boolean;
 }> {
   const body = await read(SN_LIST_TASKS, token, {maxResults: SN_MAX_RESULTS});
-  const batch = snTaskRead(body);
-  return {...batch, truncated: snTruncated(body)};
+  return {tasks: snTasksFrom(body), truncated: snTruncated(body)};
 }
 
 /** The server's own row for one task, to lay an update over. */

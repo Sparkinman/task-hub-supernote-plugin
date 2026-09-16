@@ -286,29 +286,11 @@ export function snTaskFrom(row: unknown): SnTask | null {
 
 /** Every usable task in a `scheduleTask` response. */
 export function snTasksFrom(body: unknown): SnTask[] {
-  return snTaskRead(body).tasks;
-}
-
-/**
- * The same, with a count of what was thrown away on the way through.
- *
- * Kept separate from the tasks themselves because it answers a different
- * question: "is this to-do not on my screen because the plugin filed it
- * somewhere unexpected, or because it never arrived at all?" Without the raw
- * row count those two look identical, and telling them apart has already cost
- * several installs.
- */
-export function snTaskRead(body: unknown): {
-  tasks: SnTask[];
-  rows: number;
-  dropped: number;
-} {
   const rows = (body as {scheduleTask?: unknown})?.scheduleTask;
   if (!Array.isArray(rows)) {
-    return {tasks: [], rows: 0, dropped: 0};
+    return [];
   }
-  const tasks = rows.map(snTaskFrom).filter((t): t is SnTask => t !== null);
-  return {tasks, rows: rows.length, dropped: rows.length - tasks.length};
+  return rows.map(snTaskFrom).filter((t): t is SnTask => t !== null);
 }
 
 /** Every live list in a `scheduleTaskGroup` response, deleted ones dropped. */

@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-16.
-Current build **0.73.1** (versionCode 98). **589 tests across 35 suites.**
+Current build **0.73.2** (versionCode 99). **587 tests across 35 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
 **licensed GPLv3**. **v0.71.2 is still the released build marked Latest**, with
@@ -57,8 +57,10 @@ exists because silent omission is the failure this area is prone to.
 from the answer only when `truncated` is false, and merges when it is true, so a to-do already
 on screen is not deleted because one sample lacked it.
 
-**The server has the same defect and is not yet fixed** — `app/connectors/supernote.py`, in
-`_get(LIST_TASKS)` and `_task_row`. It needs the same `maxResults`.
+**The server is fixed too**, in `task-hub` `v1.0.2` — `app/connectors/supernote.py` sends
+`maxResults` on all six of its reads, and the stale note in `pull()` claiming `nextSyncToken`
+could not be replayed has been corrected: it is a real delta cursor, refused with
+"NextSyncToken timeout" when stale, and left unused deliberately.
 
 ### 0.72.0 — the Supernote Inbox, written but NOT yet run on a device
 

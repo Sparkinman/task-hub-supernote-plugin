@@ -2489,19 +2489,11 @@ export default function App(): React.JSX.Element {
         // Why the Inbox is absent, when it is. Said here rather than left to be
         // inferred: a missing row looks identical to a broken feature.
         const why = snUnfiledNote(live, loaded);
-        // What the account actually returned, so "it never arrived" and "it
-        // arrived and was filed somewhere I did not expect" stop looking alike.
-        const heard =
-          `Supernote returned ${read.rows} to-do(s)` +
-          (read.dropped > 0 ? `, ${read.dropped} of them marked deleted.` : '.') +
-          (read.truncated
-            ? ` ${SN_CAPPED}`
-            : '');
         setSnMessage(
           lists.length === 0
-            ? `Signed in, but this account has no to-do lists. ${heard}`
-            : `Signed in. Tick the lists to show, then Save settings. ${heard}${
-                why ? ` ${why}` : ''
+            ? 'Signed in, but this account has no to-do lists.'
+            : `Signed in. Tick the lists to show, then Save settings.${why ? ` ${why}` : ''}${
+                read.truncated ? ` ${SN_CAPPED}` : ''
               }`,
         );
       } catch (err) {
