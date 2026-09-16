@@ -195,6 +195,7 @@ import {
   removeFeed,
 } from './src/feeds';
 import {forgetFeed} from './src/feedfetch';
+import {APP_BUILD, APP_VERSION} from './src/version';
 import {
   DEFAULT_SN_CONFIG,
   snDaysLeft,
@@ -4631,6 +4632,14 @@ function SettingsScreen(props: {
         where anybody looks for which tab the plugin opens on. It is one line,
         so it costs the page almost nothing to be in the open.
       */}
+      {/*
+        Which build this is, at the top of Settings where it can be read
+        without opening anything. A plugin that cannot say its own version
+        makes "is the feature missing or is the build missing?" cost an
+        install to answer, and it has done exactly that.
+      */}
+      <Text style={styles.noteCompact}>{`${APP_NAME} ${APP_VERSION} (build ${APP_BUILD})`}</Text>
+
       <Text style={styles.subheadingCompact}>Open on</Text>
       <Text style={styles.noteCompact}>
         Which tab you land on when the plugin opens. Without a CalDAV server the Tasks tab is
