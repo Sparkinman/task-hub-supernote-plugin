@@ -80,10 +80,12 @@ const BLANK_TEMPLATE_NAME = 'TaskHub-blank.png';
  * with **code 106**, because the SDK annotates `TYPE_PICTURE` as *"currently
  * unused"*.
  */
-async function blankTemplateNames(): Promise<string[]> {
+async function blankTemplateNames(): Promise<{names: string[]; presets: string[]}> {
   const names: string[] = [];
+  let seen: string[] = [];
   try {
     const presets = await listSystemTemplates();
+    seen = presets.map(t => t.name);
     for (const pattern of BLANK_PATTERNS) {
       for (const preset of presets) {
         if (pattern.test(preset.name) && !names.includes(preset.name)) {
@@ -115,11 +117,46 @@ async function blankTemplateNames(): Promise<string[]> {
   } catch {
     // The presets are the real answer; this is only the safety net.
   }
-  return names;
+  return {names, presets: seen};
 }
 
-/** The pen a background rule is drawn with: thin, and grey rather than black. */
-const RULE_PEN = {penType: 1, penColor: 157, penWidth: 400};
+/**
+ * The pen a background rule is drawn with.
+ *
+ * `penType: 11` and a width in the low thousands are the only values ever
+ * observed to draw on this hardware — `pagemark.ts` shades with them and its
+ * lines appear. The first attempt here invented `penType: 1` at width 400 and
+ * **nothing rendered at all**: the text elements on the same page arrived and
+ * the rules did not, which is the signature of a pen the host does not
+ * recognise rather than of a failed insert.
+ *
+ * The width is the open question. 3800 is what the device reported for a
+ * hand-drawn marker stroke and 2200 reads as a background wash, so a hairline
+ * is somewhere below that and may have a floor under which nothing is drawn.
+ * `CALIBRATION` exists to find it.
+ */
+const RULE_PEN = {penType: 11, penColor: 157, penWidth: 1000};
+
+/**
+ * Pen settings drawn as a labelled strip at the top of the page, once.
+ *
+ * Because "nothing appeared" is not a measurement. Each row is a short line
+ * with its own settings written beside it, so one look at the page says which
+ * pens draw, how heavy each width is, and therefore what a hairline should be —
+ * instead of another build per guess.
+ *
+ * Delete this, and the strip it draws, once the answer is known.
+ */
+const CALIBRATION: {penType: number; penWidth: number}[] = [
+  {penType: 11, penWidth: 100},
+  {penType: 11, penWidth: 300},
+  {penType: 11, penWidth: 600},
+  {penType: 11, penWidth: 1000},
+  {penType: 11, penWidth: 2200},
+  {penType: 1, penWidth: 1000},
+  {penType: 0, penWidth: 1000},
+  {penType: 2, penWidth: 1000},
+];
 
 interface Loose {
   success?: boolean;
@@ -147,6 +184,12 @@ export interface DrawReport {
   /** How long allocating the elements took, as against inserting them. */
   allocateMs: number;
   elements: number;
+  /** Which template the blank page actually got. Reported, not logged: there
+   * is no adb on the machine this is built from, so anything only logged is
+   * invisible to the person who can see the device. */
+  template: string;
+  /** Every preset the device offers, for the same reason. */
+  presets: string[];
 }
 
 /**
@@ -162,6 +205,11 @@ export async function writeBackground(
 ): Promise<DrawReport> {
   const started = Date.now();
   let allocateMs = 0;
+  // Declared out here so every return path — including the catch — can report
+  // which template was used and what the device offered. There is no adb on
+  // the build machine, so a detail only logged is a detail nobody can read.
+  let usedTemplate = '';
+  let presets: string[] = [];
   const elements: Record<string, unknown>[] = [];
 
   try {
@@ -170,8 +218,9 @@ export async function writeBackground(
     // A page of its own, blank, rather than drawing over one of the user's.
     // Their ruling stays on their pages; the calendar gets clean paper.
     let added: Loose | null = null;
-    let usedTemplate = '';
-    for (const candidate of await blankTemplateNames()) {
+    const offered = await blankTemplateNames();
+    presets = offered.presets;
+    for (const candidate of offered.names) {
       added = (await PluginFileAPI.insertNotePage({
         notePath: absolutePath,
         page: pageNum,
@@ -191,11 +240,54 @@ export async function writeBackground(
         ms: Date.now() - started,
         allocateMs: 0,
         elements: 0,
+        template: '',
+        presets,
       };
     }
     console.log(`${TAG} blank page inserted with template "${usedTemplate}"`);
 
     const startedAllocating = Date.now();
+
+    // The calibration strip, first and at the very top, so it is the first
+    // thing seen and cannot be confused with the grid below it.
+    let calibrationY = 60;
+    for (const pen of CALIBRATION) {
+      const line = await allocate(Element.TYPE_GEO);
+      if (line) {
+        const shape = new Geometry();
+        shape.type = Geometry.TYPE_STRAIGHT_LINE;
+        shape.penType = pen.penType;
+        shape.penColor = RULE_PEN.penColor;
+        shape.penWidth = pen.penWidth;
+        shape.showLassoAfterInsert = false;
+        shape.points = [
+          {x: 420, y: calibrationY},
+          {x: 900, y: calibrationY},
+        ];
+        line.pageNum = pageNum;
+        line.layerNum = BACKGROUND_LAYER;
+        line.geometry = shape;
+        elements.push(line);
+      }
+      const caption = await allocate(Element.TYPE_TEXT);
+      if (caption) {
+        const box = new TextBox();
+        box.textContentFull = `type ${pen.penType} width ${pen.penWidth}`;
+        box.textRect = {left: 40, top: calibrationY - 20, right: 400, bottom: calibrationY + 30};
+        box.fontSize = 28;
+        box.textAlign = 0;
+        box.textBold = 0;
+        box.textItalics = 0;
+        box.textFrameWidthType = 0;
+        box.textFrameStyle = 0;
+        box.textEditable = 0;
+        caption.pageNum = pageNum;
+        caption.layerNum = BACKGROUND_LAYER;
+        caption.textBox = box;
+        elements.push(caption);
+      }
+      calibrationY += 70;
+    }
 
     for (const rule of bg.rules) {
       const geo = await allocate(Element.TYPE_GEO);
@@ -272,17 +364,28 @@ export async function writeBackground(
         ms: Date.now() - started,
         allocateMs,
         elements: elements.length,
+        template: usedTemplate,
+        presets,
       };
     }
     // Deliberately NOT followed by saveCurrentNote. This wrote straight to the
     // file; saving would push the host's in-memory page back over it.
-    return {error: null, ms: Date.now() - started, allocateMs, elements: elements.length};
+    return {
+      error: null,
+      ms: Date.now() - started,
+      allocateMs,
+      elements: elements.length,
+      template: usedTemplate,
+      presets,
+    };
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : 'the device refused the background',
       ms: Date.now() - started,
       allocateMs,
       elements: elements.length,
+      template: usedTemplate,
+      presets,
     };
   } finally {
     for (const element of elements) {

@@ -2186,9 +2186,13 @@ export default function App(): React.JSX.Element {
           // whether two hundred elements is fast enough decides whether the
           // quarter page is drawn or rastered, and guessing it is what this
           // whole exercise has been trying to avoid.
+          // Everything worth knowing is said on screen rather than logged.
+          // There is no adb on the machine this is built from, so a log line is
+          // invisible to the only person who can see the device.
           return (
-            `Saved successfully — ${report.elements} element(s) drawn into ${path} ` +
-            `in ${report.ms}ms (${report.allocateMs}ms allocating).`
+            `Saved successfully — ${report.elements} element(s) into ${path} in ${report.ms}ms ` +
+            `(${report.allocateMs}ms allocating). Template used: "${report.template}". ` +
+            `Presets offered: ${report.presets.join(', ') || 'none'}.`
           );
         },
       });

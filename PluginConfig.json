@@ -5,8 +5,8 @@
   "desc": "Tasks and calendar for any CalDAV server you supply (Radicale, Nextcloud, Baikal, Fastmail and others), plus read-only .ics calendar subscriptions for Google, Outlook and Apple, and an optional connection to the Supernote To-Do app through Supernote Cloud - all of which work without a server of your own. Lasso handwriting in NOTE to capture it as a task or a calendar event, or create and edit tasks and events on device. Find searches the keywords and starred pages already recorded in your daily, weekly, monthly, quarterly, yearly and meeting notes. Your task and event content, and the login you enter, are sent only to the server address you configure - no other destination. Settings are stored in Document/TaskHub/settings.json, and daily and meeting notes are created in folders you choose. If you connect the Supernote To-Do app, your Supernote account email and password are sent only to Supernote's own service to sign in, and only the session it returns is stored - never your password. That connection is off unless you turn it on. Network access is used for your server, for any calendar you subscribe to, and for Supernote Cloud if you connect it; file read/write for those notes and settings, and to read keywords and starred pages from notes in the folders you configure.",
   "name": "Task Hub",
   "author": "Sparkinman",
-  "versionCode": "104",
-  "versionName": "0.74.3",
+  "versionCode": "105",
+  "versionName": "0.74.4",
   "jsMainPath": "index",
   "uses-permissions": [
     "plugin.permission.INTERNET",
