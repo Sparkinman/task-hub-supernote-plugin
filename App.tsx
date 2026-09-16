@@ -3045,23 +3045,13 @@ export default function App(): React.JSX.Element {
           if (report.error) {
             throw new Error(report.error);
           }
-          // The timings are reported out loud on purpose, for this first build:
-          // whether two hundred elements is fast enough decides whether the
-          // quarter page is drawn or rastered, and guessing it is what this
-          // whole exercise has been trying to avoid.
-          // Everything worth knowing is said on screen rather than logged.
-          // There is no adb on the machine this is built from, so a log line is
-          // invisible to the only person who can see the device.
-          return (
-            `Saved successfully — ${report.landed} of ${report.elements} element(s) drawn ` +
-            `into ${target.path} in ${report.ms}ms.` +
-            // Said out loud when the page is short, because a page that is
-            // missing most of itself while reporting success is the failure
-            // this whole area keeps producing.
-            (report.landed < report.elements
-              ? ' The device accepted the rest and drew nothing — tell Paul this number.'
-              : '')
-          );
+          // Short and true. The count stays rather than becoming a bare
+          // "saved": this endpoint reports success while drawing nothing, so a
+          // page missing most of itself has to be able to say so.
+          return report.landed < report.elements
+            ? `Added the page to ${target.path}, but only ${report.landed} of ` +
+                `${report.elements} marks were drawn.`
+            : `Added a ${kind} page to ${target.path}.`;
         },
       });
     },
