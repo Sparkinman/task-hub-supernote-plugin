@@ -3055,9 +3055,8 @@ export default function App(): React.JSX.Element {
           // There is no adb on the machine this is built from, so a log line is
           // invisible to the only person who can see the device.
           return (
-            `Saved successfully — ${report.elements} element(s) in ${report.ms}ms ` +
-            `(${report.allocateMs}ms allocating). Template used: "${report.template}". ` +
-            `Presets offered: ${report.presets.join(', ') || 'none'}.`
+            `Saved successfully — ${report.landed} of ${report.elements} element(s) drawn ` +
+            `into ${target.path} in ${report.ms}ms${report.oneByOne ? ', one at a time' : ''}.`
           );
         },
       });
@@ -4258,7 +4257,6 @@ will not duplicate them.`}
                   startHour={config.agendaStartHour}
                   endHour={config.agendaEndHour}
                   onDailyNote={askDailyNote}
-                  onCalendarPage={d => askCalendarPage(d, 'day')}
                   onPickDate={() => setPickingDate('day')}
                   eventNotes={eventNotes}
                   onEventNote={askEventNote}

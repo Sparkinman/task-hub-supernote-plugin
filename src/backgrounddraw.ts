@@ -58,6 +58,22 @@ const TAG = '[TaskHub]';
 const BACKGROUND_LAYER = 1;
 const MAIN_LAYER = 0;
 
+/**
+ * Writes never name a layer, on the element or in the call.
+ *
+ * Copied exactly from the Patterns plugin, whose comment is the reason: passing
+ * an explicit layer to `insertPageElements` is refused with 813, "the layer of
+ * the element does not match the provided layer parameter", **even when the
+ * element's own `layerNum` is set to that same value**. An element allocated by
+ * `createElement` evidently does not take the plain assignment.
+ *
+ * So `setCurrentLayer` makes the background layer current and the insert is
+ * given null, which lets the device use it. Setting `layerNum` on each element
+ * while passing null here was the mismatch that 813 describes, and is the most
+ * likely reason a page could report success and arrive empty.
+ */
+const WRITE_LAYER = null;
+
 /** A Manta's page, for when the device will not say. Same value as `dateheading`. */
 const FALLBACK_PAGE: PageSize = {width: 1920, height: 2560};
 
@@ -300,6 +316,10 @@ export interface DrawReport {
   /** How long allocating the elements took, as against inserting them. */
   allocateMs: number;
   elements: number;
+  /** How many of them the device actually drew, counted rather than trusted. */
+  landed: number;
+  /** True when the batch was refused and they went down one at a time. */
+  oneByOne: boolean;
   /** Which template the blank page actually got. Reported, not logged: there
    * is no adb on the machine this is built from, so anything only logged is
    * invisible to the person who can see the device. */
@@ -338,6 +358,8 @@ export async function writeBackground(
   let presets: string[] = [];
   let switched = false;
   let notePath = '';
+  let landedCount = 0;
+  let oneByOne = false;
   let drawnPage = 0;
   const elements: Record<string, unknown>[] = [];
 
@@ -366,6 +388,8 @@ export async function writeBackground(
         ms: Date.now() - started,
         allocateMs: 0,
         elements: 0,
+        landed: 0,
+        oneByOne: false,
         template: '',
         presets: [],
       };
@@ -410,6 +434,8 @@ export async function writeBackground(
         ms: Date.now() - started,
         allocateMs: 0,
         elements: 0,
+        landed: 0,
+        oneByOne: false,
         template: '',
         presets,
       };
@@ -439,7 +465,6 @@ export async function writeBackground(
         continue;
       }
       geo.pageNum = pageNum;
-      geo.layerNum = BACKGROUND_LAYER;
       // A real Geometry, not an object of the same shape. `createElement`
       // allocates natively and the host looks for its own accessors behind the
       // uuid; the same is true of the shapes hung off it, which is why
@@ -492,7 +517,6 @@ export async function writeBackground(
       box.textFrameStyle = 0;
       box.textEditable = 0;
       text.pageNum = pageNum;
-      text.layerNum = BACKGROUND_LAYER;
       text.textBox = box;
       elements.push(text);
     }
@@ -517,7 +541,7 @@ export async function writeBackground(
     let inserted = (await PluginCommAPI.insertPageElements(
       elements,
       pageNum,
-      null,
+      WRITE_LAYER,
     )) as Loose | null;
 
     // **Counted, not trusted, and retried once.** The Patterns plugin recorded
@@ -531,7 +555,39 @@ export async function writeBackground(
     const landed = Number(after ?? 0) - Number(before ?? 0);
     if (landed <= 0) {
       console.log(`${TAG} first insert drew nothing (${before} -> ${after}); retrying`);
-      inserted = (await PluginCommAPI.insertPageElements(elements, pageNum, null)) as Loose | null;
+      inserted = (await PluginCommAPI.insertPageElements(
+        elements,
+        pageNum,
+        WRITE_LAYER,
+      )) as Loose | null;
+      await PluginNoteAPI.saveCurrentNote();
+      const second = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
+      landedCount = Number(second ?? 0) - Number(before ?? 0);
+    } else {
+      landedCount = landed;
+    }
+
+    // Still nothing, so the batch is being refused rather than swallowed — and
+    // a batch is all-or-nothing, so one element the host dislikes loses the
+    // whole page. Put them down one at a time instead: the bad one loses only
+    // itself, and the count says how many there were. The Patterns plugin has
+    // the same fallback for the same reason.
+    if (landedCount <= 0 && elements.length > 0) {
+      console.log(`${TAG} batch refused twice; inserting one at a time`);
+      let drawn = 0;
+      for (const element of elements) {
+        const one = (await PluginCommAPI.insertPageElements(
+          [element],
+          pageNum,
+          WRITE_LAYER,
+        )) as Loose | null;
+        if (one?.success === true) {
+          drawn += 1;
+        }
+      }
+      oneByOne = true;
+      landedCount = drawn;
+      inserted = {success: drawn > 0, result: drawn > 0};
     }
 
     if (!inserted?.success || inserted.result === false) {
@@ -543,6 +599,8 @@ export async function writeBackground(
         ms: Date.now() - started,
         allocateMs,
         elements: elements.length,
+        landed: landedCount,
+        oneByOne,
         template: usedTemplate,
         presets,
       };
@@ -559,6 +617,8 @@ export async function writeBackground(
       ms: Date.now() - started,
       allocateMs,
       elements: elements.length,
+      landed: landedCount,
+      oneByOne,
       template: usedTemplate,
       presets,
     };
@@ -568,6 +628,8 @@ export async function writeBackground(
       ms: Date.now() - started,
       allocateMs,
       elements: elements.length,
+      landed: landedCount,
+      oneByOne,
       template: usedTemplate,
       presets,
     };
