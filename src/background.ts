@@ -35,7 +35,14 @@ export interface Label {
 
 /** Everything one background page consists of. */
 export interface Background {
-  /** The full-page fill that hides the note's own template beneath. */
+  /**
+   * The full page.
+   *
+   * Kept after the mask it was named for turned out to be impossible — the SDK
+   * has no usable picture element — because the calendar page now gets a blank
+   * template of its own instead, and this is still the rectangle everything
+   * must fit inside. The tests assert against it.
+   */
   mask: Rect;
   rules: Rule[];
   labels: Label[];

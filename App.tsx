@@ -2171,11 +2171,13 @@ export default function App(): React.JSX.Element {
 
       setAsk({
         title: 'Add a calendar page?',
-        body: `The day's events and to-dos will be drawn into ${path} as a background on its own layer, for you to write over.`,
+        body: `A new page will be added to ${path} with no template, carrying the day's events and to-dos as a background to write over. Your other pages keep their ruling.`,
         label: 'Yes, add it',
         run: async () => {
           const absolute = await absoluteNotePath(path);
           const page = await pageSizeOf(absolute);
+          // Page 0: the calendar page goes at the front of the note, where the
+          // day it describes is the first thing seen on opening it.
           const report = await writeBackground(absolute, 0, dayBackground(page, entries));
           if (report.error) {
             throw new Error(report.error);

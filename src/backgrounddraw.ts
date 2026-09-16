@@ -25,8 +25,8 @@
  *    If it is slow, the rules become one raster and only the dates stay as
  *    text — lines need no font, which is what makes that split possible.
  *
- * The third question — whether a background can hide the note's own template —
- * is answered below, and the answer is no, not this way.
+ * The third question — how a calendar grid survives a ruled template — is
+ * answered below, and it is not by masking: the page carries its own.
  */
 
 import {Element, Geometry, PluginCommAPI, PluginFileAPI, TextBox} from 'sn-plugin-lib';
@@ -46,28 +46,21 @@ const TAG = '[TaskHub]';
 const BACKGROUND_LAYER = 1;
 
 /**
- * Why there is no mask, and what it would take to have one.
+ * The template a calendar page is given: none.
  *
- * The first attempt covered the page with a white `Picture` element stretched
- * to the page rect — 71 bytes and no encoder, which would have been the neat
- * answer to a lined template showing through a calendar grid. The device
- * refused the whole insert with **code 106, invalid API parameters**, and the
- * SDK says why in a comment that is easy to miss: `TYPE_PICTURE` is annotated
- * *"currently unused"*. There is no picture element to place.
+ * This is what makes the whole idea work on somebody whose notes are all ruled.
+ * A calendar grid over ruled paper is unreadable, and the first attempt at
+ * solving it covered the page with a white `Picture` element — which the device
+ * refused outright with code 106, because the SDK annotates `TYPE_PICTURE` as
+ * *"currently unused"*. There is no picture element to place, and asking for
+ * one rejects the entire insert rather than just that element.
  *
- * `PluginNoteAPI.insertImage` does exist, but it takes a path and nothing else
- * — no rect to stretch to — and it writes into the page the host is displaying,
- * which is the dependency `dateheading.ts` established cannot be relied on from
- * here.
- *
- * So a background drawn this way sits on top of whatever template the note
- * already has. If that template is ruled, use a blank one for notes that get a
- * calendar page. Masking with white geometry is the untried idea: `penColor`
- * runs 0 for black through 201 for light grey, so 255 is plausibly white, but
- * nothing has established that a white stroke paints over a template rather
- * than being composited away — and an experiment that is wrong leaves grey
- * bands across somebody's note.
+ * The answer was not masking at all. `insertNotePage` takes a template *per
+ * page*, so the calendar gets a page of its own with a blank one while every
+ * other page in the note keeps whatever ruling the user chose. Nothing is
+ * painted over, nothing is guessed at, and the user's own pages are untouched.
  */
+const NO_TEMPLATE = '';
 
 /** The pen a background rule is drawn with: thin, and grey rather than black. */
 const RULE_PEN = {penType: 1, penColor: 157, penWidth: 400};
@@ -117,6 +110,25 @@ export async function writeBackground(
 
   try {
     await ensureFileAccess();
+
+    // A page of its own, with no template, rather than drawing over one of the
+    // user's. Their ruling stays on their pages; the calendar gets clean paper.
+    const added = (await PluginFileAPI.insertNotePage({
+      notePath: absolutePath,
+      page: pageNum,
+      template: NO_TEMPLATE,
+    })) as Loose | null;
+    if (!added?.success || added.result === false) {
+      const code = added?.error?.code;
+      return {
+        error: `${added?.error?.message ?? 'the device would not add a page'}${
+          code ? ` (code ${code})` : ''
+        }`,
+        ms: Date.now() - started,
+        allocateMs: 0,
+        elements: 0,
+      };
+    }
 
     const startedAllocating = Date.now();
 
