@@ -1,6 +1,7 @@
 import {
   WEEKDAYS,
   backgroundCost,
+  type DayAgenda,
   dayBackground,
   monthBackground,
   quarterBackground,
@@ -12,12 +13,20 @@ import {
 const PAGE: PageSize = {width: 1920, height: 2560};
 const WEEK_DAYS = WEEKDAYS.map((name, i) => ({label: `${name} ${14 + i}`}));
 
+const agenda = (over: Partial<DayAgenda> = {}): DayAgenda => ({
+  allDay: [],
+  timed: [],
+  dueToday: [],
+  upcoming: [],
+  ...over,
+});
+
 const inside = (r: {left: number; top: number; right: number; bottom: number}) =>
   r.left >= 0 && r.top >= 0 && r.right <= PAGE.width && r.bottom <= PAGE.height;
 
 describe('every background page', () => {
   const pages = {
-    day: dayBackground(PAGE, [{startMin: 540, endMin: 600, title: 'Stand-up'}]),
+    day: dayBackground(PAGE, agenda({timed: [{startMin: 540, endMin: 600, title: 'Stand-up'}]})),
     week: weekBackground(PAGE, WEEK_DAYS),
     month: monthBackground(PAGE, 5, Array.from({length: 35}, (_, i) => String(i + 1))),
     quarter: quarterBackground(PAGE, [
@@ -58,26 +67,59 @@ describe('every background page', () => {
 
 describe('the day page', () => {
   it('spends no space on hours nobody writes in', () => {
-    const narrow = dayBackground(PAGE, []);
-    // 07:00-19:00 is thirteen rules, not twenty-five.
-    expect(narrow.rules).toHaveLength(13);
+    // 07:00-19:00 is thirteen hour rules, not twenty-five.
+    const hours = dayBackground(PAGE, agenda()).rules.filter(r => r.top === r.bottom);
+    expect(hours.length).toBeGreaterThanOrEqual(13);
   });
 
   it('widens rather than dropping something scheduled outside the window', () => {
     // An early flight must appear on the page, not be silently absent from it.
-    const early = dayBackground(PAGE, [{startMin: 5 * 60, endMin: 6 * 60, title: 'Flight'}]);
+    const early = dayBackground(
+      PAGE,
+      agenda({timed: [{startMin: 5 * 60, endMin: 6 * 60, title: 'Flight'}]}),
+    );
     expect(early.labels.some(l => l.text === 'Flight')).toBe(true);
-    expect(early.labels.some(l => l.text === '05')).toBe(true);
+    expect(early.labels.some(l => l.text === '05:00')).toBe(true);
   });
 
-  it('has no notes area — the agenda is what is written over', () => {
-    const bg = dayBackground(PAGE, []);
+  it('shows all-day events, which have no hour to be drawn at', () => {
+    // The first version filtered to endMin > startMin, so a day whose every
+    // event was all-day came out as bare hour rules. Four of them, on a real
+    // device, silently dropped.
+    const bg = dayBackground(
+      PAGE,
+      agenda({allDay: [{title: 'Jack & Mitchell', subtitle: 'PC Shared Calendar'}]}),
+    );
+    expect(bg.labels.some(l => l.text === 'all day')).toBe(true);
+    expect(bg.labels.some(l => l.text === 'Jack & Mitchell')).toBe(true);
+    expect(bg.labels.some(l => l.text === 'PC Shared Calendar')).toBe(true);
+  });
+
+  it('carries the tasks column the Day view shows', () => {
+    const bg = dayBackground(
+      PAGE,
+      agenda({
+        dueToday: [{title: 'Call the dentist', subtitle: 'paul-tasks'}],
+        upcoming: [{date: '09/18/2026', rows: [{title: 'Super note Inbox'}]}],
+      }),
+    );
+    expect(bg.labels.some(l => l.text.includes('Call the dentist'))).toBe(true);
+    expect(bg.labels.some(l => l.text === 'Next 7 days')).toBe(true);
+    expect(bg.labels.some(l => l.text === '09/18/2026')).toBe(true);
+  });
+
+  it('says so when nothing is due, rather than leaving a blank column', () => {
+    expect(dayBackground(PAGE, agenda()).labels.some(l => l.text === 'Nothing due.')).toBe(true);
+  });
+
+  it('keeps a ruled notes band at the foot, across the whole width', () => {
+    const bg = dayBackground(PAGE, agenda());
+    const notes = bg.writable[bg.writable.length - 1];
     const spacing = Math.round(7 * 11.85);
-    // A ruled notes band would show up as a run of evenly spaced rules at the
-    // foot of the page. The hour grid is spaced far wider than 7mm.
-    const gaps = bg.rules.map(r => r.top).sort((a, b) => a - b);
-    const tight = gaps.filter((y, i) => i > 0 && y - gaps[i - 1] === spacing);
-    expect(tight).toHaveLength(0);
+    const band = bg.rules.filter(r => r.top === r.bottom && r.top > notes.top);
+    expect(band.length).toBeGreaterThanOrEqual(3);
+    expect(band[1].top - band[0].top).toBe(spacing);
+    expect(notes.right - notes.left).toBeGreaterThan(PAGE.width / 2);
   });
 });
 

@@ -59,6 +59,21 @@ export interface Background {
 const MARGIN_FRACTION = 0.02;
 
 /**
+ * Extra room on the left, because the NOTE app's toolbar sits over it.
+ *
+ * Measured off a device screenshot: the toolbar covers roughly the first 120px
+ * of the page. The hour labels on the first day page were drawn at x=38 and
+ * were simply invisible — and so was the first rule of the week grid, which is
+ * why that page appeared to start a column in. The page itself is fine and the
+ * export would show them; they are just behind furniture the whole time anyone
+ * is looking at it.
+ *
+ * Applied only to the left edge. The toolbar can be collapsed, so this is a
+ * little width given up to make the page readable while it is not.
+ */
+const TOOLBAR_INSET = 150;
+
+/**
  * The share of the page the calendar takes on a week or month page.
  *
  * The calendar takes precedence and the notes area gets what is left — a
@@ -89,7 +104,7 @@ function frame(page: PageSize) {
   const margin = Math.round(page.width * MARGIN_FRACTION);
   return {
     margin,
-    left: margin,
+    left: margin + TOOLBAR_INSET,
     top: margin,
     right: page.width - margin,
     bottom: page.height - margin,
@@ -122,113 +137,191 @@ function splitForNotes(page: PageSize): {calendar: Rect; notes: Rect; noteRules:
 
 /** Font sizes, as fractions of the page height. Small: labels get out of the way. */
 const DATE_FONT = 0.014;
-const HOUR_FONT = 0.012;
 const TITLE_FONT = 0.013;
 
 const fontPx = (page: PageSize, fraction: number) =>
   Math.max(18, Math.round(page.height * fraction));
 
-/** One event as the day page needs it: a span of minutes and something to call it. */
-export interface DayEntry {
-  /** Minutes from midnight. Equal values mean an all-day or undated row. */
-  startMin: number;
-  endMin: number;
+/** A row on the day page: what it says, and what it belongs to. */
+export interface AgendaRow {
   title: string;
+  /** The calendar or list it came from, shown small underneath. */
+  subtitle?: string;
+  /** Minutes from midnight. Absent for an all-day event or a to-do. */
+  startMin?: number;
+  endMin?: number;
 }
 
+/** Everything the day page draws, in the shape the Day view already shows it. */
+export interface DayAgenda {
+  allDay: AgendaRow[];
+  timed: AgendaRow[];
+  dueToday: AgendaRow[];
+  upcoming: {date: string; rows: AgendaRow[]}[];
+}
+
+/** How the clock is written, matching whatever the Day view is showing. */
+export type ClockLabel = (minutes: number) => string;
+
 /**
- * The day page: an hour grid with the day's events drawn into it.
+ * The share of the width the agenda takes, leaving the rest for tasks.
  *
- * The hour range is narrowed to what is actually used rather than running
- * midnight to midnight — a full day spends a third of the page on hours nobody
- * writes in. It widens to fit anything scheduled outside the default window, so
- * an early flight is never simply missing from the page.
+ * The same split the Day view uses on screen. The point of this page is that it
+ * looks like what you were just looking at, so the proportions are copied
+ * rather than chosen.
+ */
+const AGENDA_SHARE = 0.58;
+
+/**
+ * The share of the day page given to notes at the foot.
  *
- * No notes area. The agenda *is* the content here, and ruled lines beneath it
- * would take space from the thing being written over.
+ * Smaller than the week and month pages' quarter: the agenda above it is the
+ * content, and a deep band would push the hour grid into something too
+ * compressed to write in.
+ */
+const DAY_NOTES_SHARE = 0.18;
+
+/**
+ * The day page: the Day view, on paper, to write over.
+ *
+ * Deliberately a copy of what is already on screen — all-day events in a band
+ * at the top, an hour grid beneath them, and the day's tasks with what is
+ * coming down the right. Somebody who has just looked at the Day view should
+ * recognise the page without being told what it is.
+ *
+ * The hour range narrows to what is used and widens for anything outside it, so
+ * a full day is never spent on hours nobody writes in and an early flight is
+ * never simply missing.
+ *
+ * No notes area. The agenda is the thing being written over.
  */
 export function dayBackground(
   page: PageSize,
-  entries: DayEntry[],
+  agenda: DayAgenda,
+  clock: ClockLabel = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:00`,
   fromHour = 7,
   toHour = 19,
 ): Background {
   const f = frame(page);
-  const timed = entries.filter(e => e.endMin > e.startMin);
-  // Everything with no hour to sit at: all-day events, and to-dos, which carry
-  // a date and never a time. The first version dropped these on the floor — on
-  // a day whose every event was all-day the page came out as bare hour rules,
-  // which read as the feature not working at all.
-  const untimed = entries.filter(e => e.endMin <= e.startMin);
-  const first = timed.reduce((h, e) => Math.min(h, Math.floor(e.startMin / 60)), fromHour);
-  const last = timed.reduce((h, e) => Math.max(h, Math.ceil(e.endMin / 60)), toHour);
-  const hours = Math.max(1, last - first);
-
-  const gutter = Math.round(page.width * 0.08);
-  const body = {left: f.left + gutter, right: f.right};
-  // A band at the top for the untimed rows, sized to what there is, so a day
-  // with none of them gives the whole page to the hour grid.
-  const bandFont = fontPx(page, TITLE_FONT);
-  const bandLine = Math.round(bandFont * 1.7);
-  const bandHeight = untimed.length > 0 ? untimed.length * bandLine + 16 : 0;
-  const gridTop = f.top + bandHeight;
-  const height = f.bottom - gridTop;
-  const perHour = height / hours;
-  const y = (minutes: number) => gridTop + ((minutes - first * 60) / 60) * perHour;
-
   const rules: Rule[] = [];
   const labels: Label[] = [];
+  const writable: Rect[] = [];
 
-  untimed.forEach((entry, i) => {
-    labels.push({
-      text: entry.title,
-      left: f.left,
-      top: f.top + i * bandLine,
-      fontSize: bandFont,
-    });
-  });
-  if (bandHeight > 0) {
-    rules.push(hairline(f.left, gridTop - 8, f.right));
+  // A notes band at the foot, across the full width — under both the agenda and
+  // the tasks, because a thought at the end of the day belongs to the day
+  // rather than to one column of it.
+  const spacing = ruleSpacing();
+  const notesTop = f.bottom - Math.round((f.bottom - f.top) * DAY_NOTES_SHARE);
+  for (let ny = notesTop + spacing; ny <= f.bottom; ny += spacing) {
+    rules.push(hairline(f.left, ny, f.right));
+  }
+  const body = {top: f.top, bottom: notesTop - 12};
+
+  const split = Math.round(f.left + (f.right - f.left) * AGENDA_SHARE);
+  const titleFont = fontPx(page, TITLE_FONT);
+  const smallFont = Math.round(titleFont * 0.8);
+  const headFont = fontPx(page, DATE_FONT);
+  const rowHeight = Math.round(titleFont * 1.5 + smallFont * 1.3);
+
+  // The divider between the agenda and the tasks, as on screen.
+  rules.push({left: split, top: body.top, right: split, bottom: body.bottom});
+
+  // -- all day, in a band at the top of the agenda column ------------------
+  const gutter = Math.round(page.width * 0.09);
+  let y = f.top;
+  if (agenda.allDay.length > 0) {
+    labels.push({text: 'all day', left: f.left, top: y + 2, fontSize: smallFont});
+    for (const row of agenda.allDay) {
+      labels.push({text: row.title, left: f.left + gutter, top: y, fontSize: titleFont});
+      if (row.subtitle) {
+        labels.push({
+          text: row.subtitle,
+          left: f.left + gutter,
+          top: y + titleFont + 4,
+          fontSize: smallFont,
+        });
+      }
+      y += rowHeight;
+    }
+    rules.push(hairline(f.left, y + 6, split));
+    y += 18;
   }
 
+  // -- the hour grid ------------------------------------------------------
+  const timed = agenda.timed.filter(
+    r => r.startMin !== undefined && r.endMin !== undefined && r.endMin > r.startMin,
+  );
+  const first = timed.reduce((h, r) => Math.min(h, Math.floor((r.startMin ?? 0) / 60)), fromHour);
+  const last = timed.reduce((h, r) => Math.max(h, Math.ceil((r.endMin ?? 0) / 60)), toHour);
+  const hours = Math.max(1, last - first);
+  const perHour = (body.bottom - y) / hours;
+  const at = (minutes: number) => y + ((minutes - first * 60) / 60) * perHour;
+
   for (let h = first; h <= last; h++) {
-    const top = Math.round(y(h * 60));
-    rules.push(hairline(f.left, top, f.right));
+    const top = Math.round(at(h * 60));
+    rules.push(hairline(f.left, top, split));
     if (h < last) {
+      labels.push({text: clock(h * 60), left: f.left, top: top + 6, fontSize: smallFont});
+    }
+  }
+  for (const row of timed) {
+    const top = Math.round(at(row.startMin ?? 0));
+    labels.push({text: row.title, left: f.left + gutter, top: top + 6, fontSize: titleFont});
+    if (row.subtitle) {
       labels.push({
-        text: `${String(h).padStart(2, '0')}`,
-        left: f.left,
-        top: top + 4,
-        fontSize: fontPx(page, HOUR_FONT),
+        text: row.subtitle,
+        left: f.left + gutter,
+        top: top + 6 + titleFont + 2,
+        fontSize: smallFont,
       });
     }
   }
+  writable.push({left: f.left + gutter, top: y, right: split, bottom: body.bottom});
 
-  // Each event gets a box at its real time and its title inside it. Drawn after
-  // the hour rules so a meeting reads as sitting on the grid rather than under
-  // it.
-  for (const entry of timed) {
-    const top = Math.round(y(entry.startMin));
-    const bottom = Math.round(y(entry.endMin));
-    rules.push(
-      hairline(body.left, top, body.right),
-      {left: body.left, top, right: body.left, bottom},
-      hairline(body.left, bottom, body.right),
-    );
-    labels.push({
-      text: entry.title,
-      left: body.left + 8,
-      top: top + 4,
-      fontSize: fontPx(page, TITLE_FONT),
-    });
+  // -- tasks, down the right ----------------------------------------------
+  const right = split + 24;
+  let ty = f.top;
+  labels.push({text: 'Tasks', left: right, top: ty, fontSize: headFont});
+  ty += Math.round(headFont * 1.6);
+  if (agenda.dueToday.length === 0) {
+    labels.push({text: 'Nothing due.', left: right, top: ty, fontSize: smallFont});
+    ty += rowHeight;
+  }
+  for (const row of agenda.dueToday) {
+    labels.push({text: `\u2610 ${row.title}`, left: right, top: ty, fontSize: titleFont});
+    if (row.subtitle) {
+      labels.push({text: row.subtitle, left: right + 20, top: ty + titleFont + 2, fontSize: smallFont});
+    }
+    ty += rowHeight;
   }
 
-  return {
-    mask: {left: 0, top: 0, right: page.width, bottom: page.height},
-    rules,
-    labels,
-    writable: [{left: body.left, top: gridTop, right: f.right, bottom: f.bottom}],
-  };
+  if (agenda.upcoming.length > 0) {
+    ty += 10;
+    rules.push(hairline(right, ty, f.right));
+    ty += 14;
+    labels.push({text: 'Next 7 days', left: right, top: ty, fontSize: headFont});
+    ty += Math.round(headFont * 1.6);
+    for (const group of agenda.upcoming) {
+      if (ty > body.bottom - rowHeight) {
+        break;
+      }
+      labels.push({text: group.date, left: right, top: ty, fontSize: smallFont});
+      ty += Math.round(smallFont * 1.5);
+      for (const row of group.rows) {
+        if (ty > body.bottom - rowHeight) {
+          break;
+        }
+        labels.push({text: `\u2610 ${row.title}`, left: right, top: ty, fontSize: titleFont});
+        ty += Math.round(titleFont * 1.5);
+      }
+    }
+  }
+  writable.push(
+    {left: right, top: ty, right: f.right, bottom: body.bottom},
+    {left: f.left, top: notesTop, right: f.right, bottom: f.bottom},
+  );
+
+  return {mask: {left: 0, top: 0, right: page.width, bottom: page.height}, rules, labels, writable};
 }
 
 /** Sunday first, matching `monthGrid`. */

@@ -150,7 +150,7 @@ import {
   monthBackground,
   weekBackground,
   type Background,
-  type DayEntry,
+  type DayAgenda,
   type PageSize,
   WEEKDAYS,
 } from './src/background';
@@ -2144,32 +2144,46 @@ export default function App(): React.JSX.Element {
    */
   const askCalendarPage = useCallback(
     (iso: string, kind: 'day' | 'week' | 'month') => {
-      // startTime and endTime are local 'HH:MM' and absent on an all-day event,
-      // which is exactly the distinction the page needs: a timed event gets a
-      // block on the hour grid, an all-day one has no hour to be drawn at.
+      // Built from what is already on screen, so the page is a copy of the Day
+      // view rather than a second, possibly different, read of the data.
       const minutes = (hhmm?: string) => {
         const match = /^(\d{2}):(\d{2})$/.exec(hhmm ?? '');
-        return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+        return match ? Number(match[1]) * 60 + Number(match[2]) : undefined;
       };
-      const entries: DayEntry[] = [];
-      for (const event of eventsOnDay(eventsRef.current, iso)) {
-        const from = event.allDay ? null : minutes(event.startTime);
-        const to = event.allDay ? null : minutes(event.endTime);
-        entries.push(
-          from !== null && to !== null && to > from
-            ? {startMin: from, endMin: to, title: event.summary}
-            : {startMin: 0, endMin: 0, title: event.summary},
-        );
-      }
-      for (const task of tasksOnDay(tasksRef.current, iso)) {
-        if (task.completed) {
-          continue;
+      const dayEvents = eventsOnDay(eventsRef.current, iso);
+      const agenda: DayAgenda = {
+        allDay: dayEvents
+          .filter(e => e.allDay || minutes(e.startTime) === undefined)
+          .map(e => ({title: e.summary, subtitle: e.calendarLabel})),
+        timed: dayEvents
+          .filter(e => !e.allDay && minutes(e.startTime) !== undefined)
+          .map(e => ({
+            title: e.summary,
+            subtitle: e.calendarLabel,
+            startMin: minutes(e.startTime),
+            endMin: minutes(e.endTime) ?? (minutes(e.startTime) ?? 0) + 60,
+          })),
+        dueToday: tasksOnDay(tasksRef.current, iso)
+          .filter(t => !t.completed)
+          .map(t => ({title: t.summary, subtitle: t.collectionLabel})),
+        upcoming: [],
+      };
+
+      // The same seven days the Day view lists down its right-hand side.
+      const soon = new Map<string, {title: string; subtitle?: string}[]>();
+      for (let i = 1; i <= 7; i++) {
+        const when = shiftDays(iso, i);
+        const rows = tasksOnDay(tasksRef.current, when)
+          .filter(t => !t.completed)
+          .map(t => ({title: t.summary, subtitle: t.collectionLabel}));
+        if (rows.length > 0) {
+          soon.set(when, rows);
         }
-        // A to-do carries a date and no time, so it has nowhere on an hour grid
-        // to sit. Given a zero-length span it is drawn as a label rather than a
-        // block, which is what it is.
-        entries.push({startMin: 0, endMin: 0, title: `\u2610 ${task.summary}`});
       }
+      agenda.upcoming = Array.from(soon.entries()).map(([date, rows]) => ({
+        date: formatDate(date, getConfig().dateFormat),
+        rows,
+      }));
 
       // Week and month are deliberately empty boxes. The schedule is drawn only
       // on the day page, where the agenda is the thing being written over; a
@@ -2197,7 +2211,9 @@ export default function App(): React.JSX.Element {
             cells.map((c: {day: number | null}) => (c.day === null ? '' : String(c.day))),
           );
         }
-        return dayBackground(page, entries);
+        return dayBackground(page, agenda, m =>
+          formatTime(`${String(Math.floor(m / 60)).padStart(2, '0')}:00`, getConfig().timeFormat),
+        );
       };
 
       setAsk({
