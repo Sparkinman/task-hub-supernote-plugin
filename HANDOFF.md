@@ -49,6 +49,14 @@ rejects stale values with "NextSyncToken timeout"; and `viewer.supernote.com` ha
 interface at all**, so there is no web client whose traffic could be read — the tablet is the
 only thing that speaks this API.
 
+**Verified end to end against the live account, 2026-09-16.** A forty-task round trip: all
+forty readable with `nextPageToken` null, the fortieth present, a **rename and a completion
+applied to tasks past the old cap** with their neighbours untouched, and all forty deleted
+afterwards leaving the account at its original size. The control in that run is the part worth
+keeping: reading *without* `maxResults` still returns exactly twenty, so the test cannot pass
+by accident. The write half is the one that had never been exercised — before this, editing or
+completing any to-do past the twentieth silently did nothing.
+
 **`snTruncated` stays as a backstop.** It reads `nextPageToken` and shows `SN_CAPPED` if the
 server ever holds rows back despite being asked for everything. It should never fire; it
 exists because silent omission is the failure this area is prone to.
