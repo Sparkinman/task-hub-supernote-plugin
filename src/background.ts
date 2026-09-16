@@ -288,7 +288,7 @@ export function dayBackground(
     ty += rowHeight;
   }
   for (const row of agenda.dueToday) {
-    labels.push({text: `\u2610 ${row.title}`, left: right, top: ty, fontSize: titleFont});
+    labels.push({text: `[ ] ${row.title}`, left: right, top: ty, fontSize: titleFont});
     if (row.subtitle) {
       labels.push({text: row.subtitle, left: right + 20, top: ty + titleFont + 2, fontSize: smallFont});
     }
@@ -311,7 +311,7 @@ export function dayBackground(
         if (ty > body.bottom - rowHeight) {
           break;
         }
-        labels.push({text: `\u2610 ${row.title}`, left: right, top: ty, fontSize: titleFont});
+        labels.push({text: `[ ] ${row.title}`, left: right, top: ty, fontSize: titleFont});
         ty += Math.round(titleFont * 1.5);
       }
     }

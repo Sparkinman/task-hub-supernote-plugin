@@ -2130,124 +2130,6 @@ export default function App(): React.JSX.Element {
     [leaveForNote, noteConfigFor],
   );
 
-  /**
-   * Draw the day's agenda into its note, as a background to write over.
-   *
-   * Never automatic, and never into a note that does not exist — this writes
-   * into somebody's own file, so it is a button they press on the day they are
-   * looking at, confirmed before anything happens.
-   *
-   * The events and tasks are the ones already on screen. Nothing is fetched:
-   * `eventsRef` and `tasksRef` hold the day's content by the time this button
-   * can be pressed, so the page is a snapshot of exactly what the user is
-   * looking at rather than a second, possibly different, read.
-   */
-  const askCalendarPage = useCallback(
-    (iso: string, kind: 'day' | 'week' | 'month') => {
-      // Built from what is already on screen, so the page is a copy of the Day
-      // view rather than a second, possibly different, read of the data.
-      const minutes = (hhmm?: string) => {
-        const match = /^(\d{2}):(\d{2})$/.exec(hhmm ?? '');
-        return match ? Number(match[1]) * 60 + Number(match[2]) : undefined;
-      };
-      const dayEvents = eventsOnDay(eventsRef.current, iso);
-      const agenda: DayAgenda = {
-        allDay: dayEvents
-          .filter(e => e.allDay || minutes(e.startTime) === undefined)
-          .map(e => ({title: e.summary, subtitle: e.calendarLabel})),
-        timed: dayEvents
-          .filter(e => !e.allDay && minutes(e.startTime) !== undefined)
-          .map(e => ({
-            title: e.summary,
-            subtitle: e.calendarLabel,
-            startMin: minutes(e.startTime),
-            endMin: minutes(e.endTime) ?? (minutes(e.startTime) ?? 0) + 60,
-          })),
-        dueToday: tasksOnDay(tasksRef.current, iso)
-          .filter(t => !t.completed)
-          .map(t => ({title: t.summary, subtitle: t.collectionLabel})),
-        upcoming: [],
-      };
-
-      // The same seven days the Day view lists down its right-hand side.
-      const soon = new Map<string, {title: string; subtitle?: string}[]>();
-      for (let i = 1; i <= 7; i++) {
-        const when = shiftDays(iso, i);
-        const rows = tasksOnDay(tasksRef.current, when)
-          .filter(t => !t.completed)
-          .map(t => ({title: t.summary, subtitle: t.collectionLabel}));
-        if (rows.length > 0) {
-          soon.set(when, rows);
-        }
-      }
-      agenda.upcoming = Array.from(soon.entries()).map(([date, rows]) => ({
-        date: formatDate(date, getConfig().dateFormat),
-        rows,
-      }));
-
-      // Week and month are deliberately empty boxes. The schedule is drawn only
-      // on the day page, where the agenda is the thing being written over; a
-      // month with every cell full has nowhere left to write, which is the
-      // whole point of the page.
-      const build = (page: PageSize): Background => {
-        if (kind === 'week') {
-          // Day name and date together, in the row's own gutter: "Mon 14".
-          // The name has to be on the page somewhere and a header strip above
-          // seven rows would cost a row's worth of writing space.
-          return weekBackground(
-            page,
-            weekOf(iso).map(d => {
-              const at = new Date(`${d}T00:00:00`);
-              return {label: `${WEEKDAYS[at.getDay()]} ${at.getDate()}`};
-            }),
-          );
-        }
-        if (kind === 'month') {
-          const at = new Date(`${iso}T00:00:00`);
-          const cells = monthGrid(at.getFullYear(), at.getMonth());
-          return monthBackground(
-            page,
-            cells.length / 7,
-            cells.map((c: {day: number | null}) => (c.day === null ? '' : String(c.day))),
-          );
-        }
-        return dayBackground(page, agenda, m =>
-          formatTime(`${String(Math.floor(m / 60)).padStart(2, '0')}:00`, getConfig().timeFormat),
-        );
-      };
-
-      setAsk({
-        title: 'Add a calendar page?',
-        // Into the note being read, because that is where the host can draw:
-        // the insert writes the in-memory page, so the page it writes to is
-        // whichever one is displayed.
-        body:
-          kind === 'day'
-            ? `A blank page will be added to the note you are in, after the page you are on, carrying ${formatDate(iso, getConfig().dateFormat)}'s events and to-dos as a background to write over.`
-            : `A blank page will be added to the note you are in, after the page you are on, with an empty ${kind} grid and a ruled notes area to write in.`,
-        label: 'Yes, add it',
-        run: async () => {
-          const report = await writeBackground(build);
-          if (report.error) {
-            throw new Error(report.error);
-          }
-          // The timings are reported out loud on purpose, for this first build:
-          // whether two hundred elements is fast enough decides whether the
-          // quarter page is drawn or rastered, and guessing it is what this
-          // whole exercise has been trying to avoid.
-          // Everything worth knowing is said on screen rather than logged.
-          // There is no adb on the machine this is built from, so a log line is
-          // invisible to the only person who can see the device.
-          return (
-            `Saved successfully — ${report.elements} element(s) in ${report.ms}ms ` +
-            `(${report.allocateMs}ms allocating). Template used: "${report.template}". ` +
-            `Presets offered: ${report.presets.join(', ') || 'none'}.`
-          );
-        },
-      });
-    },
-    [],
-  );
 
   const askDailyNote = useCallback(
     (iso: string, exists: boolean) => {
@@ -3018,6 +2900,172 @@ export default function App(): React.JSX.Element {
   const noteDays = useMemo(
     () => daysWithNotes(noteFiles, monthDays, config.dailyNote, config.dateFormat),
     [noteFiles, monthDays, config.dailyNote, config.dateFormat],
+  );
+
+  /**
+   * Draw the day's agenda into its note, as a background to write over.
+   *
+   * Never automatic, and never into a note that does not exist — this writes
+   * into somebody's own file, so it is a button they press on the day they are
+   * looking at, confirmed before anything happens.
+   *
+   * The events and tasks are the ones already on screen. Nothing is fetched:
+   * `eventsRef` and `tasksRef` hold the day's content by the time this button
+   * can be pressed, so the page is a snapshot of exactly what the user is
+   * looking at rather than a second, possibly different, read.
+   */
+  const askCalendarPage = useCallback(
+    (iso: string, kind: 'day' | 'week' | 'month') => {
+      // Built from what is already on screen, so the page is a copy of the Day
+      // view rather than a second, possibly different, read of the data.
+      const minutes = (hhmm?: string) => {
+        const match = /^(\d{2}):(\d{2})$/.exec(hhmm ?? '');
+        return match ? Number(match[1]) * 60 + Number(match[2]) : undefined;
+      };
+      const dayEvents = eventsOnDay(eventsRef.current, iso);
+      const agenda: DayAgenda = {
+        allDay: dayEvents
+          .filter(e => e.allDay || minutes(e.startTime) === undefined)
+          .map(e => ({title: e.summary, subtitle: e.calendarLabel})),
+        timed: dayEvents
+          .filter(e => !e.allDay && minutes(e.startTime) !== undefined)
+          .map(e => ({
+            title: e.summary,
+            subtitle: e.calendarLabel,
+            startMin: minutes(e.startTime),
+            endMin: minutes(e.endTime) ?? (minutes(e.startTime) ?? 0) + 60,
+          })),
+        dueToday: tasksOnDay(tasksRef.current, iso)
+          .filter(t => !t.completed)
+          .map(t => ({title: t.summary, subtitle: t.collectionLabel})),
+        upcoming: [],
+      };
+
+      // The same seven days the Day view lists down its right-hand side.
+      const soon = new Map<string, {title: string; subtitle?: string}[]>();
+      for (let i = 1; i <= 7; i++) {
+        const when = shiftDays(iso, i);
+        const rows = tasksOnDay(tasksRef.current, when)
+          .filter(t => !t.completed)
+          .map(t => ({title: t.summary, subtitle: t.collectionLabel}));
+        if (rows.length > 0) {
+          soon.set(when, rows);
+        }
+      }
+      agenda.upcoming = Array.from(soon.entries()).map(([date, rows]) => ({
+        date: formatDate(date, getConfig().dateFormat),
+        rows,
+      }));
+
+      // Week and month are deliberately empty boxes. The schedule is drawn only
+      // on the day page, where the agenda is the thing being written over; a
+      // month with every cell full has nowhere left to write, which is the
+      // whole point of the page.
+      const build = (page: PageSize): Background => {
+        if (kind === 'week') {
+          // Day name and date together, in the row's own gutter: "Mon 14".
+          // The name has to be on the page somewhere and a header strip above
+          // seven rows would cost a row's worth of writing space.
+          return weekBackground(
+            page,
+            weekOf(iso).map(d => {
+              const at = new Date(`${d}T00:00:00`);
+              return {label: `${WEEKDAYS[at.getDay()]} ${at.getDate()}`};
+            }),
+          );
+        }
+        if (kind === 'month') {
+          const at = new Date(`${iso}T00:00:00`);
+          const cells = monthGrid(at.getFullYear(), at.getMonth());
+          return monthBackground(
+            page,
+            cells.length / 7,
+            cells.map((c: {day: number | null}) => (c.day === null ? '' : String(c.day))),
+          );
+        }
+        return dayBackground(page, agenda, m =>
+          formatTime(`${String(Math.floor(m / 60)).padStart(2, '0')}:00`, getConfig().timeFormat),
+        );
+      };
+
+      // The note this page belongs in, from the settings for that kind of note —
+      // not whichever note happens to be open. Writing a Tuesday into whatever
+      // the reader was last looking at is how every one of these ended up in
+      // the same file.
+      const cfg = getConfig();
+      const target =
+        kind === 'day'
+          ? {
+              enabled: cfg.dailyNote.enabled,
+              path: dailyNotePath(cfg.dailyNote, iso, cfg.dateFormat),
+              create: () => createDailyNote(cfg.dailyNote, iso, cfg.dateFormat),
+              label: 'Daily notes',
+              exists: noteDays.has(iso),
+            }
+          : {
+              enabled: noteConfigFor(kind, cfg).enabled,
+              path: periodNotePath(kind, noteConfigFor(kind, cfg), iso, cfg.dateFormat),
+              create: () =>
+                createPeriodNote(kind, noteConfigFor(kind, cfg), iso, cfg.dateFormat),
+              label: `${kind[0].toUpperCase()}${kind.slice(1)} notes`,
+              exists: hasPeriodNote(
+                periodFiles[kind],
+                kind,
+                noteConfigFor(kind, cfg),
+                iso,
+                cfg.dateFormat,
+              ),
+            };
+
+      if (!target.enabled || !target.path) {
+        setStatus({
+          kind: 'error',
+          message: `${target.label} are switched off, so there is no note to put this page in. Turn them on in Setup → Notes.`,
+        });
+        return;
+      }
+
+      setAsk({
+        title: 'Add a calendar page?',
+        // Into the note being read, because that is where the host can draw:
+        // the insert writes the in-memory page, so the page it writes to is
+        // whichever one is displayed.
+        body:
+          kind === 'day'
+            ? `A blank page will be added at the front of ${target.path}, carrying ${formatDate(iso, cfg.dateFormat)}'s events and to-dos as a background to write over.`
+            : `A blank page will be added at the front of ${target.path}, with an empty ${kind} grid and a ruled notes area to write in.`,
+        label: 'Yes, add it',
+        run: async () => {
+          // Made if it is not there. A calendar page for a day with no note yet
+          // is the ordinary case, not an error to report back. `createAt` walks
+          // several template spellings and throws only when every one fails, so
+          // a note that already exists is cheap to attempt and safe to ignore.
+          if (!target.exists) {
+            await target.create();
+          }
+          const report = await writeBackground(build, await absoluteNotePath(target.path));
+          if (report.error) {
+            throw new Error(report.error);
+          }
+          // The timings are reported out loud on purpose, for this first build:
+          // whether two hundred elements is fast enough decides whether the
+          // quarter page is drawn or rastered, and guessing it is what this
+          // whole exercise has been trying to avoid.
+          // Everything worth knowing is said on screen rather than logged.
+          // There is no adb on the machine this is built from, so a log line is
+          // invisible to the only person who can see the device.
+          return (
+            `Saved successfully — ${report.elements} element(s) in ${report.ms}ms ` +
+            `(${report.allocateMs}ms allocating). Template used: "${report.template}". ` +
+            `Presets offered: ${report.presets.join(', ') || 'none'}.`
+          );
+        },
+      });
+    },
+    // noteDays and periodFiles are read to decide whether the note has to be
+    // made first, so an empty list here would close over the first render's
+    // answer and go on creating notes that already exist.
+    [noteDays, periodFiles, noteConfigFor],
   );
 
   // The week view can straddle two months, so it needs its own lookup.

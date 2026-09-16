@@ -254,6 +254,32 @@ async function setCurrentLayer(
   return false;
 }
 
+/**
+ * Text the host will certainly accept.
+ *
+ * The day page was the only one that drew nothing while the week and month
+ * pages drew fine, and the only difference between them is that the day page
+ * carries **arbitrary text from the user's own calendar** — event titles, list
+ * names — where the others carry numbers and three-letter day names.
+ *
+ * One element the host dislikes rejects the whole batch. That is established:
+ * asking for a single unsupported `TYPE_PICTURE` element refused an insert of
+ * forty others along with it. So anything outside plain printable Latin is
+ * replaced rather than risked, and a title long enough to be pathological is
+ * cut.
+ */
+function safeText(text: string, limit = 60): string {
+  const cleaned = (text ?? '')
+    // Control characters, and anything above Latin-1: emoji in an event title
+    // is entirely ordinary and is not worth losing the page for.
+    // One expression, and no control-character class: anything outside plain
+    // printable Latin goes, which covers control characters too.
+    .replace(/[^\u0020-\u007e\u00a0-\u00ff]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > limit ? `${cleaned.slice(0, limit - 1)}\u2026` : cleaned;
+}
+
 /** Allocate one element natively. Null when the device refuses. */
 async function allocate(type: number): Promise<Record<string, unknown> | null> {
   // `createElement` is not a convenience: it allocates natively and registers
@@ -290,6 +316,18 @@ export interface DrawReport {
  */
 export async function writeBackground(
   build: (page: PageSize) => Background,
+  /**
+   * The note to write into, absolute. When given, it is opened first.
+   *
+   * Everything here draws into the page the host is displaying, so the note has
+   * to be open before anything can be put on it. Opening it **without** closing
+   * the plugin view is the trick: `leaveForNote` calls `closePluginView`, after
+   * which there is nothing left to answer the calls this needs — which is the
+   * same dependency `dateheading.ts` established and worked around by writing
+   * to the file instead. That option is not available here, because the file
+   * route silently drops geometry.
+   */
+  target?: string,
 ): Promise<DrawReport> {
   const started = Date.now();
   let allocateMs = 0;
@@ -311,12 +349,20 @@ export async function writeBackground(
     // writes to is whichever one is displayed — which means the calendar goes
     // into the note they are in. That is how the Tables and Patterns plugins
     // work too, and it is the platform's shape rather than a compromise.
-    const absolutePath = value<string>(await PluginCommAPI.getCurrentFilePath()) ?? '';
+    if (target) {
+      // Page 0: a calendar page belongs at the front of the note it describes,
+      // not wherever the reader happened to be.
+      await PluginFileAPI.openFile(target, 0);
+    }
+    const absolutePath = target || value<string>(await PluginCommAPI.getCurrentFilePath()) || '';
     notePath = absolutePath;
-    const current = Number(value<number>(await PluginCommAPI.getCurrentPageNum()) ?? 0);
+    const current = target
+      ? -1
+      : Number(value<number>(await PluginCommAPI.getCurrentPageNum()) ?? 0);
     if (!absolutePath) {
       return {
-        error: 'No note is open. Open the note you want the calendar page in, then try again.',
+        error:
+          'No note is open, and no note was named. Open a note, or turn on the note kind for this view in Settings.',
         ms: Date.now() - started,
         allocateMs: 0,
         elements: 0,
@@ -426,7 +472,7 @@ export async function writeBackground(
         continue;
       }
       const box = new TextBox();
-      box.textContentFull = label.text;
+      box.textContentFull = safeText(label.text);
       // Generous, because a box that is merely wide enough wraps. "14" came
       // back as a 1 above a 4 on the device: the host measures its own font and
       // a width derived from `length * fontSize` is not the width it needs.
