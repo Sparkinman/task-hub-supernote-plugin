@@ -21,9 +21,12 @@
  *    which way they stack. `dateheading` puts a heading on 0 and the user
  *    writes there too, so the background goes on `BACKGROUND_LAYER` and that
  *    constant is the one to change if it comes out on top.
- * 2. **How long two hundred elements take.** The quarter page is 185 of them.
- *    If it is slow, the rules become one raster and only the dates stay as
- *    text — lines need no font, which is what makes that split possible.
+ * 2. **How long two hundred elements take.** The Patterns plugin measured this
+ *    on an A6X2 and got 37-40ms an element, flat, for a single insert call —
+ *    which puts the quarter page's 185 elements at about seven seconds. If that
+ *    holds here, the only real lever is fewer elements for the same picture,
+ *    not a faster route: building an element costs 1.2ms against 37ms to insert
+ *    it, so nothing on this side of the bridge helps.
  *
  * The third question — how a calendar grid survives a ruled template — is
  * answered below, and it is not by masking: the page carries its own.
@@ -130,10 +133,10 @@ async function blankTemplateNames(): Promise<{names: string[]; presets: string[]
  * the rules did not, which is the signature of a pen the host does not
  * recognise rather than of a failed insert.
  *
- * The width is the open question. 3800 is what the device reported for a
- * hand-drawn marker stroke and 2200 reads as a background wash, so a hairline
- * is somewhere below that and may have a floor under which nothing is drawn.
- * `CALIBRATION` exists to find it.
+ * The width has a floor of 100 — the Java side reads it as an int and the
+ * schema refuses less, which the Patterns plugin established. 3800 is what the
+ * device reported for a hand-drawn marker stroke and 2200 reads as a background
+ * wash, so a hairline is well below that. `CALIBRATION` exists to find where.
  */
 const RULE_PEN = {penType: 11, penColor: 157, penWidth: 1000};
 
@@ -267,6 +270,7 @@ export async function writeBackground(
         line.pageNum = pageNum;
         line.layerNum = BACKGROUND_LAYER;
         line.geometry = shape;
+        line.thickness = pen.penWidth;
         elements.push(line);
       }
       const caption = await allocate(Element.TYPE_TEXT);
@@ -313,6 +317,12 @@ export async function writeBackground(
         {x: rule.right, y: rule.bottom},
       ];
       geo.geometry = shape;
+      // **The line that makes a rule appear at all.** Taken from the Patterns
+      // plugin, which draws thousands of these: an element carries its own
+      // thickness beside the pen's width, and without it the insert is accepted
+      // and nothing is drawn — the exact failure seen here, where the text
+      // elements in the same call arrived and every rule did not.
+      geo.thickness = RULE_PEN.penWidth;
       elements.push(geo);
     }
 
