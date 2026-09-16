@@ -1,14 +1,84 @@
-# Task Hub — state as of 2026-09-15
+# Task Hub — state as of 2026-09-16
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-`tsc` and eslint clean, all verified 2026-09-15.
-Current build **0.71.2** (versionCode 92). **563 tests across 35 suites.**
+`tsc` and eslint clean, all verified 2026-09-16.
+Current build **0.72.0** (versionCode 93). **577 tests across 35 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
-**licensed GPLv3**. **v0.71.2 is released and marked Latest**, with `TaskHub-0.71.2.snplg`
-attached. `main` is pushed and clean at `04973fe`.
+**licensed GPLv3**. **v0.71.2 is still the released build marked Latest**, with
+`TaskHub-0.71.2.snplg` attached — 0.72.0 is committed and pushed but not yet built, installed
+or released.
 
 ## READ THIS FIRST — where the work stopped
+
+### 0.72.0 — the Supernote Inbox, written but NOT yet run on a device
+
+Everything below in this section is off-device logic, verified by `tsc`, eslint and 577
+tests, and **not yet installed**. It is the first thing to check on the next build.
+
+**The bug it fixes: Supernote to-dos that belong to no list were dropped silently.**
+
+A Supernote to-do can carry `taskListId: null`, or name a list that has since been deleted.
+Either way it sits in the To-Do app's **All** view and in none of its lists. `asRemoteTasks`
+filtered tasks by the watched list ids, so those to-dos matched nothing and vanished with no
+message anywhere. The Task Hub server had already met this and solved it —
+`app/connectors/supernote.py` calls the category **Inbox** (`UNFILED_LIST_ID = "__unfiled__"`),
+having first called it "Unfiled tasks" and renamed it because that was *"accurate and
+unrecognisable"*. The plugin now does the same thing under the same name.
+
+What was added, all of it mirroring the server rather than invented here:
+
+| Where | What |
+|---|---|
+| `src/sncloud.ts` | `SN_UNFILED_ID` / `SN_UNFILED_NAME`, `snFiledUnder`, `snListsWithUnfiled` |
+| `src/sntasks.ts` | `SN_UNFILED_URL`, `isSnUnfiled`; `asRemoteTasks` re-files unfiled tasks onto the Inbox |
+| `src/caldav.ts` | `writeTask` refuses the Inbox with a plain reason |
+| `App.tsx` | Settings offers and explains it; `saveTargets` never offers it; refresh made authoritative |
+
+Four decisions worth not re-deriving:
+
+1. **Re-file before the watched-list check, never filter first.** A task with no live list
+   matches no watched id, so filtering first is exactly how it got lost. `asRemoteTasks` maps
+   it onto `SN_UNFILED_ID` and *then* checks what is ticked.
+2. **The Inbox is read-only, and refused in two places.** `writeTask` throws for it, and
+   `saveTargets` never offers it at all. Both, deliberately: offering it and then failing
+   would be feedback shown far from the action, which this repo has been bitten by three
+   times.
+3. **Offered only while something is in it**, and completed to-dos do not count towards
+   that — a list that turns out empty the moment it is ticked is worse than no list.
+4. **`refreshSupernote` now replaces the Supernote tasks rather than merging them.**
+   `mergeFetched` only ever adds, so without this the new `isDeleted` filter would have
+   fixed nothing: a to-do deleted on the tablet was already cached and would have stayed on
+   screen for ever. **This is safe only because `listSnTasks` reads the whole account in one
+   request** — a to-do moved between lists, or filed out of the Inbox, is still in the answer
+   under its new list. A per-list read would make that look like a deletion, which is why the
+   server marks its own unfiled pull `incremental=True`. If that request is ever narrowed,
+   this must change with it.
+
+**Two other bugs fixed in the same pass.**
+
+- **Deleted to-dos were never dropped.** A to-do deleted on the tablet comes back in
+  `scheduleTask` flagged rather than absent. `snListsFrom` had always checked `isDeleted` on
+  *lists*; nothing checked it on *tasks*. `snTaskFrom` now returns null for them.
+- **Completed to-dos were fetched and shown.** The CalDAV side has never downloaded them
+  (`COMPLETED is-not-defined` in the REPORT). The cloud path had no equivalent. It does now,
+  applied client-side in `asRemoteTasks`, because **their API has no server-side filter**:
+  `/file/schedule/task/all` returns the whole account whatever is asked for. So this saves
+  parsing, the merge and the cache write, but **no network time** — unlike CalDAV, where the
+  saving was the transfer itself. The maintainer's instruction was explicit regardless:
+  *"we want only non completed to-do's from all lists including inbox."*
+
+  Consequence to expect on device: ticking a Supernote to-do complete now makes it leave the
+  screen on the next refresh rather than moving to the Completed section. That matches what
+  CalDAV tasks already do.
+
+**What to check on the device**, in order: that Inbox appears in Settings after *Refresh
+lists* (it will not if every to-do is filed — make an unfiled one on the tablet first), that
+ticking it shows those to-dos badged Supernote, that it is absent from the save-target picker
+on the capture screen, and that a to-do filed into a real list on the tablet moves rather
+than duplicating.
+
+### The demo build (still broken — unchanged by the above)
 
 Two plugins are now built from this tree:
 
@@ -17,9 +87,10 @@ Two plugins are now built from this tree:
 | **Task Hub** | `vfmnvjq0i1hxf8gu` | `./buildPlugin.sh` |
 | **Task Hub Demo** | `dmo7k2q4x9hzt3vb` | `./buildDemo.sh` |
 
-**The demo build is broken and that is the live bug.** It installs, but the maintainer reports
-"nothing for events". Everything known about it is under *The demo build* below — read that
-before touching anything, because a fix was half-designed when the session ended.
+**The demo build is broken and that is still a live bug**, untouched by the 0.72.0 work. It
+installs, but the maintainer reports "nothing for events". Everything known about it is under
+*The demo build* below — read that before touching anything, because a fix was half-designed
+when that session ended.
 
 Two chores are outstanding and neither is code:
 
@@ -28,7 +99,9 @@ Two chores are outstanding and neither is code:
    says "capture handwriting as CalDAV tasks…" with no mention of `.ics` subscriptions or the
    Supernote To-Do app. The replacement text and the topics to add are in the session notes;
    the maintainer has to paste them into the repo's *About* gear.
-2. Nothing else. The release is out, history is clean, docs are written.
+2. **0.72.0 needs building and installing.** The code and the docs are done and pushed; no
+   `.snplg` has been produced for it. See the checklist at the top of this section for what
+   to look at once it is on the device.
 
 ## The demo build — and the bug it currently has
 

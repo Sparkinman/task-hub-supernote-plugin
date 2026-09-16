@@ -221,3 +221,29 @@ be discarded:
 
 Ticked lists appear beside your other task lists everywhere in the plugin,
 badged **Supernote**, and can be completed, edited and added to.
+
+**Only to-dos that are still open are shown.** Completed ones are left on the
+tablet rather than brought over, which is the same rule Task Hub applies to
+every other task source. Ticking a Supernote to-do off here completes it on the
+tablet, and it leaves the list on the next refresh.
+
+### Inbox — the to-dos that belong to no list
+
+A Supernote to-do does not have to be in a list. One made in a hurry, or left
+over from a list you later deleted, sits in the To-Do app's **All** view and in
+none of its lists.
+
+Those to-dos appear here as a list of their own called **Inbox**, the name the
+tablet itself uses. Tick it like any other list.
+
+Two things make it unlike the others:
+
+- **It is only offered while something is in it.** An account with every to-do
+  properly filed never sees it.
+- **Nothing can be added to it.** It is a view of to-dos that belong to no list,
+  so there is nowhere in it for a new one to go. It is never offered as a place
+  to save a captured task, and Task Hub says so plainly if you reach it another
+  way.
+
+File a to-do into a real list on the tablet and it simply moves to that list
+here on the next refresh — it is not lost, and it is not duplicated.

@@ -36,7 +36,7 @@
 | **Tasks** | Any CalDAV server, with priorities, repeats, sub tasks and due dates. Grouped Overdue / Today / Next 7 days / Later / No date |
 | **Calendars** | Year, quarter, month, week and day views over as many calendars as you watch |
 | **Google, Outlook &amp; Apple calendars** | Subscribe to the `.ics` address they publish — **no account and no server**. Read-only; see [why](docs/connections.md#why-a-subscription-is-read-only-and-slower) |
-| **The Supernote's own To-Do app** | Optional **two-way** connection through Supernote Cloud, off until you switch it on |
+| **The Supernote's own To-Do app** | Optional **two-way** connection through Supernote Cloud, off until you switch it on. Includes the **Inbox** — to-dos filed in no list at all |
 | **Handwriting → task or event** | Lasso writing on a page and it becomes either, with a link back to the page |
 | **Notes for every scale** | Daily, weekly, monthly, quarterly, yearly and meeting notes, each with its own folder, layout and template |
 | **Find** | Search the keywords and starred pages across all of those notes |
@@ -130,7 +130,12 @@ because that link lives on your device. For calendars you can **edit**, use CalD
 
 Optional, off until you switch it on: a **two-way** connection to the to-do list built into
 the tablet, through Supernote Cloud. Its lists appear beside your others and can be ticked,
-edited and added to from here.
+edited and added to from here. Open to-dos only — completed ones stay on the tablet.
+
+To-dos that belong to **no** list — the ones in the To-Do app's All view and nowhere else —
+come over as a list called **Inbox**, the name the tablet uses. It appears only while
+something is in it, and it is read-only, because a to-do that belongs to no list has nowhere
+in it to be added.
 
 It is the one thing in the plugin built on an API Ratta never published — worked out against
 a live account, and it works, but nothing about it is promised. Supernote's session lasts
