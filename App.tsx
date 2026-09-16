@@ -4626,13 +4626,6 @@ function SettingsScreen(props: {
       </Section>
 
       {/*
-        Outside every fold, and first.
-        This lived under "Date and time format" for a release, where it was
-        never found: the fold is named for how dates are written, which is not
-        where anybody looks for which tab the plugin opens on. It is one line,
-        so it costs the page almost nothing to be in the open.
-      */}
-      {/*
         Which build this is, at the top of Settings where it can be read
         without opening anything. A plugin that cannot say its own version
         makes "is the feature missing or is the build missing?" cost an
@@ -4640,6 +4633,13 @@ function SettingsScreen(props: {
       */}
       <Text style={styles.noteCompact}>{`${APP_NAME} ${APP_VERSION} (build ${APP_BUILD})`}</Text>
 
+      {/*
+        Outside every fold, and first.
+        This lived under "Date and time format" for a release, where it was
+        never found: the fold is named for how dates are written, which is not
+        where anybody looks for which tab the plugin opens on. It is one line,
+        so it costs the page almost nothing to be in the open.
+      */}
       <Text style={styles.subheadingCompact}>Open on</Text>
       <Text style={styles.noteCompact}>
         Which tab you land on when the plugin opens. Without a CalDAV server the Tasks tab is
