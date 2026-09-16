@@ -663,14 +663,22 @@ export default function App(): React.JSX.Element {
         if (cloudTasks.truncated) {
           setStatus({kind: 'error', message: SN_CAPPED});
         }
-        // One request returns the whole account, so this answer is complete: a
-        // to-do missing from it has been deleted, or sits in a list no longer
-        // ticked, and either way it should leave the screen. `mergeFetched`
-        // only ever adds, so the Supernote tasks are cleared first and rebuilt
-        // from the answer — which is safe *because* the read is account-wide.
-        // A per-list read would make a to-do merely moved between lists, or
-        // filed out of the Inbox, look deleted instead.
-        const kept = tasksRef.current.filter(task => !isSnTask(task));
+        // Rebuilt from the answer only when the answer is the whole account.
+        //
+        // A complete read means a to-do missing from it has been deleted, or
+        // sits in a list no longer ticked, and either way it should leave the
+        // screen — `mergeFetched` only ever adds, so the Supernote tasks have
+        // to be cleared first for that to happen.
+        //
+        // **A truncated read must never be treated that way.** Supernote caps
+        // this endpoint at twenty rows, so on a busy account the answer is a
+        // sample: to-dos beyond the cap are absent while being perfectly alive,
+        // and clearing first would delete every one of them from the screen on
+        // every refresh. Merging keeps what was seen before, which is the same
+        // reasoning that makes the server mark its unfiled pull incremental.
+        const kept = cloudTasks.truncated
+          ? tasksRef.current
+          : tasksRef.current.filter(task => !isSnTask(task));
         const merged = mergeFetched(
           kept,
           mapped,

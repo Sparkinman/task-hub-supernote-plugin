@@ -42,6 +42,33 @@ to-dos are actually missing from. It names the cap, the cause and the only remed
 clear old to-dos on the tablet. **Do not add a page walk.** Re-requesting a body-ignoring
 endpoint just fetches page one twice.
 
+**The rows come back oldest first**, which is what makes the cap bite: the to-dos beyond row
+twenty are the *newest* ones. A to-do created today on a busy account is the one that never
+arrives. That is why this presented as "the plugin cannot see my new Inbox to-do" rather than
+as "some old to-dos are missing".
+
+**A truncated read is therefore never authoritative.** `refreshSupernote` rebuilds the
+Supernote tasks from the answer only when `truncated` is false; when it is true it merges, so
+a to-do already on screen is not deleted just because this sample did not contain it. Getting
+this wrong deletes a live to-do from the plugin on every refresh.
+
+**Ruled out, so it is not re-done.** Roughly eighty parameter spellings: camelCase and
+snake_case, in the JSON body, the query string and as headers; string and integer values;
+nested `{"page": {...}}` shapes; keyset cursors built from page one's own `lastModified` and
+`taskId`; the page in the path. None changed a single row. Form encoding answers "Content type
+not supported", an empty body answers "Request Parameter Serialisation Exception" — so the
+endpoint *does* parse its JSON body, it simply ignores every key we know. `GET` fails. A path
+sweep found that only `/file/schedule/task/all` and `/file/schedule/group/all` exist at all;
+everything else returns a Spring Boot 404.
+
+**One lead not yet followed up:** `/file/schedule/group/all` returns its token under
+`pageToken`, while `/file/schedule/task/all` returns `nextPageToken`. The two endpoints use
+different spellings, which suggests the request parameter may differ too.
+
+**There is no web client to observe.** viewer.supernote.com has no to-do interface — confirmed
+by signing in — so the tablet is the only thing that speaks this API, and capturing its
+traffic is the remaining way to settle it.
+
 **Still open:** how the Partner app reads a full account. Nobody has looked at its traffic; the
 original reverse engineering read its compiled Dart, and no copy of it is on this machine. That
 is where the answer is, if there is one.
