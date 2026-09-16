@@ -94,13 +94,12 @@ describe('the day page', () => {
     expect(bg.labels.some(l => l.text === 'PC Shared Calendar')).toBe(true);
   });
 
-  it('fills the rest of the tasks column with a checklist to write in', () => {
-    // A day with two tasks left two thirds of the column blank.
+  it('leaves the column blank under the tasks, rather than filling it', () => {
+    // A column of empty checkboxes was tried and is worse than the blank paper
+    // it replaced: a box is a stronger suggestion than a ruled line, and on a
+    // day with nothing due it filled two thirds of the page with them.
     const bg = dayBackground(PAGE, agenda());
-    const boxes = bg.labels.filter(l => l.text === '[ ]');
-    expect(boxes.length).toBeGreaterThanOrEqual(5);
-    const spacing = Math.round(8 * 11.85);
-    expect(boxes[1].top - boxes[0].top).toBe(spacing);
+    expect(bg.labels.some(l => l.text === '[ ]')).toBe(false);
   });
 
   it('carries the tasks column the Day view shows', () => {

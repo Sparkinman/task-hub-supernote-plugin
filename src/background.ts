@@ -86,14 +86,6 @@ const CALENDAR_SHARE = 0.75;
 const RULE_MM = 7;
 
 /**
- * Ruled spacing for the day page's checklist, in millimetres.
- *
- * Wider than the notes ruling because a line with a box on it is written in
- * one pass rather than filled with prose, and a box wants room around it.
- */
-const CHECKLIST_MM = 8;
-
-/**
  * Pixels per millimetre.
  *
  * A Manta is 1920px across a page about 162mm wide. Every panel in the range is
@@ -365,18 +357,13 @@ export function dayBackground(
     ty += rowHeight;
   }
 
-  // The rest of the column, as a checklist to fill in.
+  // Nothing below the tasks, deliberately.
   //
-  // A day with two tasks left two thirds of this column blank, which is a lot
-  // of page to spend on nothing. Ruled at 8mm with a box on each line, so it
-  // carries on meaning "tasks" rather than becoming a second notes area — that
-  // is already at the foot, across the full width.
-  const boxSpacing = Math.round(CHECKLIST_MM * PX_PER_MM);
-  ty += 12;
-  for (let by = ty; by + boxSpacing <= body.bottom; by += boxSpacing) {
-    labels.push({text: '[ ]', left: right, top: by - Math.round(titleFont * 0.9), fontSize: titleFont});
-    rules.push(hairline(right + Math.round(titleFont * 2.2), by, f.right));
-  }
+  // A column of empty checkboxes was tried and is worse than the blank paper it
+  // replaced: on a day with nothing due it filled two thirds of the page with
+  // boxes nobody asked for, and a box is a stronger suggestion than a ruled
+  // line. Blank space under the day's own tasks is space to use however it
+  // suits; the ruled notes band at the foot is there when lines are wanted.
 
   writable.push(
     {left: right, top: ty, right: f.right, bottom: body.bottom},

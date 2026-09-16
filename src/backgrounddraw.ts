@@ -132,7 +132,12 @@ async function blankTemplateNames(): Promise<{names: string[]; presets: string[]
     console.log(`${TAG} could not list presets: ${String(err)}`);
   }
 
-  // Only if none of theirs matched.
+  // Only if none of theirs matched. Writing the file every time cost a disk
+  // write on every page for a fallback that has not been needed since
+  // `style_white` was identified.
+  if (names.length > 0) {
+    return {names, presets: seen};
+  }
   const relative = `${MY_STYLE_ROOT}/${BLANK_TEMPLATE_NAME}`;
   try {
     const written = await writeLinkImage(relative, BLANK_TEMPLATE_BASE64, 'Task Hub blank page');
@@ -547,7 +552,12 @@ export async function writeBackground(
     // differently: the week page put ~45 rules down in a single insert without
     // complaint, while 26 text elements in one call drew nothing. Text is what
     // has to be rationed, and rationing the rules as well was simply slow.
-    const TEXT_CHUNK = 8;
+    // Twelve. The week page proved 7 text elements in one call is safe and the
+    // day page proved 26 is not, so the ceiling is somewhere between — twelve
+    // sits under the middle of that range and halves the number of calls a
+    // ninety-two-label quarter page needs. Lower it if a page ever comes up
+    // short; the message says when one does.
+    const TEXT_CHUNK = 12;
     const before = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
     let refusals = 0;
     const batches: Record<string, unknown>[][] = [];
