@@ -148,6 +148,7 @@ import {writeDateHeading} from './src/dateheading';
 import {
   dayBackground,
   monthBackground,
+  quarterBackground,
   weekBackground,
   type Background,
   type DayAgenda,
@@ -244,7 +245,7 @@ import {TemplatePicker, TemplateSheet} from './src/components/TemplatePicker';
 import {FolderPicker} from './src/components/FolderPicker';
 import {MiniCalendar} from './src/components/MiniCalendar';
 import {weekOf} from './src/components/WeekView';
-import {monthGrid} from './src/calendar';
+import {MONTHS, monthGrid} from './src/calendar';
 
 /** Where a list of calendar subscriptions is read from, inside Document/TaskHub. */
 const FEED_LIST_FILE = 'calendars.txt';
@@ -2915,7 +2916,7 @@ export default function App(): React.JSX.Element {
    * looking at rather than a second, possibly different, read.
    */
   const askCalendarPage = useCallback(
-    (iso: string, kind: 'day' | 'week' | 'month') => {
+    (iso: string, kind: 'day' | 'week' | 'month' | 'quarter') => {
       // Built from what is already on screen, so the page is a copy of the Day
       // view rather than a second, possibly different, read of the data.
       const minutes = (hhmm?: string) => {
@@ -2965,6 +2966,20 @@ export default function App(): React.JSX.Element {
             cells.length / 7,
             cells.map((c: {day: number | null}) => (c.day === null ? '' : String(c.day))),
           );
+        }
+        if (kind === 'quarter') {
+          // The three months of the quarter the view is showing, each as a
+          // column of its own dates. Built from the month on screen, like the
+          // month page, so paging the calendar takes the quarter with it.
+          const at = new Date(view.year, view.month, 1);
+          const firstMonth = Math.floor(at.getMonth() / 3) * 3;
+          const months = [0, 1, 2].map(offset => {
+            const m = firstMonth + offset;
+            const days = new Date(at.getFullYear(), m + 1, 0).getDate();
+            const name = (MONTHS[m] ?? '').slice(0, 3);
+            return Array.from({length: days}, (_, d) => `${name} ${d + 1}`);
+          });
+          return quarterBackground(page, months);
         }
         return dayBackground(page, agenda, m =>
           formatTime(`${String(Math.floor(m / 60)).padStart(2, '0')}:00`, getConfig().timeFormat),
@@ -3053,7 +3068,9 @@ export default function App(): React.JSX.Element {
     // noteDays and periodFiles are read to decide whether the note has to be
     // made first, so an empty list here would close over the first render's
     // answer and go on creating notes that already exist.
-    [noteDays, periodFiles, noteConfigFor],
+    // view is read for the month and quarter pages, which belong to the month
+    // on screen rather than to the selected day.
+    [noteDays, periodFiles, noteConfigFor, view.year, view.month],
   );
 
   // The week view can straddle two months, so it needs its own lookup.
@@ -3955,7 +3972,10 @@ will not duplicate them.`}
                   — and one button serves all three views, because what it
                   draws follows whichever one is showing.
                 */}
-                {(calView === 'day' || calView === 'week' || calView === 'month') && (
+                {(calView === 'day' ||
+                  calView === 'week' ||
+                  calView === 'month' ||
+                  calView === 'quarter') && (
                   <Button
                     // "Calendar page" said what it made, not what pressing it
                     // does, which is the usual way a button ends up meaning
@@ -3967,7 +3987,7 @@ will not duplicate them.`}
                         // whichever day is selected. Paging the calendar to
                         // October and pressing this put the page in September's
                         // note, because `day` had not moved with the view.
-                        calView === 'month'
+                        calView === 'month' || calView === 'quarter'
                           ? toDateInput(new Date(view.year, view.month, 1))
                           : day,
                         calView,
