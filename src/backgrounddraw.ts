@@ -32,9 +32,16 @@
  * answered below, and it is not by masking: the page carries its own.
  */
 
-import {Element, Geometry, PluginCommAPI, PluginFileAPI, TextBox} from 'sn-plugin-lib';
+import {
+  Element,
+  Geometry,
+  PluginCommAPI,
+  PluginFileAPI,
+  PluginNoteAPI,
+  TextBox,
+} from 'sn-plugin-lib';
 
-import type {Background} from './background';
+import type {Background, PageSize} from './background';
 import {MY_STYLE_ROOT, listSystemTemplates} from './notes';
 import {ensureFileAccess} from './permissions';
 import {externalRoot, writeLinkImage} from './storage';
@@ -49,6 +56,10 @@ const TAG = '[TaskHub]';
  * without taking the writing with it.
  */
 const BACKGROUND_LAYER = 1;
+const MAIN_LAYER = 0;
+
+/** A Manta's page, for when the device will not say. Same value as `dateheading`. */
+const FALLBACK_PAGE: PageSize = {width: 1920, height: 2560};
 
 /**
  * Names that might mean "a blank page", tried in order.
@@ -126,45 +137,102 @@ async function blankTemplateNames(): Promise<{names: string[]; presets: string[]
 /**
  * The pen a background rule is drawn with.
  *
- * `penType: 11` and a width in the low thousands are the only values ever
- * observed to draw on this hardware — `pagemark.ts` shades with them and its
- * lines appear. The first attempt here invented `penType: 1` at width 400 and
- * **nothing rendered at all**: the text elements on the same page arrived and
- * the rules did not, which is the signature of a pen the host does not
- * recognise rather than of a failed insert.
+ * Every value here is copied from `patterns-supernote-plugin/src/grid/types.ts`
+ * rather than derived. That plugin draws thousands of rules on this hardware and
+ * its constants are device-verified; the SDK's type definitions specify none of
+ * them, and four builds of this feature drew nothing because they were invented
+ * instead of looked up.
  *
- * The width has a floor of 100 — the Java side reads it as an int and the
- * schema refuses less, which the Patterns plugin established. 3800 is what the
- * device reported for a hand-drawn marker stroke and 2200 reads as a background
- * wash, so a hairline is well below that. `CALIBRATION` exists to find where.
+ * - `penType` 10 is the **fineliner**. 11 is the marker, which is a wash rather
+ *   than a line and is what `pagemark.ts` shades with.
+ * - `penColor` 0x9d is dark grey and 0xc9 light grey — the two weights the
+ *   maintainer already uses. 0xfe is white, which is worth remembering exists.
+ * - `penWidth` has a floor of 100 (`GeometrySchema` refuses less) and
+ *   `new Geometry()` defaults it to **0**, so it must always be set explicitly.
+ *   The widely-copied `penWidth: 3` example is refused outright.
+ *
+ * Light grey, because these are rules to write over rather than lines to read.
  */
-const RULE_PEN = {penType: 11, penColor: 157, penWidth: 1000};
+const RULE_PEN = {penType: 10, penColor: 0xc9, penWidth: 400};
 
 /**
- * Pen settings drawn as a labelled strip at the top of the page, once.
+ * What a page of rules costs, measured — so nothing here has to be timed again.
  *
- * Because "nothing appeared" is not a measurement. Each row is a short line
- * with its own settings written beside it, so one look at the page says which
- * pens draw, how heavy each width is, and therefore what a hairline should be —
- * instead of another build per guess.
+ * `patterns-supernote-plugin` measured this on an A6X2: 48 elements took
+ * 1,912ms, 120 took 4,533 and 460 took 16,941 — **37 to 40ms an element, flat,
+ * in a single insert call**. Building an element is 1.2ms against 37ms to
+ * insert it, so concurrency is worth 6% on the job and nothing on this side of
+ * the bridge makes it quicker.
  *
- * Delete this, and the strip it draws, once the answer is known.
+ * The only lever is fewer elements for the same picture. The day page is about
+ * 31 and lands near a second; the quarter page is 185 and will take roughly
+ * seven. If that is too slow it needs a cheaper drawing, not a faster route.
  */
-const CALIBRATION: {penType: number; penWidth: number}[] = [
-  {penType: 11, penWidth: 100},
-  {penType: 11, penWidth: 300},
-  {penType: 11, penWidth: 600},
-  {penType: 11, penWidth: 1000},
-  {penType: 11, penWidth: 2200},
-  {penType: 1, penWidth: 1000},
-  {penType: 0, penWidth: 1000},
-  {penType: 2, penWidth: 1000},
-];
+export const MS_PER_ELEMENT = 38;
 
 interface Loose {
   success?: boolean;
   result?: unknown;
   error?: {message?: string; code?: number};
+}
+
+interface RawLayer {
+  layerId: number;
+  name: string;
+  isVisible: boolean;
+  isCurrentLayer?: boolean;
+}
+
+/**
+ * Make one layer the current one, and say whether it worked.
+ *
+ * Copied wholesale from `patterns-supernote-plugin`, filter and retry included,
+ * because both exist for reasons that cost that project device runs to find.
+ *
+ * The filter: the background layer comes back with `layerId -1`, and
+ * `modifyLayers` rejects the **entire call** with "layerId must be >= 0" if it
+ * is handed straight back.
+ *
+ * The retry: this answers 1207, "the page does not exist", on a page that
+ * plainly does — always right after a write, which looks like the page being
+ * momentarily unavailable while a reload is in flight. That is this firmware's
+ * signature failure. Giving up leaves the user on the plugin's layer, where
+ * their next stroke lands among the rules and the eraser can reach them.
+ */
+async function setCurrentLayer(
+  filePath: string,
+  page: number,
+  layerId: number,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      // A save first, because that is what settles the file against the host's
+      // page everywhere else here.
+      await PluginNoteAPI.saveCurrentNote();
+    }
+    const raw = (await PluginFileAPI.getLayers(filePath, page)) as Loose | null;
+    const layers = (raw?.result ?? raw) as RawLayer[] | null;
+    if (!Array.isArray(layers)) {
+      continue;
+    }
+    const res = (await PluginFileAPI.modifyLayers(
+      filePath,
+      page,
+      layers
+        .filter(l => l.layerId >= 0)
+        .map(l => ({
+          layerId: l.layerId,
+          name: l.name,
+          isVisible: l.isVisible,
+          isCurrentLayer: l.layerId === layerId,
+        })),
+    )) as Loose | null;
+    if (res?.success === true) {
+      return true;
+    }
+    console.log(`${TAG} modifyLayers refused: ${JSON.stringify(res)}`);
+  }
+  return false;
 }
 
 /** Allocate one element natively. Null when the device refuses. */
@@ -202,9 +270,7 @@ export interface DrawReport {
  * background that failed to draw must not read as a note that failed to appear.
  */
 export async function writeBackground(
-  absolutePath: string,
-  pageNum: number,
-  bg: Background,
+  build: (page: PageSize) => Background,
 ): Promise<DrawReport> {
   const started = Date.now();
   let allocateMs = 0;
@@ -213,10 +279,46 @@ export async function writeBackground(
   // the build machine, so a detail only logged is a detail nobody can read.
   let usedTemplate = '';
   let presets: string[] = [];
+  let switched = false;
+  let notePath = '';
+  let drawnPage = 0;
   const elements: Record<string, unknown>[] = [];
 
   try {
     await ensureFileAccess();
+
+    // The note the user is looking at, not a path worked out from settings.
+    // `insertPageElements` writes the host's in-memory page, so the page it
+    // writes to is whichever one is displayed — which means the calendar goes
+    // into the note they are in. That is how the Tables and Patterns plugins
+    // work too, and it is the platform's shape rather than a compromise.
+    const absolutePath = (await PluginCommAPI.getCurrentFilePath()) as unknown as string;
+    notePath = absolutePath;
+    const current = ((await PluginCommAPI.getCurrentPageNum()) as unknown as number) ?? 0;
+    if (typeof absolutePath !== 'string' || !absolutePath) {
+      return {
+        error: 'No note is open. Open the note you want the calendar page in, then try again.',
+        ms: Date.now() - started,
+        allocateMs: 0,
+        elements: 0,
+        template: '',
+        presets: [],
+      };
+    }
+    // Straight after the page being looked at, so it arrives where the user is
+    // rather than at the front of a note they may be deep inside.
+    const pageNum = current + 1;
+
+    // The device's own page size, asked for here rather than passed in: the
+    // caller has no way to know it, and `getPageDisplaySize` is what the SDK
+    // says to use for anything that will be drawn on the current page.
+    const size = (await PluginCommAPI.getPageDisplaySize()) as unknown as
+      | {width?: number; height?: number}
+      | null;
+    const bg = build({
+      width: Number(size?.width) || FALLBACK_PAGE.width,
+      height: Number(size?.height) || FALLBACK_PAGE.height,
+    });
 
     // A page of its own, blank, rather than drawing over one of the user's.
     // Their ruling stays on their pages; the calendar gets clean paper.
@@ -249,49 +351,22 @@ export async function writeBackground(
     }
     console.log(`${TAG} blank page inserted with template "${usedTemplate}"`);
 
-    const startedAllocating = Date.now();
+    // The insert lands on the displayed page, so the new one has to be shown
+    // before anything is drawn into it.
+    await PluginCommAPI.jumpToPage(pageNum);
 
-    // The calibration strip, first and at the very top, so it is the first
-    // thing seen and cannot be confused with the grid below it.
-    let calibrationY = 60;
-    for (const pen of CALIBRATION) {
-      const line = await allocate(Element.TYPE_GEO);
-      if (line) {
-        const shape = new Geometry();
-        shape.type = Geometry.TYPE_STRAIGHT_LINE;
-        shape.penType = pen.penType;
-        shape.penColor = RULE_PEN.penColor;
-        shape.penWidth = pen.penWidth;
-        shape.showLassoAfterInsert = false;
-        shape.points = [
-          {x: 420, y: calibrationY},
-          {x: 900, y: calibrationY},
-        ];
-        line.pageNum = pageNum;
-        line.layerNum = BACKGROUND_LAYER;
-        line.geometry = shape;
-        line.thickness = pen.penWidth;
-        elements.push(line);
-      }
-      const caption = await allocate(Element.TYPE_TEXT);
-      if (caption) {
-        const box = new TextBox();
-        box.textContentFull = `type ${pen.penType} width ${pen.penWidth}`;
-        box.textRect = {left: 40, top: calibrationY - 20, right: 400, bottom: calibrationY + 30};
-        box.fontSize = 28;
-        box.textAlign = 0;
-        box.textBold = 0;
-        box.textItalics = 0;
-        box.textFrameWidthType = 0;
-        box.textFrameStyle = 0;
-        box.textEditable = 0;
-        caption.pageNum = pageNum;
-        caption.layerNum = BACKGROUND_LAYER;
-        caption.textBox = box;
-        elements.push(caption);
-      }
-      calibrationY += 70;
+    // Onto a layer of its own, so a lasso round the user's handwriting does not
+    // also catch the rules under it — the single-layer lasso stops being a
+    // limitation and becomes the point. Restored in the finally below, without
+    // fail: leaving somebody on the plugin's layer means their next stroke
+    // lands among the rules.
+    drawnPage = pageNum;
+    switched = await setCurrentLayer(absolutePath, pageNum, BACKGROUND_LAYER);
+    if (!switched) {
+      console.log(`${TAG} could not switch layer; drawing on the current one`);
     }
+
+    const startedAllocating = Date.now();
 
     for (const rule of bg.rules) {
       const geo = await allocate(Element.TYPE_GEO);
@@ -359,11 +434,38 @@ export async function writeBackground(
         `layer ${BACKGROUND_LAYER}, page ${pageNum} -> ${absolutePath}`,
     );
 
-    const inserted = (await PluginFileAPI.insertElements(
-      absolutePath,
-      pageNum,
+    // **The in-memory page, not the file.** This is the whole reason nothing
+    // drew: `PluginFileAPI.insertElements` writes straight to the file and
+    // carries text fine — `dateheading.ts` relies on it — but geometry inserted
+    // that way is accepted and never appears. The Patterns plugin, which draws
+    // thousands of rules, uses this route exclusively and never the file one.
+    //
+    // The layer is null on purpose. Passing one explicitly is refused with 813,
+    // "the layer of the element does not match the provided layer parameter",
+    // even when the element's own layerNum says the same thing. Whichever layer
+    // is current is the one it lands on.
+    const before = ((await PluginFileAPI.getElementCounts(absolutePath, pageNum)) as Loose | null)
+      ?.result;
+    let inserted = (await PluginCommAPI.insertPageElements(
       elements,
+      pageNum,
+      null,
     )) as Loose | null;
+
+    // **Counted, not trusted, and retried once.** The Patterns plugin recorded
+    // this after losing a session to it: the first batch insert after the panel
+    // opens is often swallowed — it reports success and draws nothing — and a
+    // second attempt always lands. On a Nomad it happened to every first
+    // insert; on a Manta, never. A path that writes without checking is a path
+    // that silently does nothing on one of the two panels.
+    await PluginNoteAPI.saveCurrentNote();
+    const after = ((await PluginFileAPI.getElementCounts(absolutePath, pageNum)) as Loose | null)
+      ?.result;
+    const landed = Number(after ?? 0) - Number(before ?? 0);
+    if (landed <= 0) {
+      console.log(`${TAG} first insert drew nothing (${before} -> ${after}); retrying`);
+      inserted = (await PluginCommAPI.insertPageElements(elements, pageNum, null)) as Loose | null;
+    }
 
     if (!inserted?.success || inserted.result === false) {
       const code = inserted?.error?.code;
@@ -378,8 +480,13 @@ export async function writeBackground(
         presets,
       };
     }
-    // Deliberately NOT followed by saveCurrentNote. This wrote straight to the
-    // file; saving would push the host's in-memory page back over it.
+    // Save, THEN reload — the ordering for an in-memory write, and the opposite
+    // of the rule for the file route. Reloading without saving first throws the
+    // insert away, which looks exactly like the API having silently done
+    // nothing. Two write paths, opposite orderings; match the save to the path.
+    await PluginNoteAPI.saveCurrentNote();
+    await PluginCommAPI.reloadFile();
+
     return {
       error: null,
       ms: Date.now() - started,
@@ -398,6 +505,11 @@ export async function writeBackground(
       presets,
     };
   } finally {
+    // The user goes back to their own layer whatever happened above, including
+    // if it threw. This is the one thing the layer arrangement exists for.
+    if (switched && notePath) {
+      await setCurrentLayer(notePath, drawnPage, MAIN_LAYER).catch(() => false);
+    }
     for (const element of elements) {
       try {
         await (element as {recycle?: () => Promise<void>}).recycle?.();

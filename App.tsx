@@ -144,7 +144,7 @@ import {
 } from './src/storage';
 import {CACHE_FILE, decodeCache, encodeCache} from './src/cache';
 import {expandEvents} from './src/expand';
-import {pageSizeOf, writeDateHeading} from './src/dateheading';
+import {writeDateHeading} from './src/dateheading';
 import {dayBackground, type DayEntry} from './src/background';
 import {writeBackground} from './src/backgrounddraw';
 import {
@@ -2135,13 +2135,6 @@ export default function App(): React.JSX.Element {
    */
   const askCalendarPage = useCallback(
     (iso: string) => {
-      const cfg = getConfig();
-      const path = dailyNotePath(cfg.dailyNote, iso, cfg.dateFormat);
-      if (!path) {
-        setStatus({kind: 'error', message: 'Could not build a note path for that day.'});
-        return;
-      }
-
       // startTime and endTime are local 'HH:MM' and absent on an all-day event,
       // which is exactly the distinction the page needs: a timed event gets a
       // block on the hour grid, an all-day one has no hour to be drawn at.
@@ -2171,14 +2164,13 @@ export default function App(): React.JSX.Element {
 
       setAsk({
         title: 'Add a calendar page?',
-        body: `A new page will be added to ${path} with no template, carrying the day's events and to-dos as a background to write over. Your other pages keep their ruling.`,
+        // Into the note being read, because that is where the host can draw:
+        // the insert writes the in-memory page, so the page it writes to is
+        // whichever one is displayed.
+        body: `A blank page will be added to the note you are in, after the page you are on, carrying ${formatDate(iso, getConfig().dateFormat)}'s events and to-dos as a background to write over.`,
         label: 'Yes, add it',
         run: async () => {
-          const absolute = await absoluteNotePath(path);
-          const page = await pageSizeOf(absolute);
-          // Page 0: the calendar page goes at the front of the note, where the
-          // day it describes is the first thing seen on opening it.
-          const report = await writeBackground(absolute, 0, dayBackground(page, entries));
+          const report = await writeBackground(page => dayBackground(page, entries));
           if (report.error) {
             throw new Error(report.error);
           }
@@ -2190,7 +2182,7 @@ export default function App(): React.JSX.Element {
           // There is no adb on the machine this is built from, so a log line is
           // invisible to the only person who can see the device.
           return (
-            `Saved successfully — ${report.elements} element(s) into ${path} in ${report.ms}ms ` +
+            `Saved successfully — ${report.elements} element(s) in ${report.ms}ms ` +
             `(${report.allocateMs}ms allocating). Template used: "${report.template}". ` +
             `Presets offered: ${report.presets.join(', ') || 'none'}.`
           );
