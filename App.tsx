@@ -206,11 +206,11 @@ import {
   type SnList,
 } from './src/sncloud';
 import {
+  SN_CAPPED,
   SN_EXPIRED,
   beginSignIn,
   finishSignIn,
   listSnLists,
-  listSnTasks,
   readSnTasks,
 } from './src/snclient';
 import {
@@ -654,9 +654,15 @@ export default function App(): React.JSX.Element {
       try {
         const [lists, cloudTasks] = await Promise.all([
           listSnLists(cfg.supernote.token),
-          listSnTasks(cfg.supernote.token),
+          readSnTasks(cfg.supernote.token),
         ]);
-        const mapped = asRemoteTasks(cloudTasks, lists, cfg.supernote.lists);
+        const mapped = asRemoteTasks(cloudTasks.tasks, lists, cfg.supernote.lists);
+        // Said on the Tasks tab, not only in Settings: this is where the to-dos
+        // are missing from, and a cap nobody is told about is how a to-do sits
+        // on the tablet while the plugin quietly insists it does not exist.
+        if (cloudTasks.truncated) {
+          setStatus({kind: 'error', message: SN_CAPPED});
+        }
         // One request returns the whole account, so this answer is complete: a
         // to-do missing from it has been deleted, or sits in a list no longer
         // ticked, and either way it should leave the screen. `mergeFetched`
@@ -2479,7 +2485,10 @@ export default function App(): React.JSX.Element {
         // arrived and was filed somewhere I did not expect" stop looking alike.
         const heard =
           `Supernote returned ${read.rows} to-do(s)` +
-          (read.dropped > 0 ? `, ${read.dropped} of them marked deleted.` : '.');
+          (read.dropped > 0 ? `, ${read.dropped} of them marked deleted.` : '.') +
+          (read.truncated
+            ? ` ${SN_CAPPED}`
+            : '');
         setSnMessage(
           lists.length === 0
             ? `Signed in, but this account has no to-do lists. ${heard}`

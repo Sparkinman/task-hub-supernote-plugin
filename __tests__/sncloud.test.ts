@@ -11,6 +11,7 @@ import {
   snNoteLink,
   snOpenCounts,
   snTaskRead,
+  snTruncated,
   snUnfiledCounts,
   snUnfiledNote,
   snTaskFrom,
@@ -357,5 +358,20 @@ describe('reporting what actually arrived', () => {
   it('reports nothing rather than throwing on a body it cannot read', () => {
     expect(snTaskRead(null)).toEqual({tasks: [], rows: 0, dropped: 0});
     expect(snTaskRead({})).toEqual({tasks: [], rows: 0, dropped: 0});
+  });
+});
+
+describe('the twenty-row cap', () => {
+  it('notices when Supernote is holding to-dos back', () => {
+    // Proved on a live account: 21 to-dos gave nextPageToken '2' and omitted
+    // the newest; deleting the completed ones gave 6 rows, a null token, and
+    // the missing to-do. There is no way to ask for page two, so the only
+    // thing left is to know that it exists.
+    expect(snTruncated({nextPageToken: '2'})).toBe(true);
+    expect(snTruncated({nextPageToken: null})).toBe(false);
+    expect(snTruncated({nextPageToken: ''})).toBe(false);
+    expect(snTruncated({nextPageToken: 'null'})).toBe(false);
+    expect(snTruncated({})).toBe(false);
+    expect(snTruncated(null)).toBe(false);
   });
 });

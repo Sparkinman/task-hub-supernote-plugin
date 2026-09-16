@@ -227,6 +227,17 @@ tablet rather than brought over, which is the same rule Task Hub applies to
 every other task source. Ticking a Supernote to-do off here completes it on the
 tablet, and it leaves the list on the next refresh.
 
+### Only your first 20 to-dos are available
+
+Supernote's service hands back **at most twenty to-dos** and offers no way to ask
+for the rest, so on a busy account some of yours will not appear here. Task Hub
+says so plainly when it happens rather than quietly showing you a short list.
+
+The only remedy is on the tablet: completing or deleting old to-dos brings the
+newer ones within reach. This is a limit of Supernote's own service, not of the
+connection — the [Task Hub server](#task-hub-server-recommended) hits the same
+wall.
+
 ### Inbox — the to-dos that belong to no list
 
 A Supernote to-do does not have to be in a list. One made in a hurry, or left

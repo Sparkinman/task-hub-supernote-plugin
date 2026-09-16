@@ -8,7 +8,7 @@ import {
   snFieldsFrom,
   snListsFrom,
   snTaskRead,
-  snTasksFrom,
+  snTruncated,
   type SnList,
   type SnTask,
 } from './sncloud';
@@ -30,6 +30,16 @@ const TAG = '[TaskHub]';
 
 /** Raised when the session is gone, as distinct from a request that failed. */
 export class SnAuthError extends Error {}
+
+/**
+ * Said whenever Supernote admits to holding more to-dos than it will hand over.
+ *
+ * Names the cap, names the cause and gives the one action that works, because
+ * "some to-dos are missing" without a remedy is only slightly better than
+ * silence.
+ */
+export const SN_CAPPED =
+  'Supernote only returns your first 20 to-dos and gives no way to ask for the rest, so some are not shown here. Completing or deleting old to-dos on the tablet brings the newer ones into view.';
 
 export const SN_EXPIRED =
   'Your Supernote sign-in has run out. It lasts thirty days and cannot renew itself, so sign in again in Settings.';
@@ -250,16 +260,28 @@ export async function listSnLists(token: string): Promise<SnList[]> {
  * returned everything unchanged, so the full set is what is asked for.
  */
 export async function listSnTasks(token: string): Promise<SnTask[]> {
-  return snTasksFrom(await read(SN_LIST_TASKS, token));
+  return (await readSnTasks(token)).tasks;
 }
 
-/** The same request, reporting how many rows arrived and how many were dropped. */
+/**
+ * Every task the account will give up, and whether that is all of them.
+ *
+ * `truncated` is the important field. The endpoint returns at most twenty rows
+ * and provides no way to ask for the rest — see `SN_PAGE_SIZE` in `sncloud.ts`
+ * for what was tried — so on a busy account this answer is a sample, not the
+ * set. Reporting that is the whole of the fix available: a to-do missing
+ * without explanation is what cost this plugin an afternoon of its author's
+ * time and several installs.
+ */
 export async function readSnTasks(token: string): Promise<{
   tasks: SnTask[];
   rows: number;
   dropped: number;
+  truncated: boolean;
 }> {
-  return snTaskRead(await read(SN_LIST_TASKS, token));
+  const body = await read(SN_LIST_TASKS, token);
+  const batch = snTaskRead(body);
+  return {...batch, truncated: snTruncated(body)};
 }
 
 /** The server's own row for one task, to lay an update over. */

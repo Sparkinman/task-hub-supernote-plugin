@@ -36,6 +36,45 @@ export const SN_BASE_URL = 'https://viewer.supernote.com/api';
 
 export const SN_LIST_GROUPS = '/file/schedule/group/all';
 export const SN_LIST_TASKS = '/file/schedule/task/all';
+
+/**
+ * How many task rows `SN_LIST_TASKS` will return, ever.
+ *
+ * **The endpoint is capped at twenty rows and takes no arguments.** It answers
+ * with `nextPageToken` beside them when more exist, which reads like ordinary
+ * pagination — but the request body is ignored outright: filtering by
+ * `taskListId`, by `status`, or sending a deliberate nonsense key all return
+ * the identical twenty rows, and so does every spelling of a page parameter in
+ * the body, in the query string and in a header. Twenty-seven were tried.
+ *
+ * Proved on a live account: with 21 to-dos the newest was absent and
+ * `nextPageToken` was `'2'`; after deleting the completed ones the account
+ * returned 6 rows, `nextPageToken` was null, and the missing to-do appeared.
+ * It had been on page two all along.
+ *
+ * So the second page cannot be asked for by any means found, and the only
+ * honest thing left is to notice the cap and say so. `snTruncated` is what does
+ * that. Do not replace this with a page walk unless a route is actually found —
+ * a loop that re-requests a body-ignoring endpoint just fetches page one twice.
+ *
+ * The Task Hub server's connector has the same cap and does not yet know it.
+ * See `app/connectors/supernote.py`.
+ */
+export const SN_PAGE_SIZE = 20;
+
+/**
+ * Whether the account holds more to-dos than this answer contains.
+ *
+ * True when `nextPageToken` is set, which is the server saying there is a page
+ * two — a page nothing here can reach. It is the difference between "you have
+ * six to-dos" and "you have six of your to-dos", and a user staring at a to-do
+ * on their tablet that this plugin does not list deserves to be told which.
+ */
+export function snTruncated(body: unknown): boolean {
+  const token = (body as {nextPageToken?: unknown})?.nextPageToken;
+  const text = String(token ?? '').trim();
+  return text !== '' && text !== 'null' && text !== 'undefined';
+}
 /**
  * One task. The verb decides the operation, and each has a trap of its own.
  *

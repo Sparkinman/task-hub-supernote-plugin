@@ -11,6 +11,45 @@ or released.
 
 ## READ THIS FIRST — where the work stopped
 
+### Supernote Cloud returns only 20 to-dos, and cannot be asked for more
+
+**This is the most important thing on this page.** `/file/schedule/task/all` answers with at
+most **twenty rows**, and there is no way to ask for the rest. Both this plugin and the Task
+Hub server have always read a capped view of any account with more than twenty to-dos.
+
+**Proved on the maintainer's live account**, not inferred:
+
+- With 21 to-dos, the newest — an open one plainly visible in the tablet's own Inbox — was
+  absent from the response, and `nextPageToken` came back `'2'`.
+- After deleting the completed to-dos, the account returned **6 rows, `nextPageToken: null`**,
+  and the missing to-do was there. It had been on page two all along.
+
+**The body is ignored outright.** This is the finding that closes off the obvious fix, so do
+not spend another session on it: sending `{"taskListId": ...}`, `{"status": ...}` or a
+deliberate nonsense key all return the *identical* twenty rows. So do fourteen spellings of a
+page parameter in the body, eight in the query string, and five as headers — twenty-seven in
+total, none of which changed a single row. `GET` on the same path answers "Server Error", and
+so do `/file/schedule/task/list`, `/page`, `/query` and `/sync`.
+
+It also retires the old note in `sncloud.ts` about `nextSyncToken` "coming back but never
+replaying". That was this cap being mistaken for a broken delta read. `nextSyncToken` is null
+on this account; `nextPageToken` is the field that means something, and nothing can be done
+with it.
+
+**What the plugin does about it:** `snTruncated()` reads `nextPageToken`, and `SN_CAPPED` is
+shown both in Settings after *Refresh lists* and as a status on the Tasks tab — the place the
+to-dos are actually missing from. It names the cap, the cause and the only remedy there is:
+clear old to-dos on the tablet. **Do not add a page walk.** Re-requesting a body-ignoring
+endpoint just fetches page one twice.
+
+**Still open:** how the Partner app reads a full account. Nobody has looked at its traffic; the
+original reverse engineering read its compiled Dart, and no copy of it is on this machine. That
+is where the answer is, if there is one.
+
+**The server has the same defect** and does not yet know it — `app/connectors/supernote.py`,
+in `_get(LIST_TASKS)` and in `_task_row`, which means a task beyond the first twenty cannot be
+updated either.
+
 ### 0.72.0 — the Supernote Inbox, written but NOT yet run on a device
 
 Everything below in this section is off-device logic, verified by `tsc`, eslint and 577
