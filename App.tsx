@@ -3056,7 +3056,13 @@ export default function App(): React.JSX.Element {
           // invisible to the only person who can see the device.
           return (
             `Saved successfully — ${report.landed} of ${report.elements} element(s) drawn ` +
-            `into ${target.path} in ${report.ms}ms.`
+            `into ${target.path} in ${report.ms}ms.` +
+            // Said out loud when the page is short, because a page that is
+            // missing most of itself while reporting success is the failure
+            // this whole area keeps producing.
+            (report.landed < report.elements
+              ? ' The device accepted the rest and drew nothing — tell Paul this number.'
+              : '')
           );
         },
       });

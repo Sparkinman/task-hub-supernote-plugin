@@ -563,39 +563,55 @@ export async function writeBackground(
     // "the layer of the element does not match the provided layer parameter",
     // even when the element's own layerNum says the same thing. Whichever layer
     // is current is the one it lands on.
+    // Counted before, so what landed can be measured rather than believed.
+    const before = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
     let inserted = (await PluginCommAPI.insertPageElements(
       elements,
       pageNum,
       WRITE_LAYER,
     )) as Loose | null;
 
-    // One retry, and only when the call itself says it failed.
+    // **`success` is not evidence.** The Patterns plugin recorded that the
+    // first batch insert after the panel opens is often swallowed: it reports
+    // success and draws nothing, every time on a Nomad and never on a Manta.
+    // Trusting the flag is how a page comes out blank while the plugin says it
+    // worked — which is exactly what happened when this check was removed.
     //
-    // The Patterns plugin records that the first batch insert after the panel
-    // opens is often swallowed — success reported, nothing drawn — so a retry
-    // is worth having. What is NOT worth having is deciding that from an
-    // element count: reading straight after a write can show the page as it was
-    // rather than as it is, because a reload still in flight is this firmware's
-    // signature failure. A count-triggered retry therefore fires when nothing
-    // is wrong, inserts everything twice, and on the device took the note down
-    // with it.
-    if (inserted?.success !== true) {
-      console.log(`${TAG} insert refused: ${JSON.stringify(inserted)} — retrying once`);
-      await PluginNoteAPI.saveCurrentNote();
+    // So the page is counted. The count has a trap of its own: reading straight
+    // after a write can show the page as it was rather than as it is, because a
+    // reload still in flight is this firmware's signature failure. Hence the
+    // save and the reload before reading, which is what `settleForRead` does in
+    // the plugin this is copied from.
+    //
+    // What made the earlier version of this dangerous was not the retry. It was
+    // recycling the elements afterwards, which freed memory the host still held
+    // and took the note down. The retry is safe; the recycle was not.
+    await PluginNoteAPI.saveCurrentNote();
+    await PluginCommAPI.reloadFile();
+    const after = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
+    landedCount = Math.max(0, Number(after ?? 0) - Number(before ?? 0));
+
+    if (landedCount <= 0) {
+      console.log(
+        `${TAG} insert drew nothing (${before} -> ${after}, reported ${JSON.stringify(
+          inserted?.success,
+        )}); retrying once`,
+      );
       inserted = (await PluginCommAPI.insertPageElements(
         elements,
         pageNum,
         WRITE_LAYER,
       )) as Loose | null;
+      await PluginNoteAPI.saveCurrentNote();
+      await PluginCommAPI.reloadFile();
+      const second = value<number>(await PluginFileAPI.getElementCounts(absolutePath, pageNum));
+      landedCount = Math.max(0, Number(second ?? 0) - Number(before ?? 0));
     }
-    landedCount = inserted?.success === true ? elements.length : 0;
 
-    // Save, THEN reload — the ordering for an in-memory write, and the opposite
-    // of the rule for the file route. Reloading without saving first throws the
-    // insert away, which looks exactly like the API having silently done
-    // nothing. Two write paths, opposite orderings; match the save to the path.
-    await PluginNoteAPI.saveCurrentNote();
-    await PluginCommAPI.reloadFile();
+    // The save above is what commits an in-memory write, and it comes before the
+    // reload — the opposite of the rule for the file route, where a save after
+    // the write pushes the stale page back over it. Two routes, opposite
+    // orderings; match the save to the path.
 
     return {
       error: null,
