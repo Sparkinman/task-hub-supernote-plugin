@@ -13,8 +13,6 @@ import {
 } from './periodnote';
 import {DEFAULT_MEETING_NOTE, type MeetingLinks, type MeetingNoteConfig} from './meetingnote';
 import type {NoteFile} from './notesearch';
-import {DEMO} from './demoflag';
-import {demoConfig} from './demodata';
 import type {CalendarFeed} from './feeds';
 import {DEFAULT_SN_CONFIG, type SnConfig, type SnList} from './sncloud';
 
@@ -391,12 +389,6 @@ export async function listNotes(relativeRoot: string): Promise<string[]> {
  * "start with defaults", and none of them should stop the plugin opening.
  */
 export async function loadSettings(): Promise<ServerConfig | null> {
-  // Its own invented settings, never the real plugin's. Both installs share
-  // Document/TaskHub, so reading the file here would show a recording somebody's
-  // actual server address.
-  if (DEMO) {
-    return demoConfig();
-  }
   if (!store) {
     return null;
   }
@@ -418,11 +410,6 @@ export async function loadSettings(): Promise<ServerConfig | null> {
 
 /** Save settings. Resolves to the path written, and throws so the UI can report. */
 export async function saveSettings(config: ServerConfig): Promise<string> {
-  // Accepted and discarded. Settings can be opened and changed on camera, and
-  // nothing is written — so the demo is identical every time it is launched.
-  if (DEMO) {
-    return 'Document/TaskHubDemo (nothing is written by the demo build)';
-  }
   if (!store) {
     throw new Error('This build has no settings storage — rebuild with the native module.');
   }
@@ -493,11 +480,6 @@ export async function settingsLocation(): Promise<string | null> {
  * slow opening rather than a broken one.
  */
 export async function readNamed(name: string): Promise<string | null> {
-  // The demo build owns no files. Reading none means it cannot pick up a cache
-  // or an index belonging to the real plugin, which shares this folder.
-  if (DEMO) {
-    return null;
-  }
   if (!store?.readNamed) {
     return null;
   }
@@ -511,11 +493,6 @@ export async function readNamed(name: string): Promise<string | null> {
 
 /** Write one of the plugin's own files. Resolves false if it did not happen. */
 export async function writeNamed(name: string, contents: string): Promise<boolean> {
-  // Writing none means it cannot overwrite the real plugin's either. This is
-  // the whole of what keeps the two installs from treading on each other.
-  if (DEMO) {
-    return true;
-  }
   if (!store?.writeNamed) {
     return false;
   }

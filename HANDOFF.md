@@ -2,7 +2,7 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-16.
-Current build **0.73.2** (versionCode 99). **587 tests across 35 suites.**
+Current build **0.73.3** (versionCode 100). **587 tests across 35 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
 **licensed GPLv3**. **v0.73.2 is released and marked Latest**, with `TaskHub-0.73.2.snplg`
@@ -138,20 +138,6 @@ ticking it shows those to-dos badged Supernote, that it is absent from the save-
 on the capture screen, and that a to-do filed into a real list on the tablet moves rather
 than duplicating.
 
-### The demo build (still broken — unchanged by the above)
-
-Two plugins are now built from this tree:
-
-| | pluginID | Built by |
-|---|---|---|
-| **Task Hub** | `vfmnvjq0i1hxf8gu` | `./buildPlugin.sh` |
-| **Task Hub Demo** | `dmo7k2q4x9hzt3vb` | `./buildDemo.sh` |
-
-**The demo build is broken and that is still a live bug**, untouched by the 0.72.0 work. It
-installs, but the maintainer reports "nothing for events". Everything known about it is under
-*The demo build* below — read that before touching anything, because a fix was half-designed
-when that session ended.
-
 Two chores are outstanding and neither is code:
 
 1. **The GitHub About box is stale and I could not change it** — the token here answers
@@ -164,91 +150,23 @@ Two chores are outstanding and neither is code:
    the live account. The server is at `v1.0.2` on GitHub and Docker Hub with the same
    `maxResults` fix.
 
-## The demo build — and the bug it currently has
+## The demo build was removed on 2026-09-16
 
-A **second** `.snplg` with its own `pluginID`, so it installs beside the real plugin rather
-than replacing it. It exists for screenshots and screen recordings: it invents a month of
-calendar events and a set of tasks, and must never touch anything real.
+A second `.snplg` (pluginID `dmo7k2q4x9hzt3vb`) built from this tree by `buildDemo.sh`, which
+installed beside the real plugin and invented a month of events for screen recordings. It
+never worked — it installed but showed no events, and the diagnosis was never finished.
 
-An earlier demo build was deleted on 2026-09-06 (`src/mode.ts`, `src/demo.ts`, `buildDemo.ps1`,
-`scripts/set_demo_names.py` and a `blockedInDemo` guard on every write path). **This is not
-that.** It was rebuilt from scratch on 2026-09-15 on a different principle: the old one was a
-crippled copy of the real plugin, this one is the real plugin with its inputs replaced.
+**Deleted on the maintainer's instruction**, because it existed for a thirty-second video and
+was not worth the debugging. Gone with it: `buildDemo.sh`, `PluginConfig.demo.json`,
+`src/demoflag.ts`, `src/demodata.ts`, and the `DEMO` guards in `storage.ts` (`loadSettings`,
+`saveSettings`, `readNamed`, `writeNamed`) and `tasks.ts` (`listTasks`, `listEvents`).
 
-### How it is put together
-
-| File | Holds |
-|---|---|
-| `src/demoflag.ts` | `export const DEMO = false;` — one line, swapped to `true` for the build |
-| `src/demodata.ts` | `demoConfig()`, `demoTasks()`, `demoEvents()`. Pure, no SDK |
-| `PluginConfig.demo.json` | pluginID `dmo7k2q4x9hzt3vb`, pluginKey `TaskHubDemo`, name "Task Hub Demo" |
-| `buildDemo.sh` | Swaps four files, builds, restores them with a `trap` |
-
-Three guards are all that make it a demo, and they are deliberately few:
-
-- `storage.ts loadSettings()` returns `demoConfig()` and `saveSettings()` discards.
-- `storage.ts readNamed()` returns null and `writeNamed()` is a no-op. **This is what keeps
-  the two installs apart**: they share `Document/TaskHub`, so reading the file there would put
-  the real server address on camera.
-- `tasks.ts listTasks()` / `listEvents()` return the invented data **before** `ensureInternet`,
-  so the demo makes no request and never asks for network permission.
-
-Dates in `demodata.ts` are computed when read, not baked in, so the demo always shows the
-month it is being recorded in.
-
-`buildDemo.sh` swaps `app.json` (the name `index.js` registers under), `package.json` (decides
-the output filename), `PluginConfig.json` and `src/demoflag.ts`. A `trap` restores all four
-however the script ends. **Verified after a build: the tree is restored, `DEMO` is back to
-`false`, and the real 0.71.2 rebuilds byte-identical in identity.**
-
-### The bug: "nothing for events"
-
-Reported on device after installing `TaskHubDemo.snplg`. Not yet diagnosed. What is already
-established, so it is not re-done:
-
-**Ruled out.**
-
-- The package is right: `pluginID dmo7k2q4x9hzt3vb`, `pluginKey TaskHubDemo`, name
-  "Task Hub Demo", permissions FILE:READ/WRITE only.
-- `buildDemo.sh` did set the flag — it `grep -q`s for `DEMO = true` after the `sed` and exits
-  if absent, and the build proceeded.
-- The startup order is *not* obviously wrong: `refresh('opening')` is called **after**
-  `setConfig(stored)` inside the restore effect, so `getConfig()` should already hold
-  `demoConfig()` by then.
-- `demoConfig()` sets `collectionUrls` and `calendarUrls` to non-empty `demo:` URLs, so
-  `hasCollections` / `hasCalendars` are both true and the listing calls should run.
-- `pruneContainers` does not eat them: no `demo:` URL is a path ancestor of another.
-
-**Not decisive, do not repeat it.** Grepping the two bundles for `Team stand-up` finds it in
-**both**, because nothing tree-shakes the unused branch. That test proves nothing either way
-about the flag's value in the shipped bundle.
-
-**Still unknown.** Whether `DEMO` is actually `true` in the bundled output. The source was
-correct at build time; the bundle was not independently verified.
-
-### The fix that was being written when the session ended
-
-Two changes, and the first is the important one:
-
-1. **Seed the demo state at mount, not through `refresh`.** When `DEMO` is true, set
-   `tasks`/`events` (and their refs) directly as the component comes up, independently of
-   config, scope or the restore effect. This removes every ordering and configuration
-   dependency at once instead of proving which of them is at fault.
-
-   *Why the demo is fragile here and the real plugin is not:* `readNamed` returns null in the
-   demo, so there is **no cache**. The real plugin draws cached content immediately and a
-   failure to refresh is invisible; the demo has nothing to fall back on, so the same failure
-   is a blank calendar.
-
-2. **Make the build say what it is.** A visible "Demo" marker in the header, and one ungated
-   `console.log` at startup carrying the flag's value. Both because a recording should be
-   identifiable as a demo, and because "nothing showed" then becomes a question with an
-   answer. Remember `buildPlugin.sh` always bundles `--dev false`, so a `__DEV__`-gated log is
-   invisible on any real install.
-
-Worth considering if those do not settle it: the demo currently relies on the whole normal
-startup path. A build whose only job is to show the UI could set its state and skip that path
-entirely.
+This is the **second** demo build to be deleted — an earlier one went on 2026-09-06, built on
+a different principle. If a third is ever wanted, note what sank both: the demo has no cache,
+because `readNamed` returns null in demo mode, so any failure to populate state is a blank
+screen rather than slightly stale content. Seed its state at mount, not through the normal
+refresh path, and give the build a visible marker and one ungated startup log so "nothing
+showed" is a question with an answer.
 
 ## What changed on 2026-09-15 — release, history and documentation
 
