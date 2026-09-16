@@ -150,3 +150,48 @@ in a bar pinned at the foot so Save is always reachable.
 
 The time picker offers hours and minutes to pick from, with AM/PM as a pair of
 chips. Minutes are in five-minute steps.
+
+## Insert snapshot — the calendar on paper, to write over
+
+**Calendar tab → Insert snapshot**, beside Today and Refresh. It adds a page to
+the note for whatever you are looking at, with that view drawn onto it, and you
+write over the top.
+
+It never happens by itself. Nothing is added until you press the button and
+confirm, and the confirmation names the file first.
+
+### Where the page goes
+
+Into the note your settings say it belongs in — the daily note for a day, the
+weekly note for a week, and so on, using the folder and filename layout from
+**Setup → Notes**. If that note does not exist yet it is created. The page is
+added at the front, so the day it describes is the first thing you see.
+
+The page carries **no template**, whatever the rest of the note uses. A calendar
+grid over ruled paper is unreadable, so the snapshot page gets clean paper while
+every other page in the note keeps its ruling.
+
+If the note kind is switched off in Setup, the button says so rather than
+putting the page somewhere arbitrary.
+
+### What each view draws
+
+| View | The page |
+|---|---|
+| **Day** | All-day events with the calendar each came from, an hour grid with the day's meetings on it, the day's tasks down the right, and a ruled band at the foot |
+| **Week** | Seven rows across the page, the date in a gutter on the left, ruled to write in, with a notes band below |
+| **Month** | A grid with the days named across the top and the dates in the corners, with a notes band below |
+| **Quarter** | Three month columns side by side, every date with a rule beside it |
+
+**Only the day page carries your schedule.** The week, month and quarter pages
+are deliberately empty — the point of them is the room to write, and a grid
+full of entries has none left.
+
+The day page is a **snapshot**: it is right when you make it and does not
+change afterwards. That is what makes it worth writing on.
+
+### How long it takes
+
+A day, week or month page takes a few seconds. The quarter page draws ninety-two
+dated lines and takes longer — that is the device, not the plugin, and there is
+nothing to be done about it beyond drawing fewer marks.

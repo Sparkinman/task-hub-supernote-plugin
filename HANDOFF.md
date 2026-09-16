@@ -2,13 +2,50 @@
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-16.
-Current build **0.73.3** (versionCode 100). **587 tests across 35 suites.**
+Current build **0.81.2** (versionCode 123). **606 tests across 36 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
-**licensed GPLv3**. **v0.73.2 is released and marked Latest**, with `TaskHub-0.73.2.snplg`
+**licensed GPLv3**. **v0.81.2 is released and marked Latest**, with `TaskHub-0.81.2.snplg`
 attached. `main` is pushed and clean.
 
 ## READ THIS FIRST — where the work stopped
+
+### Drawing on a note page — everything that cost a build to learn
+
+**Read this before touching `backgrounddraw.ts`.** Fourteen device builds went into it, almost
+all of them because a device-facing value was invented from the SDK's type signatures instead of
+copied from `patterns-supernote-plugin`, which draws thousands of marks on this hardware. **A
+type signature tells you the shape of a call and nothing about whether it works**, and this SDK
+is full of calls that accept input, report success and do nothing.
+
+| What | Why it matters |
+|---|---|
+| **`PluginCommAPI.insertPageElements`, never `PluginFileAPI.insertElements`** | The file route carries text — `dateheading.ts` depends on it — and **silently drops geometry**. This was the original "nothing draws". |
+| **In-memory write: save *then* reload. File write: never save after.** | Two routes, opposite orderings. Reloading without saving throws the insert away; saving after a file write pushes the stale page back over it. |
+| **`element.thickness` must be set as well as `penWidth`** | Without it the insert is accepted and nothing appears. |
+| **Never set `element.layerNum`, and pass `null` as the layer** | An explicit layer is refused with **813** *even when the element's own `layerNum` says the same thing*. |
+| **Never `recycle()` anything inserted this way** | The host holds the element behind its uuid. Freeing it after an in-memory insert **crashed the note** mid-page. `dateheading` recycles and is right to — different route. |
+| **`success` is not evidence** | This endpoint reports success while drawing nothing. Count the page with `getElementCounts`, before and after. |
+| **Count only after a save *and* a reload** | Reading straight after a write shows the page as it was, because a reload in flight is this firmware's signature failure. A count-triggered retry that skips this fires when nothing is wrong, inserts everything twice, and takes the note down. |
+| **At most ~12 text elements per insert call** | The week page puts **7** text elements among ~45 rules down in one call and draws. The day page tried **26** in one call and drew nothing. **It is not the batch size — the week page has more elements in total.** Rules go in one call; text is chunked. |
+| **Allocate geometry concurrently if you like; never text** | Allocating both types 64-at-a-time is what turned the day page blank. Patterns measured concurrency for `TYPE_GEO` only. |
+| **`penType` 10 is the fineliner**, 11 the marker | Colours `0x9d` dark grey, `0xc9` light grey, `0xfe` white. `penWidth` floor is 100 and `new Geometry()` defaults it to **0**. |
+| **`TYPE_PICTURE` is "currently unused"** | Asking for one refuses the **whole batch** with 106. There is no image element; a full-page white mask is not available this way. |
+| **`insertNotePage` takes a template per page** | So a calendar page can be blank inside a note whose every other page is ruled. An empty string is refused with **107** — blank is a template, not the absence of one. On this firmware it is **`style_white`**. |
+| **The NOTE app's toolbar covers the first ~120px** | Anything drawn there is invisible while the toolbar is open. `TOOLBAR_INSET` in `background.ts`. |
+| **The host does not wrap a text box** | It draws past the end of it. Labels are cut to their column by `fit()`. |
+| **Cost is ~37ms an element to insert, ~1.2ms to build** | Nothing on this side of the bridge changes that. The only lever is fewer elements: the quarter page is 185 and takes about seven seconds. |
+
+**What the feature is.** *Insert snapshot*, in the Calendar tab's top row, adds a blank page to
+the note that kind of note belongs in — from the settings, created if absent — and draws the
+view onto it. Day carries the agenda: all-day band, hour grid with events, the day's own tasks,
+and a ruled band at the foot. Week is seven rows across the page. Month is a grid with a weekday
+header. Quarter is three month columns with a rule beside every date. Week, month and quarter
+are deliberately **empty** — the schedule is drawn only on the day page.
+
+The geometry is pure and tested in `background.ts`; `backgrounddraw.ts` is the half that talks to
+the device. Keep that split — a rule placed wrong is otherwise only discoverable by installing.
+
 
 ### Supernote Cloud defaults to 20 to-dos per read — ask for `maxResults`
 

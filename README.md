@@ -36,6 +36,7 @@
 | **Tasks** | Any CalDAV server, with priorities, repeats, sub tasks and due dates. Grouped Overdue / Today / Next 7 days / Later / No date |
 | **Calendars** | Year, quarter, month, week and day views over as many calendars as you watch |
 | **Google, Outlook &amp; Apple calendars** | Subscribe to the `.ics` address they publish — **no account and no server**. Read-only; see [why](docs/connections.md#why-a-subscription-is-read-only-and-slower) |
+| **The calendar on paper** | **Insert snapshot** puts the day, week, month or quarter into a note as a page to handwrite over |
 | **The Supernote's own To-Do app** | Optional **two-way** connection through Supernote Cloud, off until you switch it on. Includes the **Inbox** — to-dos filed in no list at all |
 | **Handwriting → task or event** | Lasso writing on a page and it becomes either, with a link back to the page |
 | **Notes for every scale** | Daily, weekly, monthly, quarterly, yearly and meeting notes, each with its own folder, layout and template |
