@@ -249,26 +249,27 @@ async function allocate(type: number): Promise<Record<string, unknown> | null> {
 }
 
 /**
- * How many elements are allocated at once.
+ * Allocate elements, one at a time.
  *
- * `createElement` is a bridge round trip each, and awaiting them one at a time
- * is why building forty-seven elements was noticeable on its own. Patterns
- * measured the same thing over 48 marks — 192ms at one at a time, 80ms at
- * sixteen, 57ms at sixty-four, every mark landing every time — and settled on
- * 64 because nothing was dropped at it. There was a real question about
- * `createElement` being re-entrant, since it allocates natively and registers
- * accessors behind a uuid; the answer is that it copes.
+ * **Sequential deliberately, and it is not an oversight.** These were built
+ * sixty-four at a time for a while, copying the Patterns plugin, and the day
+ * page went from drawing-and-crashing to drawing nothing in exactly that
+ * build. Patterns allocates concurrently but only ever one element type at a
+ * time; this allocates `TYPE_TEXT` as well, and `createElement` registers
+ * native accessors behind a uuid, so re-entrancy across two types is not
+ * something that plugin ever established.
+ *
+ * The cost is a bridge round trip each, measured there at about 1.2ms against
+ * 37ms to insert one — so this is a few per cent of the wait, and not where the
+ * time goes.
  */
-const BUILD_CONCURRENCY = 64;
-
-/** Allocate several elements at once, in order. */
 async function allocateAll<T>(
   items: T[],
   make: (item: T) => Promise<Record<string, unknown> | null>,
 ): Promise<(Record<string, unknown> | null)[]> {
   const out: (Record<string, unknown> | null)[] = [];
-  for (let i = 0; i < items.length; i += BUILD_CONCURRENCY) {
-    out.push(...(await Promise.all(items.slice(i, i + BUILD_CONCURRENCY).map(make))));
+  for (const item of items) {
+    out.push(await make(item));
   }
   return out;
 }
