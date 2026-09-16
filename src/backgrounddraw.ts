@@ -55,8 +55,6 @@ const TAG = '[TaskHub]';
  * background sharing a layer with the writing cannot be hidden or removed
  * without taking the writing with it.
  */
-const BACKGROUND_LAYER = 1;
-const MAIN_LAYER = 0;
 
 /**
  * Writes never name a layer, on the element or in the call.
@@ -212,64 +210,6 @@ function value<T>(res: unknown): T | null {
   return (res ?? null) as T | null;
 }
 
-interface RawLayer {
-  layerId: number;
-  name: string;
-  isVisible: boolean;
-  isCurrentLayer?: boolean;
-}
-
-/**
- * Make one layer the current one, and say whether it worked.
- *
- * Copied wholesale from `patterns-supernote-plugin`, filter and retry included,
- * because both exist for reasons that cost that project device runs to find.
- *
- * The filter: the background layer comes back with `layerId -1`, and
- * `modifyLayers` rejects the **entire call** with "layerId must be >= 0" if it
- * is handed straight back.
- *
- * The retry: this answers 1207, "the page does not exist", on a page that
- * plainly does — always right after a write, which looks like the page being
- * momentarily unavailable while a reload is in flight. That is this firmware's
- * signature failure. Giving up leaves the user on the plugin's layer, where
- * their next stroke lands among the rules and the eraser can reach them.
- */
-async function setCurrentLayer(
-  filePath: string,
-  page: number,
-  layerId: number,
-): Promise<boolean> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt > 0) {
-      // A save first, because that is what settles the file against the host's
-      // page everywhere else here.
-      await PluginNoteAPI.saveCurrentNote();
-    }
-    const layers = value<RawLayer[]>(await PluginFileAPI.getLayers(filePath, page));
-    if (!Array.isArray(layers)) {
-      continue;
-    }
-    const res = (await PluginFileAPI.modifyLayers(
-      filePath,
-      page,
-      layers
-        .filter(l => l.layerId >= 0)
-        .map(l => ({
-          layerId: l.layerId,
-          name: l.name,
-          isVisible: l.isVisible,
-          isCurrentLayer: l.layerId === layerId,
-        })),
-    )) as Loose | null;
-    if (res?.success === true) {
-      return true;
-    }
-    console.log(`${TAG} modifyLayers refused: ${JSON.stringify(res)}`);
-  }
-  return false;
-}
-
 /**
  * Text the host will certainly accept.
  *
@@ -379,10 +319,7 @@ export async function writeBackground(
   // the build machine, so a detail only logged is a detail nobody can read.
   let usedTemplate = '';
   let presets: string[] = [];
-  let switched = false;
-  let notePath = '';
   let landedCount = 0;
-  let drawnPage = 0;
   const elements: Record<string, unknown>[] = [];
 
   try {
@@ -399,7 +336,6 @@ export async function writeBackground(
       await PluginFileAPI.openFile(target, 0);
     }
     const absolutePath = target || value<string>(await PluginCommAPI.getCurrentFilePath()) || '';
-    notePath = absolutePath;
     const current = target
       ? -1
       : Number(value<number>(await PluginCommAPI.getCurrentPageNum()) ?? 0);
@@ -471,11 +407,17 @@ export async function writeBackground(
     // limitation and becomes the point. Restored in the finally below, without
     // fail: leaving somebody on the plugin's layer means their next stroke
     // lands among the rules.
-    drawnPage = pageNum;
-    switched = await setCurrentLayer(absolutePath, pageNum, BACKGROUND_LAYER);
-    if (!switched) {
-      console.log(`${TAG} could not switch layer; drawing on the current one`);
-    }
+    // **No layer switching.** The background used to be put on a layer of its
+    // own so a lasso round handwriting would not catch the rules under it, and
+    // that is a genuinely nice property — but it asked for layer 1 on a page
+    // that has just been created blank, and a fresh page has only layer 0. The
+    // map then marked no layer current at all, and `modifyLayers` has its own
+    // documented ways of failing on top of that.
+    //
+    // Drawing at all matters more than drawing somewhere tidy. The page is a
+    // page of its own with nothing else on it, so the rules and the
+    // handwriting sharing a layer costs far less here than it would in a table
+    // drawn around somebody's existing notes.
 
     const startedAllocating = Date.now();
 
@@ -550,7 +492,7 @@ export async function writeBackground(
 
     console.log(
       `${TAG} background: ${elements.length} element(s), allocated in ${allocateMs}ms, ` +
-        `layer ${BACKGROUND_LAYER}, page ${pageNum} -> ${absolutePath}`,
+        `page ${pageNum} -> ${absolutePath}`,
     );
 
     // **The in-memory page, not the file.** This is the whole reason nothing
@@ -633,11 +575,6 @@ export async function writeBackground(
       presets,
     };
   } finally {
-    // The user goes back to their own layer whatever happened above, including
-    // if it threw. This is the one thing the layer arrangement exists for.
-    if (switched && notePath) {
-      await setCurrentLayer(notePath, drawnPage, MAIN_LAYER).catch(() => false);
-    }
     // **Nothing is recycled here, deliberately.** `createElement` allocates
     // natively and the host finds the element behind its uuid; after an
     // in-memory insert the host is still holding it, so freeing it pulls the
