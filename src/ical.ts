@@ -1,3 +1,5 @@
+import {instantInZone, parseTimezones, type ZoneTable} from './vtimezone';
+
 /* eslint-disable no-bitwise -- base64 encoding is inherently bitwise */
 /**
  * Pure iCalendar / encoding helpers.
@@ -162,6 +164,61 @@ export interface VTodo {
 }
 
 /** Undo RFC 5545 line folding: CRLF (or LF) followed by one space or tab. */
+/**
+ * The TZID parameter on a date-time property, if it carries one.
+ *
+ * Quoted forms occur — `TZID="America/New_York"` — and a bare name is far more
+ * common, so both are accepted.
+ */
+function tzidOf(params: string[]): string | undefined {
+  for (const param of params) {
+    const match = /^TZID=(.+)$/i.exec(param.trim());
+    if (match) {
+      return match[1].replace(/^"|"$/g, '');
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The instant a parsed date-time denotes, by the three rules that apply.
+ *
+ * A `Z` suffix is already UTC. A TZID is resolved against the rules the file
+ * carried with it. Only a floating time, or a TZID the file never described,
+ * falls back to the device's own zone — which is what every build before this
+ * one did with every one of them, and why a noon meeting booked in New York
+ * showed as noon on a Mountain device.
+ */
+function zonedInstant(
+  y: string,
+  m: string,
+  d: string,
+  hh: string,
+  mm: string,
+  zulu: string | undefined,
+  tzid: string | undefined,
+  zones: ZoneTable,
+): number {
+  if (zulu) {
+    return Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm));
+  }
+  if (tzid) {
+    const at = instantInZone(
+      zones,
+      tzid,
+      Number(y),
+      Number(m),
+      Number(d),
+      Number(hh),
+      Number(mm),
+    );
+    if (at !== null) {
+      return at;
+    }
+  }
+  return new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm)).getTime();
+}
+
 function unfold(text: string): string {
   return text.replace(/\r?\n[ \t]/g, '');
 }
@@ -178,7 +235,12 @@ function unescapeText(value: string): string {
  * Three shapes occur in the wild: VALUE=DATE (all-day), a UTC instant ending in
  * Z, and a floating local date-time with no zone at all.
  */
-function parseDue(raw: string, isDateOnly: boolean): Pick<VTodo, 'dueDate' | 'dueTime' | 'dueAt'> {
+function parseDue(
+  raw: string,
+  isDateOnly: boolean,
+  tzid?: string,
+  zones: ZoneTable = {},
+): Pick<VTodo, 'dueDate' | 'dueTime' | 'dueAt'> {
   const match = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/.exec(raw.trim());
   if (!match) {
     return {dueAt: null};
@@ -193,9 +255,7 @@ function parseDue(raw: string, isDateOnly: boolean): Pick<VTodo, 'dueDate' | 'du
     };
   }
 
-  const instant = zulu
-    ? Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm))
-    : new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm)).getTime();
+  const instant = zonedInstant(y, m, d, hh, mm, zulu, tzid, zones);
 
   const local = new Date(instant);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -207,8 +267,15 @@ function parseDue(raw: string, isDateOnly: boolean): Pick<VTodo, 'dueDate' | 'du
 }
 
 /** Extract every VTODO from one or more calendar objects. */
-export function parseVTodos(text: string): VTodo[] {
-  const lines = unfold(text).split(/\r?\n/);
+export function parseVTodos(text: string, zones?: ZoneTable): VTodo[] {
+  const unfolded = unfold(text);
+  const lines = unfolded.split(/\r?\n/);
+  // The VTIMEZONE block is read from the object itself unless the caller has
+  // already done it: a feed is cut into chunks for parsing and only the first
+  // of them carries the zone definitions the later ones still refer to.
+  const table =
+    zones ?? (unfolded.includes('BEGIN:VTIMEZONE') ? parseTimezones(unfolded) : {});
+
   const todos: VTodo[] = [];
   let current: Partial<VTodo> | null = null;
   let completedStamp = false;
@@ -322,11 +389,21 @@ export function parseVTodos(text: string): VTodo[] {
       case 'DUE':
         Object.assign(
           current,
-          parseDue(value, params.some(p => /VALUE=DATE$/i.test(p.trim()))),
+          parseDue(
+            value,
+            params.some(p => /VALUE=DATE$/i.test(p.trim())),
+            tzidOf(params),
+            table,
+          ),
         );
         break;
       case 'DTSTART': {
-        const parsed = parseDue(value, params.some(p => /VALUE=DATE$/i.test(p.trim())));
+        const parsed = parseDue(
+          value,
+          params.some(p => /VALUE=DATE$/i.test(p.trim())),
+          tzidOf(params),
+          table,
+        );
         current.startDate = parsed.dueDate;
         current.startAt = parsed.dueAt;
         break;
@@ -431,6 +508,8 @@ export interface VEvent {
 function parseStamp(
   raw: string,
   isDateOnly: boolean,
+  tzid?: string,
+  zones: ZoneTable = {},
 ): {date: string; time?: string; at: number; allDay: boolean} | null {
   const match = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/.exec(raw.trim());
   if (!match) {
@@ -446,9 +525,7 @@ function parseStamp(
     };
   }
 
-  const at = zulu
-    ? Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm))
-    : new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm)).getTime();
+  const at = zonedInstant(y, m, d, hh, mm, zulu, tzid, zones);
   const local = new Date(at);
   const pad = (n: number) => String(n).padStart(2, '0');
   return {
@@ -460,8 +537,15 @@ function parseStamp(
 }
 
 /** Extract every VEVENT from one or more calendar objects. */
-export function parseVEvents(text: string): VEvent[] {
-  const lines = unfold(text).split(/\r?\n/);
+export function parseVEvents(text: string, zones?: ZoneTable): VEvent[] {
+  const unfolded = unfold(text);
+  const lines = unfolded.split(/\r?\n/);
+  // The VTIMEZONE block is read from the object itself unless the caller has
+  // already done it: a feed is cut into chunks for parsing and only the first
+  // of them carries the zone definitions the later ones still refer to.
+  const table =
+    zones ?? (unfolded.includes('BEGIN:VTIMEZONE') ? parseTimezones(unfolded) : {});
+
   const events: VEvent[] = [];
   let current: Partial<VEvent> | null = null;
   let inside = false;
@@ -509,6 +593,7 @@ export function parseVEvents(text: string): VEvent[] {
     const value = line.slice(colon + 1);
     const [name, ...params] = rawName.split(';');
     const dateOnly = params.some(p => /VALUE=DATE$/i.test(p.trim()));
+    const zone = tzidOf(params);
 
     switch (name.toUpperCase()) {
       case 'UID':
@@ -528,7 +613,7 @@ export function parseVEvents(text: string): VEvent[] {
         // may carry several EXDATE lines, so these accumulate.
         const dates: string[] = [];
         for (const part of value.split(',')) {
-          const parsed = parseStamp(part.trim(), dateOnly);
+          const parsed = parseStamp(part.trim(), dateOnly, zone, table);
           if (parsed) {
             dates.push(parsed.date);
           }
@@ -560,7 +645,7 @@ export function parseVEvents(text: string): VEvent[] {
         break;
       }
       case 'DTSTART': {
-        const parsed = parseStamp(value, dateOnly);
+        const parsed = parseStamp(value, dateOnly, zone, table);
         if (parsed) {
           current.startDate = parsed.date;
           current.startTime = parsed.time;
@@ -570,7 +655,7 @@ export function parseVEvents(text: string): VEvent[] {
         break;
       }
       case 'DTEND': {
-        const parsed = parseStamp(value, dateOnly);
+        const parsed = parseStamp(value, dateOnly, zone, table);
         if (parsed) {
           current.endTime = parsed.time;
         }

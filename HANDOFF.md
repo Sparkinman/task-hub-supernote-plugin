@@ -1,14 +1,82 @@
-# Task Hub — state as of 2026-09-16
+# Task Hub — state as of 2026-09-21
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
 `tsc` and eslint clean, all verified 2026-09-16.
-Current build **0.81.3** (versionCode 124). **609 tests across 37 suites.**
+Current build **0.82.0** (versionCode 125). **626 tests across 38 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
 **licensed GPLv3**. **v0.81.3 is released and marked Latest**, with `TaskHub-0.81.3.snplg`
 attached. `main` is pushed and clean.
 
 ## READ THIS FIRST — where the work stopped
+
+### 0.82.0 — a meeting booked in another timezone showed two hours late
+
+**Reported as "a meeting on my work Google calendar showed 10am in Google and at 10am in real
+life, but the plugin said 12pm — all-day events are fine".** The last clause is the diagnosis:
+`VALUE=DATE` carries no zone, so only *timed* events could be wrong.
+
+The event, as actually stored:
+
+```
+DTSTART;TZID=America/New_York:20260921T120000
+```
+
+It is a noon **Eastern** meeting, which is 10:00 Mountain. The parser split the parameters off
+`DTSTART`, looked only for `VALUE=DATE`, **threw the `TZID` away**, and read `120000` as a
+device-local wall time. The old comment on `parseStamp` said so outright — "TZID is treated as
+device-local … being an hour out on a foreign-zone event is better than dropping it". In
+practice it is two hours, on the routine case of a colleague in another timezone sending an
+invitation.
+
+**This was not a display-only fault.** `buildStamp` writes `DTSTART:<UTC>Z`, converting the
+*displayed* time to an absolute instant, so opening a misread event and saving it wrote the
+meeting back two hours later on the real calendar. Anyone who edited a foreign-zone event
+before 0.82.0 silently rescheduled it.
+
+**Where the fix does not go.** It is tempting to fix this in the Task Hub server, which is what
+syncs Google into Radicale — but the server is correct, and deliberately so: `google.py`
+preserves each event's own zone and its docstring records the opposite bug being fixed there
+already. Flattening everything to UTC upstream would break recurring events, since a weekly
+noon-Eastern meeting pinned to a UTC instant drifts an hour at each daylight-saving change,
+and nine of the foreign-zone events in that calendar recur. It would also degrade the data for
+every other client reading the same server. The plugin is the only link that was wrong, and it
+is also the only place that can fix the `.ics` feed path, where there is no server of ours at
+all.
+
+**How it works now.** `src/vtimezone.ts` reads the `VTIMEZONE` block that RFC 5545 requires to
+travel with any event naming a zone. **No timezone database is needed, because the
+daylight-saving rules arrive with the data** — Google, Apple and every CalDAV server send them.
+It parses `TZOFFSETFROM`/`TZOFFSETTO` and the yearly `BYDAY`/`BYMONTH` transition rules,
+honours an expired rule's `UNTIL`, and picks the latest change at or before the time in
+question.
+
+`Intl.DateTimeFormat` with a `timeZone` option would have been a tenth of the code and was
+rejected: it is the same trap as `new URL()`. Full ICU under Node makes every test pass while
+Hermes on the panel may answer with a silently wrong offset rather than throwing. Everything
+in `vtimezone.ts` is arithmetic on values read out of the file, so what the tests prove is
+what the device does.
+
+**Things that would have broken and were handled.**
+
+| What | Why |
+|---|---|
+| **A feed is parsed in chunks cut on `END:VEVENT`** | The `VTIMEZONE` is in the header, so every chunk after the first would have reverted to the bug. The header is read once — only as far as the first `BEGIN:VEVENT`, to stay off the hot path — and handed to each chunk. |
+| **An unknown TZID falls back to the old behaviour** | Inventing an offset is worse than the clock face. Not every server sends a `VTIMEZONE`. |
+| **`Date.UTC`, never `new Date(y, m, d)`, inside the resolver** | The latter folds the *device's* zone into a calculation whose whole purpose is independence from it — the same bug one level down. |
+| **Tasks take the fix too** | `DUE;TZID=` has the identical fault. No task currently carries one, so it changes nothing today, but a half-fix would be worse than none. |
+
+**The tests are written to be non-vacuous in the suite's own zone**, which is the part worth
+copying. `jest.config.js` pins `TZ=America/New_York` and explains that setting it later is
+useless because Node caches the zone at startup — so a *New York* event proves nothing here,
+its clock face being accidentally correct. Every case in `__tests__/vtimezone.test.ts` is
+therefore zoned somewhere else, or asserts an absolute instant that no device zone can change.
+This was verified by disabling the resolver and confirming that exactly the seven behavioural
+tests fail while the four "what must not change" guards stay green. **Do that check on any
+timezone test added here** — it is the only way to know the assertion is real.
+
+Verified end to end against the real stored object: the instant parses as `2026-09-21T16:00Z`,
+which is 10:00 in Denver, matching what Google shows.
 
 ### 0.81.3 — a late settings read was undoing what the user had just done
 
@@ -1496,9 +1564,9 @@ Borders are deliberately not scaled, and positive spacing never rounds to zero.
 
 ## Open threads
 
-0. **Fix the demo build** — it shows no events. This is the live bug; see
-   *The demo build* near the top, which has what has been ruled out and the fix that was
-   being written. Do not restart the diagnosis from scratch.
+0. ~~**Fix the demo build**~~ — **done with, not open.** The demo build was deleted on
+   2026-09-16; see *The demo build was removed* above. This entry outlived it by five days
+   and misdirected a later session into calling it "the live bug".
 1. Two-way sync — nothing is read back beyond listing. No un-complete, no
    dedupe, no offline queue.
 2. Per-task identity in a page mark, so copies can be told apart (see *Page
@@ -1507,15 +1575,13 @@ Borders are deliberately not scaled, and positive spacing never rounds to zero.
    Deleting it was offered and not yet decided.
 4. Day view's two-column split is unverified for cramping on a real panel.
 5. Publish-review item 7 (end-to-end device testing) is still the author's to do.
-6. **The calendar as an image in a note** — the next real feature, and what the author
-   actually asked for when they asked about handwriting on the views. `PluginNoteAPI.insertImage(pngPath)`
-   inserts a PNG into the current page and layer, and pictures are allowed on custom layers,
-   so a day, week or month view could go onto its own layer with the user writing over it on
-   the main one. Layer mechanics are proven in the Tables plugin: `modifyLayers` to make the
-   layer current, write, restore in a `finally`, filter `layerId >= 0` or the call is rejected
-   outright, and never leave the user on the plugin's layer. **Render the calendar
-   purpose-built at page resolution — do not screenshot the plugin view**, which would be
-   panel-resolution, soft when scaled, and full of our own buttons.
+6. ~~**The calendar as an image in a note**~~ — **largely shipped as *Insert snapshot*** in
+   0.81.x, which draws the day, week, month or quarter view onto a blank page in the note, as
+   geometry rather than an image. See *Drawing on a note page* above for the fourteen builds
+   that bought it. What remains unbuilt is only the *image* route — `PluginNoteAPI.insertImage`
+   onto a custom layer, so the drawing sits on a layer of its own and the user writes over it
+   on the main one, with layer mechanics proven in the Tables plugin. Treat that as a possible
+   refinement, **not as an unstarted feature**.
 7. **Handwriting inside the plugin's own views is not worth attempting.** Checked against the
    docs: the only primitive is `PluginManager.registerMotionListener` (raw pointers,
    `toolType 2` is the EMR pen), the ink would have to be drawn in React Native on a panel

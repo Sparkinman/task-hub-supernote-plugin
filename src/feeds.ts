@@ -27,6 +27,7 @@
  */
 
 import {parseVEvents, type VEvent} from './ical';
+import {parseTimezones} from './vtimezone';
 import type {DateRange} from './eventwindow';
 
 /** One subscription, as the settings hold it. */
@@ -288,18 +289,31 @@ function breathe(): Promise<void> {
  * This works because `parseVEvents` collects whatever lies between
  * `BEGIN:VEVENT` and `END:VEVENT` and ignores everything else — it does not
  * need the `VCALENDAR` wrapper, which only the first chunk has.
+ *
+ * The VTIMEZONE blocks are the one thing the wrapper carries that the events
+ * genuinely need, since a `TZID` on the tenth thousandth event refers back to a
+ * definition at the top of the file. They are therefore read once, from the
+ * header alone, and handed to every chunk. Reading only as far as the first
+ * event keeps this off the hot path: the cost is a slice of the header, not a
+ * second pass over a file that may hold ten years of a calendar.
  */
 export async function parseFeedBody(body: string): Promise<VEvent[]> {
   const events: VEvent[] = [];
   let chunk: string[] = [];
   let seen = 0;
 
-  for (const line of (body ?? '').split(/\r?\n/)) {
+  const text = body ?? '';
+  const firstEvent = text.indexOf('BEGIN:VEVENT');
+  const zones = text.includes('BEGIN:VTIMEZONE')
+    ? parseTimezones(firstEvent > 0 ? text.slice(0, firstEvent) : text)
+    : {};
+
+  for (const line of text.split(/\r?\n/)) {
     chunk.push(line);
     if (line.startsWith('END:VEVENT')) {
       seen += 1;
       if (seen >= PARSE_CHUNK) {
-        events.push(...parseVEvents(chunk.join('\r\n')));
+        events.push(...parseVEvents(chunk.join('\r\n'), zones));
         chunk = [];
         seen = 0;
         await breathe();
@@ -307,7 +321,7 @@ export async function parseFeedBody(body: string): Promise<VEvent[]> {
     }
   }
   if (chunk.length > 0) {
-    events.push(...parseVEvents(chunk.join('\r\n')));
+    events.push(...parseVEvents(chunk.join('\r\n'), zones));
   }
   return events;
 }

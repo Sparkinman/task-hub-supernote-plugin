@@ -96,11 +96,22 @@ It showed up most often after **Insert snapshot**, because that hands over to th
 note it has just written, and the day it records is whichever week or month you
 had paged to. Choosing a tab in that first moment could be undone the same way.
 
-## Everything is an hour or a day out
+## A meeting shows at the wrong time
 
-Task Hub reads times as the device's own. It bundles no timezone database, so an
-event written in a foreign timezone can sit an hour out — shown in the wrong
-place rather than dropped.
+Fixed in **0.82.0**. An event booked in a timezone other than your device's — a
+colleague in another region sending an invitation — was shown at the time it was
+booked rather than the time it happens for you, so a meeting set for noon in New
+York appeared at noon on a device in Denver, two hours late. All-day events were
+never affected.
+
+Task Hub now reads the timezone rules that arrive with the event, so it needs no
+timezone database and works offline. If your calendar server sends an event
+naming a timezone but omits the rules for it, the old behaviour still applies and
+that event can be out by the difference between the two zones.
+
+**If you edited such an event on 0.81.3 or earlier, check its time on the
+original calendar.** Saving wrote back the time that was on screen, which moved
+the meeting.
 
 ## Starting over
 
