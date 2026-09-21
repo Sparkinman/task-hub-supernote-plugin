@@ -8,10 +8,9 @@ Current build **0.82.0** (versionCode 125). **626 tests across 38 suites.**
 **licensed GPLv3**. **v0.82.0 is released and marked Latest**, with `TaskHub-0.82.0.snplg`
 attached. `main` is pushed and clean.
 
-**0.82.0 has not yet been confirmed on hardware.** It was built, released and handed over on
-2026-09-21; the check that matters is whether a meeting booked in another timezone — the
-Eastern one that prompted it — now reads at the local hour. Everything below about it was
-verified off-device, including against the real stored calendar object.
+**0.82.0 is confirmed on hardware.** Installed and checked on the device on 2026-09-21: the
+meeting booked in Eastern time that prompted the work now reads at the local hour. The
+timezone fix is settled, and no follow-up build is outstanding.
 
 ## READ THIS FIRST — where the work stopped
 
@@ -81,7 +80,9 @@ tests fail while the four "what must not change" guards stay green. **Do that ch
 timezone test added here** — it is the only way to know the assertion is real.
 
 Verified end to end against the real stored object: the instant parses as `2026-09-21T16:00Z`,
-which is 10:00 in Denver, matching what Google shows.
+which is 10:00 in Denver, matching what Google shows. **Then confirmed on the device the same
+day** — the meeting reads at the local hour, so this one is closed rather than pending a
+report.
 
 ### 0.81.3 — a late settings read was undoing what the user had just done
 
