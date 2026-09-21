@@ -1,12 +1,17 @@
 # Task Hub — state as of 2026-09-21
 
 Working Supernote plugin, installed and in real use. `pluginID vfmnvjq0i1hxf8gu`.
-`tsc` and eslint clean, all verified 2026-09-16.
+`tsc` and eslint clean, all verified 2026-09-21.
 Current build **0.82.0** (versionCode 125). **626 tests across 38 suites.**
 
 **Published** at <https://github.com/Sparkinman/task-hub-supernote-plugin> (public, `main`),
-**licensed GPLv3**. **v0.81.3 is released and marked Latest**, with `TaskHub-0.81.3.snplg`
+**licensed GPLv3**. **v0.82.0 is released and marked Latest**, with `TaskHub-0.82.0.snplg`
 attached. `main` is pushed and clean.
+
+**0.82.0 has not yet been confirmed on hardware.** It was built, released and handed over on
+2026-09-21; the check that matters is whether a meeting booked in another timezone — the
+Eastern one that prompted it — now reads at the local hour. Everything below about it was
+verified off-device, including against the real stored calendar object.
 
 ## READ THIS FIRST — where the work stopped
 
